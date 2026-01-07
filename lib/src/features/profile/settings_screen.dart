@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/providers.dart';
 import 'profile_edit_screen.dart';
@@ -26,7 +27,14 @@ class SettingsScreen extends ConsumerWidget {
         title: const Text('Settings'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () {
+            // Use GoRouter navigation instead of Navigator.pop
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/chats');
+            }
+          },
         ),
       ),
       body: Center(
