@@ -1,0 +1,212 @@
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:file_picker/file_picker.dart';
+import 'status_repository.dart';
+
+class CreateStatusScreen extends ConsumerStatefulWidget {
+  const CreateStatusScreen({super.key});
+
+  @override
+  ConsumerState<CreateStatusScreen> createState() => _CreateStatusScreenState();
+}
+
+class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
+  final _textController = TextEditingController();
+  
+  File? _selectedMedia;
+  bool _isVideo = false;
+  bool _isLoading = false;
+  
+  final List<Color> _backgroundColors = [
+    const Color(0xFF00A884),
+    const Color(0xFF6C5CE7),
+    const Color(0xFFFF7675),
+    const Color(0xFF74B9FF),
+    const Color(0xFFFAB1A0),
+    const Color(0xFFFDCB6E),
+    const Color(0xFF00B894),
+    const Color(0xFFD63031),
+    const Color(0xFF0984E3),
+    const Color(0xFFFF6348),
+  ];
+  
+  Color _selectedColor = const Color(0xFF00A884);
+
+  @override
+  void dispose() {
+    _textController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickMedia() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.media,
+      allowMultiple: false,
+    );
+
+    if (result != null && result.files.single.path != null) {
+      final file = File(result.files.single.path!);
+      final extension = result.files.single.extension?.toLowerCase();
+      
+      setState(() {
+        _selectedMedia = file;
+        _isVideo = extension == 'mp4' || extension == 'mov' || extension == 'avi';
+      });
+    }
+  }
+
+  Future<void> _createStatus() async {
+    if (_isLoading) return;
+
+    if (_selectedMedia == null && _textController.text.trim().isEmpty) {
+      _showError('Please add text or select media');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final repo = ref.read(statusRepositoryProvider);
+
+      if (_selectedMedia != null) {
+        if (_isVideo) {
+          await repo.createVideoStatus(
+            videoFile: _selectedMedia!,
+            caption: _textController.text.isNotEmpty ? _textController.text : null,
+          );
+        } else {
+          await repo.createImageStatus(
+            imageFile: _selectedMedia!,
+            caption: _textController.text.isNotEmpty ? _textController.text : null,
+          );
+        }
+      } else {
+        await repo.createTextStatus(
+          text: _textController.text,
+          backgroundColor: '#${_selectedColor.value.toRadixString(16).substring(2)}',
+        );
+      }
+
+      if (mounted) {
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      _showError('Failed to create status: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
+      appBar: AppBar(
+        title: const Text('Create Status'),
+        actions: [
+          TextButton(
+            onPressed: _isLoading ? null : _createStatus,
+            child: const Text('Share'),
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Center(
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 600),
+            child: Column(
+              children: [
+                // Media preview or text input
+                if (_selectedMedia != null)
+                  Container(
+                    height: 300,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: _isVideo
+                        ? const Center(child: Icon(Icons.videocam, size: 64))
+                        : Image.file(_selectedMedia!, fit: BoxFit.cover),
+                  )
+                else
+                  Container(
+                    height: 300,
+                    decoration: BoxDecoration(
+                      color: _selectedColor,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: TextField(
+                      controller: _textController,
+                      style: const TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                      decoration: const InputDecoration(
+                        border: InputBorder.none,
+                        hintText: 'Type a status...',
+                        hintStyle: TextStyle(color: Colors.white70),
+                        contentPadding: EdgeInsets.all(24),
+                      ),
+                      maxLines: null,
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                
+                const SizedBox(height: 24),
+                
+                // Color picker (for text status)
+                if (_selectedMedia == null)
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: _backgroundColors.map((color) {
+                      final isSelected = color == _selectedColor;
+                      return GestureDetector(
+                        onTap: () => setState(() => _selectedColor = color),
+                        child: Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: color,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isSelected ? Colors.white : Colors.transparent,
+                              width: 3,
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                
+                const SizedBox(height: 24),
+                
+                // Pick media button
+                OutlinedButton.icon(
+                  onPressed: _pickMedia,
+                  icon: const Icon(Icons.add_photo_alternate),
+                  label: Text(_selectedMedia != null ? 'Change Media' : 'Add Photo/Video'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+

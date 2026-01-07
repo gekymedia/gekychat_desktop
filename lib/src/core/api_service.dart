@@ -1,0 +1,560 @@
+import 'dart:io';
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+class ApiService {
+  late final Dio _dio;
+
+  ApiService() {
+    // 🔴 MUST come from .env
+    final baseUrl = dotenv.env['API_BASE_URL'];
+
+    if (baseUrl == null || baseUrl.isEmpty) {
+      throw Exception('API_BASE_URL is not defined in .env');
+    }
+
+    // Ensure baseUrl doesn't end with a slash to avoid redirects
+    final cleanBaseUrl = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+    
+    _dio = Dio(
+      BaseOptions(
+        baseUrl: cleanBaseUrl,
+        connectTimeout: const Duration(seconds: 30),
+        receiveTimeout: const Duration(seconds: 30),
+        followRedirects: true,
+        maxRedirects: 5,
+        headers: {
+          'Accept': 'application/json',
+        },
+      ),
+    );
+
+    _dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) async {
+          final prefs = await SharedPreferences.getInstance();
+          final token = prefs.getString('auth_token');
+
+          if (token != null && token.isNotEmpty) {
+            options.headers['Authorization'] = 'Bearer $token';
+          } else {
+            debugPrint('⚠️ Warning: No auth token found for request to ${options.path}');
+          }
+
+          return handler.next(options);
+        },
+        onError: (DioException e, handler) {
+          // Log detailed error information for debugging
+          if (e.response != null) {
+            debugPrint('❌ API Error ${e.response?.statusCode}: ${e.requestOptions.path}');
+            debugPrint('   Response: ${e.response?.data}');
+          } else {
+            debugPrint('❌ API Error: ${e.type} - ${e.message}');
+            debugPrint('   Path: ${e.requestOptions.path}');
+          }
+          return handler.next(e);
+        },
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  String _normalize(String path) =>
+      path.startsWith('/') ? path : '/$path';
+
+  Future<Response> get(
+    String path, {
+    Map<String, dynamic>? queryParameters,
+  }) =>
+      _dio.get(_normalize(path), queryParameters: queryParameters);
+
+  Future<Response> post(String path, {dynamic data}) =>
+      _dio.post(_normalize(path), data: data);
+
+  Future<Response> put(String path, {dynamic data}) =>
+      _dio.put(_normalize(path), data: data);
+
+  Future<Response> delete(String path, {dynamic data}) =>
+      _dio.delete(_normalize(path), data: data);
+
+  Future<Response> uploadFiles(
+    String path,
+    List<File> files, {
+    Map<String, dynamic>? data,
+  }) async {
+    final formData = FormData.fromMap({...?data});
+
+    for (final file in files) {
+      formData.files.add(
+        MapEntry(
+          'attachments[]',
+          await MultipartFile.fromFile(
+            file.path,
+            filename: file.path.split(Platform.pathSeparator).last,
+          ),
+        ),
+      );
+    }
+
+    return _dio.post(_normalize(path), data: formData);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Server Health / Ping
+  // ---------------------------------------------------------------------------
+
+  Future<Response> pingServer({Duration? timeout}) async {
+    final pingTimeout = timeout ?? const Duration(seconds: 5);
+    
+    final pingDio = Dio(
+      BaseOptions(
+        baseUrl: _dio.options.baseUrl,
+        connectTimeout: pingTimeout,
+        receiveTimeout: pingTimeout,
+        headers: {
+          'Accept': 'application/json',
+        },
+      ),
+    );
+
+    final endpoints = ['/health', '/ping', '/api/health', '/api/ping', '/'];
+    
+    DioException? lastError;
+    
+    for (final endpoint in endpoints) {
+      try {
+        final response = await pingDio.get(_normalize(endpoint));
+        return response;
+      } on DioException catch (e) {
+        lastError = e;
+        if (e.response?.statusCode == 404 || 
+            e.type == DioExceptionType.connectionTimeout ||
+            e.type == DioExceptionType.receiveTimeout ||
+            e.type == DioExceptionType.connectionError) {
+          continue;
+        }
+        rethrow;
+      }
+    }
+    
+    throw lastError ?? DioException(
+      requestOptions: RequestOptions(path: '/'),
+      type: DioExceptionType.connectionTimeout,
+      error: 'All ping endpoints failed',
+    );
+  }
+
+  String get baseUrl => _dio.options.baseUrl;
+
+  // ---------------------------------------------------------------------------
+  // Auth / User
+  // ---------------------------------------------------------------------------
+
+  Future<void> saveToken(String token) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('auth_token', token);
+  }
+
+  Future<Response> requestOtp(String phone) =>
+      post('/auth/phone', data: {'phone': phone});
+
+  Future<Response> verifyOtp(String phone, String code) =>
+      post('/auth/verify', data: {'phone': phone, 'code': code});
+
+  // ---------------------------------------------------------------------------
+  // Contacts
+  // ---------------------------------------------------------------------------
+
+  Future<Response> fetchContacts() => get('/contacts');
+
+  Future<Response> syncContacts(List<Map<String, String>> contacts) =>
+      post('/contacts/sync', data: {'contacts': contacts});
+
+  Future<Response> resolveContacts(List<String> phones) =>
+      post('/contacts/resolve', data: {'phones': phones});
+
+  Future<Response> createContact({
+    required String displayName,
+    required String phone,
+    int? contactUserId,
+    String? note,
+    bool? isFavorite,
+  }) =>
+      post('/contacts', data: {
+        'display_name': displayName,
+        'phone': phone,
+        if (contactUserId != null) 'contact_user_id': contactUserId,
+        if (note != null) 'note': note,
+        if (isFavorite != null) 'is_favorite': isFavorite,
+      });
+
+  // ---------------------------------------------------------------------------
+  // Messages
+  // ---------------------------------------------------------------------------
+
+  Future<Response> conversationMessages({
+    required int conversationId,
+    String? before,
+    String? after,
+    int? limit,
+  }) {
+    final params = <String, dynamic>{};
+    if (before != null) params['before'] = before;
+    if (after != null) params['after'] = after;
+    if (limit != null) params['limit'] = limit;
+
+    return get(
+      '/conversations/$conversationId/messages',
+      queryParameters: params,
+    );
+  }
+
+  Future<Response> updateDob({int? month, int? day}) =>
+      put('/me', data: {
+        if (month != null) 'month': month,
+        if (day != null) 'day': day,
+      });
+
+  Future<Response> deleteMessage(int messageId) =>
+      delete('/messages/$messageId');
+
+  Future<Response> editMessage(int messageId, String body) =>
+      put('/messages/$messageId', data: {'body': body});
+
+  // ---------------------------------------------------------------------------
+  // Search
+  // ---------------------------------------------------------------------------
+
+  Future<Response> search({
+    String? query,
+    List<String>? filters,
+    int? limit,
+  }) {
+    final params = <String, dynamic>{};
+    if (query != null && query.isNotEmpty) params['q'] = query;
+    if (filters != null && filters.isNotEmpty) params['filters'] = filters;
+    if (limit != null) params['limit'] = limit;
+    return get('/search', queryParameters: params.isEmpty ? null : params);
+  }
+
+  Future<Response> getSearchFilters() => get('/search/filters');
+
+  // ---------------------------------------------------------------------------
+  // Attachments
+  // ---------------------------------------------------------------------------
+
+  Future<Response> uploadAttachment(File file) async {
+    final formData = FormData.fromMap({
+      'file': await MultipartFile.fromFile(
+        file.path,
+        filename: file.path.split(Platform.pathSeparator).last,
+      ),
+    });
+    return _dio.post(_normalize('/attachments'), data: formData);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Profile
+  // ---------------------------------------------------------------------------
+
+  Future<Response> getProfile() => get('/me');
+
+  Future<Response> updateProfile({
+    String? name,
+    String? about,
+    File? avatar,
+  }) async {
+    if (avatar != null) {
+      final formData = FormData.fromMap({
+        if (name != null) 'name': name,
+        if (about != null) 'about': about,
+        'avatar': await MultipartFile.fromFile(
+          avatar.path,
+          filename: avatar.path.split(Platform.pathSeparator).last,
+        ),
+      });
+      return _dio.put(_normalize('/me'), data: formData);
+    } else {
+      final data = <String, dynamic>{};
+      if (name != null) data['name'] = name;
+      if (about != null) data['about'] = about;
+      return put('/me', data: data.isEmpty ? null : data);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Quick Replies
+  // ---------------------------------------------------------------------------
+
+  Future<Response> getQuickReplies() => get('/quick-replies');
+
+  Future<Response> createQuickReply(String title, String message) =>
+      post('/quick-replies', data: {'title': title, 'message': message});
+
+  Future<Response> updateQuickReply(int id, String title, String message) =>
+      put('/quick-replies/$id', data: {'title': title, 'message': message});
+
+  Future<Response> deleteQuickReply(int id) => delete('/quick-replies/$id');
+
+  Future<Response> recordQuickReplyUsage(int id) =>
+      post('/quick-replies/$id/usage');
+
+  // ---------------------------------------------------------------------------
+  // Blocks
+  // ---------------------------------------------------------------------------
+
+  Future<Response> getBlockedUsers() => get('/blocks');
+
+  Future<Response> blockUser(int userId, {String? reason}) {
+    final data = reason != null ? {'reason': reason} : null;
+    return post('/blocks/$userId', data: data);
+  }
+
+  Future<Response> unblockUser(int userId) => delete('/blocks/$userId');
+
+  // ---------------------------------------------------------------------------
+  // Reports
+  // ---------------------------------------------------------------------------
+
+  Future<Response> reportUser(int userId, String reason, {String? details, bool? block}) {
+    final data = <String, dynamic>{
+      'reason': reason,
+      if (details != null) 'details': details,
+      if (block != null) 'block': block,
+    };
+    return post('/reports/$userId', data: data);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Conversation Actions
+  // ---------------------------------------------------------------------------
+
+  Future<Response> pinConversation(int conversationId) =>
+      post('/conversations/$conversationId/pin');
+
+  Future<Response> unpinConversation(int conversationId) =>
+      delete('/conversations/$conversationId/pin');
+
+  Future<Response> markConversationUnread(int conversationId) =>
+      post('/conversations/$conversationId/mark-unread');
+
+  Future<Response> archiveConversation(int conversationId) =>
+      post('/conversations/$conversationId/archive');
+
+  Future<Response> unarchiveConversation(int conversationId) =>
+      delete('/conversations/$conversationId/archive');
+
+  Future<Response> getArchivedConversations() =>
+      get('/conversations/archived');
+
+  // ---------------------------------------------------------------------------
+  // Two-Factor Authentication
+  // ---------------------------------------------------------------------------
+
+  Future<Response> getTwoFactorStatus() => get('/two-factor/status');
+  Future<Response> setupTwoFactor() => get('/two-factor/setup');
+  Future<Response> enableTwoFactor(Map<String, dynamic> data) =>
+      post('/two-factor/enable', data: data);
+  Future<Response> disableTwoFactor(Map<String, dynamic> data) =>
+      post('/two-factor/disable', data: data);
+  Future<Response> regenerateRecoveryCodes(Map<String, dynamic> data) =>
+      post('/two-factor/regenerate-recovery-codes', data: data);
+
+  // ---------------------------------------------------------------------------
+  // Linked Devices
+  // ---------------------------------------------------------------------------
+
+  Future<Response> getLinkedDevices() => get('/linked-devices');
+  Future<Response> deleteLinkedDevice(int id) => delete('/linked-devices/$id');
+  Future<Response> deleteOtherLinkedDevices() => delete('/linked-devices/others');
+
+  // ---------------------------------------------------------------------------
+  // Media Gallery
+  // ---------------------------------------------------------------------------
+
+  Future<Response> getConversationMedia(int conversationId) =>
+      get('/conversations/$conversationId/media');
+  Future<Response> getGroupMedia(int groupId) => get('/groups/$groupId/media');
+
+  // ---------------------------------------------------------------------------
+  // Search in Chat
+  // ---------------------------------------------------------------------------
+
+  Future<Response> searchInConversation(int conversationId, String query) =>
+      get('/conversations/$conversationId/search', queryParameters: {'q': query});
+  Future<Response> searchInGroup(int groupId, String query) =>
+      get('/groups/$groupId/search', queryParameters: {'q': query});
+
+  // ---------------------------------------------------------------------------
+  // Chat Actions
+  // ---------------------------------------------------------------------------
+
+  Future<Response> clearConversation(int conversationId) =>
+      post('/conversations/$conversationId/clear');
+  Future<Response> deleteConversation(int conversationId) =>
+      delete('/conversations/$conversationId');
+  Future<Response> exportConversation(int conversationId) =>
+      get('/conversations/$conversationId/export');
+
+  // ---------------------------------------------------------------------------
+  // Group Management
+  // ---------------------------------------------------------------------------
+
+  Future<Response> updateGroup(int groupId, Map<String, dynamic> data) =>
+      put('/groups/$groupId', data: data);
+  Future<Response> addGroupMember(int groupId, Map<String, dynamic> data) =>
+      post('/groups/$groupId/members', data: data);
+  Future<Response> removeGroupMember(int groupId, int userId) =>
+      delete('/groups/$groupId/members/$userId');
+  Future<Response> promoteGroupAdmin(int groupId, int userId) =>
+      post('/groups/$groupId/members/$userId/promote');
+  Future<Response> demoteGroupAdmin(int groupId, int userId) =>
+      post('/groups/$groupId/members/$userId/demote');
+
+  // Group Actions
+  Future<Response> pinGroup(int groupId) => post('/groups/$groupId/pin');
+  Future<Response> unpinGroup(int groupId) => delete('/groups/$groupId/pin');
+  Future<Response> leaveGroup(int groupId) => delete('/groups/$groupId/leave');
+  
+  Future<Response> muteGroup(int groupId, {int? minutes, DateTime? until}) {
+    final data = <String, dynamic>{};
+    if (minutes != null) data['minutes'] = minutes;
+    if (until != null) data['until'] = until.toIso8601String();
+    return post('/groups/$groupId/mute', data: data);
+  }
+  Future<Response> unmuteGroup(int groupId) => delete('/groups/$groupId/mute');
+
+  // ---------------------------------------------------------------------------
+  // Privacy Settings
+  // ---------------------------------------------------------------------------
+
+  Future<Response> getPrivacySettings() => get('/privacy-settings');
+  Future<Response> updatePrivacySettings(Map<String, dynamic> data) =>
+      put('/privacy-settings', data: data);
+
+  // ---------------------------------------------------------------------------
+  // Notification Settings
+  // ---------------------------------------------------------------------------
+
+  Future<Response> getNotificationSettings() => get('/notification-settings');
+  Future<Response> updateNotificationSettings(Map<String, dynamic> data) =>
+      put('/notification-settings', data: data);
+  Future<Response> updateConversationNotificationSettings(
+          int conversationId, Map<String, dynamic> data) =>
+      put('/conversations/$conversationId/notification-settings', data: data);
+  Future<Response> updateGroupNotificationSettings(
+          int groupId, Map<String, dynamic> data) =>
+      put('/groups/$groupId/notification-settings', data: data);
+
+  // ---------------------------------------------------------------------------
+  // Media Auto-Download
+  // ---------------------------------------------------------------------------
+
+  Future<Response> getMediaAutoDownloadSettings() =>
+      get('/media-auto-download');
+  Future<Response> updateMediaAutoDownloadSettings(Map<String, dynamic> data) =>
+      put('/media-auto-download', data: data);
+
+  // ---------------------------------------------------------------------------
+  // Storage Usage
+  // ---------------------------------------------------------------------------
+
+  Future<Response> getStorageUsage() => get('/storage-usage');
+
+  // ---------------------------------------------------------------------------
+  // Starred Messages
+  // ---------------------------------------------------------------------------
+
+  Future<Response> getStarredMessages() => get('/starred-messages');
+  Future<Response> starMessage(int messageId) => post('/messages/$messageId/star');
+  Future<Response> unstarMessage(int messageId) => delete('/messages/$messageId/star');
+  Future<Response> starGroupMessage(int groupId, int messageId) => post('/groups/$groupId/messages/$messageId/star');
+  Future<Response> unstarGroupMessage(int groupId, int messageId) => delete('/groups/$groupId/messages/$messageId/star');
+
+  // ---------------------------------------------------------------------------
+  // Account
+  // ---------------------------------------------------------------------------
+
+  Future<Response> deleteAccount(Map<String, dynamic> data) =>
+      delete('/account', data: data);
+
+  // ---------------------------------------------------------------------------
+  // Location Sharing
+  // ---------------------------------------------------------------------------
+
+  Future<Response> shareLocationInConversation(
+    int conversationId, {
+    required double latitude,
+    required double longitude,
+    String? address,
+    String? placeName,
+  }) {
+    return post('/conversations/$conversationId/share-location', data: {
+      'latitude': latitude,
+      'longitude': longitude,
+      if (address != null) 'address': address,
+      if (placeName != null) 'place_name': placeName,
+    });
+  }
+
+  Future<Response> shareLocationInGroup(
+    int groupId, {
+    required double latitude,
+    required double longitude,
+    String? address,
+    String? placeName,
+  }) {
+    return post('/groups/$groupId/share-location', data: {
+      'latitude': latitude,
+      'longitude': longitude,
+      if (address != null) 'address': address,
+      if (placeName != null) 'place_name': placeName,
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Contact Sharing
+  // ---------------------------------------------------------------------------
+
+  Future<Response> shareContactInConversation(
+    int conversationId, {
+    int? contactId,
+    String? name,
+    String? phone,
+    String? email,
+  }) {
+    if (contactId != null) {
+      return post('/conversations/$conversationId/share-contact', data: {'contact_id': contactId});
+    } else {
+      return post('/conversations/$conversationId/share-contact', data: {
+        'name': name,
+        'phone': phone,
+        if (email != null) 'email': email,
+      });
+    }
+  }
+
+  Future<Response> shareContactInGroup(
+    int groupId, {
+    int? contactId,
+    String? name,
+    String? phone,
+    String? email,
+  }) {
+    if (contactId != null) {
+      return post('/groups/$groupId/share-contact', data: {'contact_id': contactId});
+    } else {
+      return post('/groups/$groupId/share-contact', data: {
+        'name': name,
+        'phone': phone,
+        if (email != null) 'email': email,
+      });
+    }
+  }
+}
+

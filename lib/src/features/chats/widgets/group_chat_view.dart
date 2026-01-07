@@ -1,0 +1,1016 @@
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:record/record.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:geolocator/geolocator.dart' show Geolocator, LocationPermission, LocationAccuracy, Position;
+import 'package:path_provider/path_provider.dart';
+import '../chat_repo.dart';
+import '../models.dart';
+import 'message_bubble.dart';
+import 'emoji_picker_widget.dart';
+import '../../contacts/contacts_repository.dart';
+import 'group_info_screen.dart'; // Provides groupInfoProvider
+import '../../media/media_gallery_screen.dart';
+import 'search_in_chat_screen.dart';
+import '../../calls/call_screen.dart';
+import '../../calls/providers.dart';
+
+class GroupChatView extends ConsumerStatefulWidget {
+  final int groupId;
+  final String groupName;
+  final String? groupAvatarUrl;
+  final List<String> memberNames;
+  final int? memberCount;
+
+  const GroupChatView({
+    super.key,
+    required this.groupId,
+    required this.groupName,
+    this.groupAvatarUrl,
+    this.memberNames = const [],
+    this.memberCount,
+  });
+
+  @override
+  ConsumerState<GroupChatView> createState() => _GroupChatViewState();
+}
+
+class _GroupChatViewState extends ConsumerState<GroupChatView> {
+  final _scrollController = ScrollController();
+  final _messageController = TextEditingController();
+  final List<Message> _messages = [];
+  final List<File> _attachments = [];
+  bool _isLoading = false;
+  bool _isSending = false;
+  bool _showEmojiPicker = false;
+  int? _currentUserId;
+  
+  // Audio recording
+  final AudioRecorder _audioRecorder = AudioRecorder();
+  bool _isRecording = false;
+  String? _recordingPath;
+  Duration _recordingDuration = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentUserId();
+    _loadMessages();
+  }
+
+  Future<void> _loadCurrentUserId() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _currentUserId = prefs.getInt('user_id');
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _messageController.dispose();
+    _audioRecorder.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadMessages() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final chatRepo = ref.read(chatRepositoryProvider);
+      final messages = await chatRepo.getGroupMessages(widget.groupId);
+      setState(() {
+        _messages.clear();
+        _messages.addAll(messages);
+        _isLoading = false;
+      });
+      _scrollToBottom();
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load messages: $e')),
+        );
+      }
+    }
+  }
+
+  void _scrollToBottom() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
+  Future<void> _sendMessage() async {
+    final message = _messageController.text.trim();
+    if (message.isEmpty && _attachments.isEmpty) return;
+
+    setState(() {
+      _isSending = true;
+    });
+
+    try {
+      final chatRepo = ref.read(chatRepositoryProvider);
+      final newMessage = await chatRepo.sendMessageToGroup(
+        groupId: widget.groupId,
+        body: message.isEmpty ? null : message,
+        attachments: _attachments.isNotEmpty ? _attachments : null,
+      );
+      
+      setState(() {
+        _messages.add(newMessage);
+        _messageController.clear();
+        _attachments.clear();
+      });
+      _scrollToBottom();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send message: $e')),
+        );
+      }
+    } finally {
+      setState(() {
+        _isSending = false;
+      });
+    }
+  }
+
+  Future<void> _pickFiles() async {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'doc', 'docx', 'txt', 'zip', 'rar'],
+    );
+
+    if (result != null && result.files.isNotEmpty) {
+      setState(() {
+        _attachments.addAll(
+          result.files
+              .where((f) => f.path != null)
+              .map((f) => File(f.path!))
+              .toList(),
+        );
+      });
+    }
+  }
+
+  Future<void> _recordAudio() async {
+    // Request microphone permission
+    final status = await Permission.microphone.request();
+    if (!status.isGranted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Microphone permission is required to record audio')),
+        );
+      }
+      return;
+    }
+
+    if (_isRecording) {
+      // Stop recording
+      await _stopRecording();
+    } else {
+      // Start recording
+      await _startRecording();
+    }
+  }
+
+  Future<void> _startRecording() async {
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      _recordingPath = '${tempDir.path}/recording_$timestamp.m4a';
+
+      if (await _audioRecorder.hasPermission()) {
+        await _audioRecorder.start(
+          const RecordConfig(
+            encoder: AudioEncoder.aacLc,
+            bitRate: 128000,
+            sampleRate: 44100,
+          ),
+          path: _recordingPath!,
+        );
+
+        setState(() {
+          _isRecording = true;
+          _recordingDuration = Duration.zero;
+        });
+
+        // Update duration timer
+        _updateRecordingDuration();
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Microphone permission denied')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to start recording: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _stopRecording() async {
+    try {
+      final path = await _audioRecorder.stop();
+      
+      setState(() {
+        _isRecording = false;
+      });
+
+      if (path != null && mounted) {
+        // Show dialog to confirm sending or canceling
+        final shouldSend = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Voice Message'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Recording duration: ${_formatDuration(_recordingDuration)}'),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('Cancel'),
+                    ),
+                    ElevatedButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('Send'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+
+        if (shouldSend == true) {
+          setState(() {
+            _attachments.add(File(path));
+          });
+        } else {
+          // Delete the recording file
+          try {
+            final file = File(path);
+            if (await file.exists()) {
+              await file.delete();
+            }
+          } catch (e) {
+            debugPrint('Failed to delete recording: $e');
+          }
+        }
+      }
+
+      _recordingPath = null;
+      _recordingDuration = Duration.zero;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to stop recording: $e')),
+        );
+      }
+    }
+  }
+
+  void _updateRecordingDuration() {
+    if (!_isRecording) return;
+    
+    Future.delayed(const Duration(seconds: 1), () {
+      if (mounted && _isRecording) {
+        setState(() {
+          _recordingDuration = _recordingDuration + const Duration(seconds: 1);
+        });
+        _updateRecordingDuration();
+      }
+    });
+  }
+
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final minutes = twoDigits(duration.inMinutes.remainder(60));
+    final seconds = twoDigits(duration.inSeconds.remainder(60));
+    return '$minutes:$seconds';
+  }
+
+  Future<void> _startCall(String type) async {
+    try {
+      final callManager = ref.read(callManagerProvider);
+      await callManager.startCall(
+        groupId: widget.groupId,
+        type: type,
+      );
+
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => CallScreen(
+              call: callManager.currentCall!,
+              userName: widget.groupName,
+              userAvatar: widget.groupAvatarUrl,
+              isIncoming: false,
+              callManager: callManager,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to start call: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _shareLocation() async {
+    // Request location permission
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Location services are disabled. Please enable location services.')),
+        );
+      }
+      return;
+    }
+
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Location permissions are denied')),
+          );
+        }
+        return;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Location permissions are permanently denied. Please enable them in settings.')),
+        );
+      }
+      return;
+    }
+
+    // Show loading indicator
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
+    try {
+      // Get current position
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      if (mounted) {
+        Navigator.pop(context); // Close loading dialog
+
+        // Note: Reverse geocoding (getting address from coordinates) requires the geocoding package
+        // For now, we'll just use coordinates. To enable address lookup, add geocoding package.
+        String? address;
+
+        setState(() {
+          _isSending = true;
+        });
+
+        final chatRepo = ref.read(chatRepositoryProvider);
+        final newMessage = await chatRepo.shareLocationInGroup(
+          widget.groupId,
+          latitude: position.latitude,
+          longitude: position.longitude,
+          address: address,
+          placeName: null,
+        );
+        setState(() {
+          _messages.add(newMessage);
+        });
+        _scrollToBottom();
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // Close loading dialog if still open
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to get location: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSending = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _shareContact() async {
+    final contacts = await ref.read(contactsRepositoryProvider).listContacts();
+    
+    if (!mounted) return;
+    
+    final selected = await showDialog<int>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Share Contact'),
+        content: SizedBox(
+          width: 300,
+          child: contacts.isEmpty
+              ? const Text('No contacts available')
+              : ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: contacts.length,
+                  itemBuilder: (context, index) {
+                    final contact = contacts[index];
+                    return ListTile(
+                      leading: CircleAvatar(
+                        child: Text(contact.name.isNotEmpty ? contact.name[0] : '?'),
+                      ),
+                      title: Text(contact.name),
+                      subtitle: contact.phone != null ? Text(contact.phone!) : null,
+                      onTap: () => Navigator.pop(context, contact.id),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (selected != null) {
+      setState(() {
+        _isSending = true;
+      });
+
+      try {
+        final chatRepo = ref.read(chatRepositoryProvider);
+        final newMessage = await chatRepo.shareContactInGroup(
+          widget.groupId,
+          contactId: selected,
+        );
+        setState(() {
+          _messages.add(newMessage);
+        });
+        _scrollToBottom();
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to share contact: $e')),
+          );
+        }
+      } finally {
+        setState(() {
+          _isSending = false;
+        });
+      }
+    }
+  }
+
+  void _removeAttachment(int index) {
+    setState(() {
+      _attachments.removeAt(index);
+    });
+  }
+
+
+  Future<void> _replyPrivately(Message message) async {
+    try {
+      final chatRepo = ref.read(chatRepositoryProvider);
+      final result = await chatRepo.replyPrivatelyToGroupMessage(widget.groupId, message.id);
+      
+      if (mounted) {
+        // Show success message - user can find the conversation in their chat list
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Conversation opened with ${result['group_message_sender']}. Check your chats list.'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        // Navigate back to chats tab to see the conversation
+        context.go('/chats');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to reply privately: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _reactToMessage(Message message, String emoji) async {
+    try {
+      final chatRepo = ref.read(chatRepositoryProvider);
+      await chatRepo.reactToMessage(message.id, emoji, isGroupMessage: true);
+      // Reload messages to get updated reactions
+      _loadMessages();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to react: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteMessage(Message message) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Message'),
+        content: const Text('Are you sure you want to delete this message?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final chatRepo = ref.read(chatRepositoryProvider);
+      await chatRepo.deleteMessage(message.id);
+      setState(() {
+        _messages.removeWhere((m) => m.id == message.id);
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Message deleted')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to delete message: $e')),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final groupAsync = ref.watch(groupInfoProvider(widget.groupId));
+    final isChannel = groupAsync.maybeWhen(
+      data: (group) => group['type'] == 'channel',
+      orElse: () => false,
+    );
+
+    return Column(
+      children: [
+        // Group Chat Header
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF202C33) : Colors.white,
+            border: Border(
+              bottom: BorderSide(
+                color: isDark ? const Color(0xFF2A3942) : const Color(0xFFD1D7DB),
+                width: 1,
+              ),
+            ),
+          ),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 20,
+                backgroundImage: widget.groupAvatarUrl != null
+                    ? CachedNetworkImageProvider(widget.groupAvatarUrl!)
+                    : null,
+                child: widget.groupAvatarUrl == null
+                    ? const Icon(Icons.group, size: 20)
+                    : null,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.groupName,
+                      style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 16,
+                      ),
+                    ),
+                    Text(
+                      '${widget.memberCount ?? widget.memberNames.length} ${widget.memberCount == 1 ? 'member' : 'members'}',
+                      style: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.grey[600],
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Commented out call buttons for channels temporarily
+              if (!isChannel) ...[
+                IconButton(
+                  icon: Icon(Icons.call, color: isDark ? Colors.white70 : Colors.grey[600]),
+                  onPressed: () => _startCall('voice'),
+                ),
+                IconButton(
+                  icon: Icon(Icons.videocam, color: isDark ? Colors.white70 : Colors.grey[600]),
+                  onPressed: () => _startCall('video'),
+                ),
+              ],
+              IconButton(
+                icon: Icon(Icons.info_outline, color: isDark ? Colors.white70 : Colors.grey[600]),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => GroupInfoScreen(groupId: widget.groupId),
+                    ),
+                  );
+                },
+              ),
+              PopupMenuButton<String>(
+                icon: Icon(Icons.more_vert, color: isDark ? Colors.white70 : Colors.grey[600]),
+                onSelected: (value) async {
+                  switch (value) {
+                    case 'search':
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => SearchInChatScreen(
+                            groupId: widget.groupId,
+                            title: widget.groupName,
+                          ),
+                        ),
+                      );
+                      break;
+                    case 'media':
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => MediaGalleryScreen(
+                            groupId: widget.groupId,
+                            title: widget.groupName,
+                          ),
+                        ),
+                      );
+                      break;
+                    case 'group_info':
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => GroupInfoScreen(groupId: widget.groupId),
+                        ),
+                      );
+                      break;
+                    case 'mute':
+                      // TODO: Implement mute
+                      break;
+                    case 'archive':
+                      // TODO: Implement archive
+                      break;
+                  }
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(value: 'search', child: Row(
+                    children: [
+                      Icon(Icons.search, size: 20),
+                      SizedBox(width: 8),
+                      Text('Search'),
+                    ],
+                  )),
+                  const PopupMenuItem(value: 'media', child: Row(
+                    children: [
+                      Icon(Icons.photo_library, size: 20),
+                      SizedBox(width: 8),
+                      Text('Media'),
+                    ],
+                  )),
+                  const PopupMenuItem(value: 'group_info', child: Row(
+                    children: [
+                      Icon(Icons.info, size: 20),
+                      SizedBox(width: 8),
+                      Text('Group Info'),
+                    ],
+                  )),
+                  const PopupMenuItem(value: 'mute', child: Row(
+                    children: [
+                      Icon(Icons.notifications_off, size: 20),
+                      SizedBox(width: 8),
+                      Text('Mute Notifications'),
+                    ],
+                  )),
+                  const PopupMenuItem(value: 'archive', child: Row(
+                    children: [
+                      Icon(Icons.archive, size: 20),
+                      SizedBox(width: 8),
+                      Text('Archive'),
+                    ],
+                  )),
+                ],
+              ),
+            ],
+          ),
+        ),
+
+        // Messages List
+        Expanded(
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : _messages.isEmpty
+                  ? Center(
+                      child: Text(
+                        'No messages yet. Start a conversation!',
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.grey[600],
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.all(16),
+                      itemCount: _messages.length,
+                      itemBuilder: (context, index) {
+                        final message = _messages[index];
+                        return MessageBubble(
+                          message: message,
+                          currentUserId: _currentUserId ?? 0,
+                          onDelete: () => _deleteMessage(message),
+                          onReplyPrivately: () => _replyPrivately(message),
+                          onReact: (emoji) => _reactToMessage(message, emoji),
+                          isGroupMessage: true,
+                        );
+                      },
+                    ),
+        ),
+
+        // Attachments Preview
+        if (_attachments.isNotEmpty)
+          Container(
+            height: 80,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF202C33) : Colors.white,
+              border: Border(
+                top: BorderSide(
+                  color: isDark ? const Color(0xFF2A3942) : const Color(0xFFD1D7DB),
+                  width: 1,
+                ),
+              ),
+            ),
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: _attachments.length,
+              itemBuilder: (context, index) {
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Stack(
+                    children: [
+                      Container(
+                        width: 64,
+                        height: 64,
+                        decoration: BoxDecoration(
+                          color: Colors.grey[300],
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(Icons.insert_drive_file),
+                      ),
+                      Positioned(
+                        top: -4,
+                        right: -4,
+                        child: IconButton(
+                          icon: const Icon(Icons.close, size: 18),
+                          onPressed: () => _removeAttachment(index),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+
+        // Message Input
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF202C33) : Colors.white,
+            border: Border(
+              top: BorderSide(
+                color: isDark ? const Color(0xFF2A3942) : const Color(0xFFD1D7DB),
+                width: 1,
+              ),
+            ),
+          ),
+          child: Row(
+            children: [
+              IconButton(
+                icon: Icon(Icons.emoji_emotions_outlined,
+                    color: isDark ? Colors.white70 : Colors.grey[600]),
+                onPressed: () {
+                  setState(() {
+                    _showEmojiPicker = !_showEmojiPicker;
+                  });
+                },
+              ),
+              IconButton(
+                icon: Icon(_isRecording ? Icons.stop : Icons.mic,
+                    color: isDark ? Colors.white70 : Colors.grey[600]),
+                onPressed: _recordAudio,
+                tooltip: _isRecording ? 'Stop Recording' : 'Record Audio',
+              ),
+              PopupMenuButton<String>(
+                icon: Icon(Icons.attach_file, color: isDark ? Colors.white70 : Colors.grey[600]),
+                onSelected: (value) async {
+                  switch (value) {
+                    case 'file':
+                      await _pickFiles();
+                      break;
+                    case 'location':
+                      await _shareLocation();
+                      break;
+                    case 'contact':
+                      await _shareContact();
+                      break;
+                  }
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(value: 'file', child: Row(
+                    children: [
+                      Icon(Icons.insert_drive_file),
+                      SizedBox(width: 8),
+                      Text('Document'),
+                    ],
+                  )),
+                  const PopupMenuItem(value: 'location', child: Row(
+                    children: [
+                      Icon(Icons.location_on),
+                      SizedBox(width: 8),
+                      Text('Location'),
+                    ],
+                  )),
+                  const PopupMenuItem(value: 'contact', child: Row(
+                    children: [
+                      Icon(Icons.contact_phone),
+                      SizedBox(width: 8),
+                      Text('Contact'),
+                    ],
+                  )),
+                ],
+              ),
+              Expanded(
+                child: TextField(
+                  controller: _messageController,
+                  minLines: 1,
+                  maxLines: 4,
+                  style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                  decoration: InputDecoration(
+                    hintText: 'Type a message',
+                    hintStyle: TextStyle(color: isDark ? Colors.white38 : Colors.grey[500]),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(24),
+                      borderSide: BorderSide.none,
+                    ),
+                    filled: true,
+                    fillColor: isDark ? const Color(0xFF2A3942) : const Color(0xFFF0F2F5),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  ),
+                  onSubmitted: (_) => _sendMessage(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              if (_isRecording)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.fiber_manual_record, color: Colors.white, size: 16),
+                          const SizedBox(width: 8),
+                          Text(
+                            _formatDuration(_recordingDuration),
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    CircleAvatar(
+                      backgroundColor: Colors.red,
+                      child: IconButton(
+                        icon: const Icon(Icons.stop, color: Colors.white),
+                        onPressed: _stopRecording,
+                      ),
+                    ),
+                  ],
+                )
+              else
+                CircleAvatar(
+                  backgroundColor: const Color(0xFF008069),
+                  child: IconButton(
+                    icon: _isSending
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : const Icon(Icons.send, color: Colors.white),
+                    onPressed: _isSending ? null : _sendMessage,
+                  ),
+                ),
+            ],
+          ),
+        ),
+
+        // Emoji Picker
+        if (_showEmojiPicker)
+          Container(
+            height: 250,
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF202C33) : Colors.white,
+              border: Border(
+                top: BorderSide(
+                  color: isDark ? const Color(0xFF2A3942) : const Color(0xFFD1D7DB),
+                  width: 1,
+                ),
+              ),
+            ),
+            child: EmojiPickerWidget(
+              onEmojiSelected: (emoji) {
+                final currentText = _messageController.text;
+                _messageController.text = currentText + emoji;
+                _messageController.selection = TextSelection.fromPosition(
+                  TextPosition(offset: _messageController.text.length),
+                );
+              },
+              onBackspace: () {
+                final currentText = _messageController.text;
+                if (currentText.isNotEmpty) {
+                  _messageController.text = currentText.substring(0, currentText.length - 1);
+                  _messageController.selection = TextSelection.fromPosition(
+                    TextPosition(offset: _messageController.text.length),
+                  );
+                }
+              },
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+
+
