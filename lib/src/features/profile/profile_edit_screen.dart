@@ -16,11 +16,17 @@ class ProfileEditScreen extends ConsumerStatefulWidget {
 class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
   final _nameController = TextEditingController();
   final _aboutController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _usernameController = TextEditingController();
+  final _bioController = TextEditingController();
   File? _selectedAvatar;
   String? _currentAvatarUrl;
   bool _isLoading = false;
   bool _isSaving = false;
   Map<String, dynamic>? _userData;
+  int? _selectedMonth;
+  int? _selectedDay;
 
   @override
   void initState() {
@@ -32,6 +38,10 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
   void dispose() {
     _nameController.dispose();
     _aboutController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    _usernameController.dispose();
+    _bioController.dispose();
     super.dispose();
   }
 
@@ -49,6 +59,12 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
         _userData = userData;
         _nameController.text = userData['name'] ?? '';
         _aboutController.text = userData['about'] ?? '';
+        _emailController.text = userData['email'] ?? '';
+        _phoneController.text = userData['phone'] ?? '';
+        _usernameController.text = userData['username'] ?? '';
+        _bioController.text = userData['bio'] ?? '';
+        _selectedMonth = userData['dob_month'];
+        _selectedDay = userData['dob_day'];
         _currentAvatarUrl = userData['avatar_url'];
         _isLoading = false;
       });
@@ -94,6 +110,12 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
       await apiService.updateProfile(
         name: _nameController.text.trim(),
         about: _aboutController.text.trim().isEmpty ? null : _aboutController.text.trim(),
+        email: _emailController.text.trim().isEmpty ? null : _emailController.text.trim(),
+        phone: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
+        username: _usernameController.text.trim().isEmpty ? null : _usernameController.text.trim(),
+        bio: _bioController.text.trim().isEmpty ? null : _bioController.text.trim(),
+        dobMonth: _selectedMonth,
+        dobDay: _selectedDay,
         avatar: _selectedAvatar,
       );
 
@@ -198,6 +220,39 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
                       ),
                       const SizedBox(height: 24),
                       
+                      // Email field
+                      TextField(
+                        controller: _emailController,
+                        decoration: const InputDecoration(
+                          labelText: 'Email',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: TextInputType.emailAddress,
+                      ),
+                      const SizedBox(height: 24),
+                      
+                      // Phone field
+                      TextField(
+                        controller: _phoneController,
+                        decoration: const InputDecoration(
+                          labelText: 'Phone Number',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: TextInputType.phone,
+                      ),
+                      const SizedBox(height: 24),
+                      
+                      // Username field
+                      TextField(
+                        controller: _usernameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Username',
+                          hintText: 'e.g., johndoe123',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      
                       // About field
                       TextField(
                         controller: _aboutController,
@@ -206,6 +261,71 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
                           border: OutlineInputBorder(),
                         ),
                         maxLines: 3,
+                      ),
+                      const SizedBox(height: 24),
+                      
+                      // Bio field
+                      TextField(
+                        controller: _bioController,
+                        decoration: const InputDecoration(
+                          labelText: 'Bio',
+                          hintText: 'Tell us about yourself...',
+                          border: OutlineInputBorder(),
+                        ),
+                        maxLines: 3,
+                        maxLength: 500,
+                      ),
+                      const SizedBox(height: 24),
+                      
+                      // Date of Birth
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<int>(
+                              value: _selectedMonth,
+                              decoration: const InputDecoration(
+                                labelText: 'Birth Month',
+                                border: OutlineInputBorder(),
+                              ),
+                              items: List.generate(12, (i) => i + 1).map((month) {
+                                final monthNames = [
+                                  'January', 'February', 'March', 'April', 'May', 'June',
+                                  'July', 'August', 'September', 'October', 'November', 'December'
+                                ];
+                                return DropdownMenuItem(
+                                  value: month,
+                                  child: Text(monthNames[month - 1]),
+                                );
+                              }).toList(),
+                              onChanged: (value) {
+                                setState(() {
+                                  _selectedMonth = value;
+                                });
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: DropdownButtonFormField<int>(
+                              value: _selectedDay,
+                              decoration: const InputDecoration(
+                                labelText: 'Birth Day',
+                                border: OutlineInputBorder(),
+                              ),
+                              items: List.generate(31, (i) => i + 1).map((day) {
+                                return DropdownMenuItem(
+                                  value: day,
+                                  child: Text(day.toString()),
+                                );
+                              }).toList(),
+                              onChanged: (value) {
+                                setState(() {
+                                  _selectedDay = value;
+                                });
+                              },
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 32),
                       

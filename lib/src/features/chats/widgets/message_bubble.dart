@@ -40,6 +40,7 @@ class MessageBubble extends StatelessWidget {
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: GestureDetector(
         onLongPress: () => _showMessageMenu(context, context),
+        onSecondaryTapDown: (details) => _showMessageMenuAtPosition(context, details.globalPosition),
         child: Container(
           margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           constraints: BoxConstraints(
@@ -305,14 +306,26 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
-  void _showMessageMenu(BuildContext context, BuildContext widgetContext) {
+  void _showMessageMenuAtPosition(BuildContext context, Offset position) {
+    final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    _showMessageMenu(context, context, position: overlay.globalToLocal(position));
+  }
+
+  void _showMessageMenu(BuildContext context, BuildContext widgetContext, {Offset? position}) {
+    final RenderBox? overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
+    final screenSize = MediaQuery.of(context).size;
+    
+    // Use provided position or center of screen
+    final menuPosition = position ?? Offset(screenSize.width / 2, screenSize.height / 2);
+    final menuSize = const Size(200, 300); // Approximate menu size
+    
     showMenu(
       context: context,
       position: RelativeRect.fromLTRB(
-        MediaQuery.of(context).size.width / 2,
-        MediaQuery.of(context).size.height / 2,
-        MediaQuery.of(context).size.width / 2,
-        MediaQuery.of(context).size.height / 2,
+        menuPosition.dx,
+        menuPosition.dy,
+        screenSize.width - menuPosition.dx - menuSize.width,
+        screenSize.height - menuPosition.dy - menuSize.height,
       ),
       items: [
         PopupMenuItem(

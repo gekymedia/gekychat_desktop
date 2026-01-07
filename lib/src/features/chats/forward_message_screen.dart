@@ -84,50 +84,61 @@ class _ForwardMessageScreenState extends ConsumerState<ForwardMessageScreen>
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
-      appBar: AppBar(
-        title: const Text('Forward Message'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Chats'),
-            Tab(text: 'Groups'),
-          ],
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 100, vertical: 50),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 600, maxHeight: 700),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF202C33) : Colors.white,
+          borderRadius: BorderRadius.circular(12),
         ),
-        actions: [
-          IconButton(
-            icon: _isLoading
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.send),
-            onPressed: (!_hasSelection || _isLoading) ? null : _forward,
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(
+            title: const Text('Forward Message'),
+            bottom: TabBar(
+              controller: _tabController,
+              tabs: const [
+                Tab(text: 'Chats'),
+                Tab(text: 'Groups'),
+              ],
+            ),
+            actions: [
+              IconButton(
+                icon: _isLoading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.send),
+                onPressed: (!_hasSelection || _isLoading) ? null : _forward,
+              ),
+            ],
           ),
-        ],
-      ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _ConversationTab(
-            selectedIds: _selectedConversationIds,
-            onToggle: (id, selected) {
-              setState(() {
-                selected ? _selectedConversationIds.add(id) : _selectedConversationIds.remove(id);
-              });
-            },
+          body: TabBarView(
+            controller: _tabController,
+            children: [
+              _ConversationTab(
+                selectedIds: _selectedConversationIds,
+                onToggle: (id, selected) {
+                  setState(() {
+                    selected ? _selectedConversationIds.add(id) : _selectedConversationIds.remove(id);
+                  });
+                },
+              ),
+              _GroupTab(
+                selectedIds: _selectedGroupIds,
+                onToggle: (id, selected) {
+                  setState(() {
+                    selected ? _selectedGroupIds.add(id) : _selectedGroupIds.remove(id);
+                  });
+                },
+              ),
+            ],
           ),
-          _GroupTab(
-            selectedIds: _selectedGroupIds,
-            onToggle: (id, selected) {
-              setState(() {
-                selected ? _selectedGroupIds.add(id) : _selectedGroupIds.remove(id);
-              });
-            },
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -145,7 +156,6 @@ class _ConversationTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final repo = ref.read(chatRepositoryProvider);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return FutureBuilder<List<ConversationSummary>>(
       future: repo.getConversations(),
@@ -193,7 +203,6 @@ class _GroupTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final repo = ref.read(chatRepositoryProvider);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return FutureBuilder<List<GroupSummary>>(
       future: repo.getGroups(),

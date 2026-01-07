@@ -57,6 +57,7 @@ class ChatRepository {
 
   Future<GroupSummary> createGroup({
     required String name,
+    String? description,
     required List<int> memberIds,
     File? avatar,
     String type = 'group',
@@ -70,6 +71,9 @@ class ChatRepository {
         final formData = FormData();
         formData.fields.add(MapEntry('name', name));
         formData.fields.add(MapEntry('type', type));
+        if (description != null && description.isNotEmpty) {
+          formData.fields.add(MapEntry('description', description));
+        }
         // Add each member as members[] to match Laravel's expected format
         for (final memberId in memberIds) {
           formData.fields.add(MapEntry('members[]', memberId.toString()));
@@ -90,6 +94,7 @@ class ChatRepository {
           '/groups',
           data: {
             'name': name,
+            if (description != null && description.isNotEmpty) 'description': description,
             'members': memberIds,
             'type': type,
           },

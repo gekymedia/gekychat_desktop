@@ -1,5 +1,6 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'notification_service.dart';
+import 'package:flutter/foundation.dart';
 
 class DesktopNotificationService extends NotificationService {
   final FlutterLocalNotificationsPlugin _localNotifications =
@@ -30,11 +31,47 @@ class DesktopNotificationService extends NotificationService {
   }
 
   void _onNotificationTapped(NotificationResponse response) {
+    debugPrint('📬 Desktop notification response: ${response.id}, ${response.actionId}, ${response.input}');
+    
+    // Handle inline reply
+    if (response.actionId == 'reply' && response.input != null && response.input!.isNotEmpty) {
+      _handleNotificationReply(response.payload ?? '', response.input!);
+      return;
+    }
+    
     // Handle notification tap
     final data = response.payload != null
         ? {'data': response.payload}
         : <String, dynamic>{};
     onNotificationTap?.call(data);
+  }
+  
+  void _handleNotificationReply(String payload, String replyText) {
+    debugPrint('💬 Desktop notification reply received: $replyText');
+    try {
+      // Parse payload to get conversation_id and message_id
+      final data = <String, dynamic>{'payload': payload};
+      
+      // Try to extract conversation_id from payload if it's in format like "conversation_id=123&message_id=456"
+      if (payload.contains('conversation_id')) {
+        final parts = payload.split('&');
+        for (final part in parts) {
+          final kv = part.split('=');
+          if (kv.length == 2) {
+            data[kv[0]] = kv[1];
+          }
+        }
+      }
+      
+      // Add reply text
+      data['reply_text'] = replyText;
+      data['type'] = 'message_reply';
+      
+      // Call callback to handle the reply
+      onNotificationTap?.call(data);
+    } catch (e) {
+      debugPrint('❌ Error handling notification reply: $e');
+    }
   }
 
   @override
@@ -56,6 +93,31 @@ class DesktopNotificationService extends NotificationService {
     Map<String, dynamic>? data,
     String? imageUrl,
   }) async {
+    // Extract conversation and message IDs for reply
+    final conversationId = data?['conversation_id']?.toString() ?? '';
+    final messageId = data?['message_id']?.toString() ?? '';
+    
+    // Create payload string with conversation and message IDs
+    final payloadString = conversationId.isNotEmpty && messageId.isNotEmpty
+        ? 'conversation_id=$conversationId&message_id=$messageId'
+        : (data?.toString() ?? '');
+    
+    // Windows notification details
+    const windowsDetails = WindowsNotificationDetails();
+    
+    // macOS supports inline replies via categoryIdentifier
+    const darwinDetails = DarwinNotificationDetails(
+      categoryIdentifier: 'MESSAGE_CATEGORY',
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
+
+    // Linux notification details
+    const linuxDetails = LinuxNotificationDetails(
+      defaultActionName: 'Open',
+    );
+
     const androidDetails = AndroidNotificationDetails(
       'gekychat_channel',
       'GekyChat Notifications',
@@ -64,14 +126,12 @@ class DesktopNotificationService extends NotificationService {
       priority: Priority.high,
     );
 
-    const darwinDetails = DarwinNotificationDetails();
-
     const notificationDetails = NotificationDetails(
       android: androidDetails,
       iOS: darwinDetails,
       macOS: darwinDetails,
-      linux: LinuxNotificationDetails(),
-      windows: WindowsNotificationDetails(),
+      linux: linuxDetails,
+      windows: windowsDetails,
     );
 
     await _localNotifications.show(
@@ -79,7 +139,7 @@ class DesktopNotificationService extends NotificationService {
       title,
       body,
       notificationDetails,
-      payload: data != null ? data.toString() : null,
+      payload: payloadString,
     );
   }
 

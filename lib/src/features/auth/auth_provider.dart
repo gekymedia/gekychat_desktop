@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import '../../core/providers.dart';
 import '../../core/api_service.dart';
 import '../../core/device_id.dart';
@@ -78,6 +79,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   Future<void> loginWithPhone(String phone) async {
     state = state.copyWith(isLoading: true, error: null);
+    
+    // Clear any existing token when starting new login
+    // This prevents old tokens from causing auto-login
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('auth_token');
+    await prefs.remove('user_id');
+    state = state.copyWith(token: null);
+    
     try {
       await _apiService.post('/auth/phone', data: {'phone': phone});
       state = state.copyWith(isLoading: false);
@@ -131,8 +140,31 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<void> checkAuthStatus() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
-    if (token != null) {
-      state = state.copyWith(token: token);
+    
+    if (token == null || token.isEmpty) {
+      // No token, user is not logged in
+      state = AuthState();
+      return;
+    }
+    
+    // Validate token by calling /me endpoint to ensure it's still valid
+    try {
+      final response = await _apiService.getProfile();
+      if (response.statusCode == 200 && response.data != null) {
+        // Token is valid, update state
+        final userId = response.data['id'];
+        if (userId != null) {
+          await prefs.setInt('user_id', userId);
+        }
+        state = state.copyWith(token: token);
+      } else {
+        // Token is invalid, clear it
+        await logout();
+      }
+    } catch (e) {
+      // Token is invalid or expired (401), clear it
+      debugPrint('⚠️ Token validation failed (this is normal if token expired): $e');
+      await logout();
     }
   }
 

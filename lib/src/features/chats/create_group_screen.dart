@@ -17,6 +17,7 @@ class CreateGroupScreen extends ConsumerStatefulWidget {
 class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
+  final _descriptionController = TextEditingController();
   final _searchController = TextEditingController();
 
   final Set<int> _selectedMemberIds = {};
@@ -48,6 +49,7 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _descriptionController.dispose();
     _searchController.removeListener(_onSearch);
     _searchController.dispose();
     _debounce?.cancel();
@@ -89,6 +91,9 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
     try {
       final group = await ref.read(chatRepositoryProvider).createGroup(
             name: _nameController.text.trim(),
+            description: _descriptionController.text.trim().isEmpty 
+                ? null 
+                : _descriptionController.text.trim(),
             memberIds: _selectedMemberIds.toList(),
             avatar: _selectedAvatar,
             type: _groupType,
@@ -279,6 +284,17 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
                   ),
                   validator: (v) =>
                       (v == null || v.trim().length < 2) ? 'Enter ${_groupType == 'channel' ? 'channel' : 'group'} name' : null,
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _descriptionController,
+                  decoration: InputDecoration(
+                    labelText: _groupType == 'channel' ? 'Channel description (optional)' : 'Group description (optional)',
+                    hintText: 'Describe what this ${_groupType == 'channel' ? 'channel' : 'group'} is about',
+                    border: const OutlineInputBorder(),
+                  ),
+                  maxLines: 3,
+                  maxLength: 500,
                 ),
                 const SizedBox(height: 16),
 

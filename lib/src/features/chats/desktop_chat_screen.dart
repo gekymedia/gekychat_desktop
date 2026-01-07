@@ -29,6 +29,7 @@ import '../storage/storage_usage_screen.dart';
 import '../world/world_feed_screen.dart';
 import '../mail/mail_screen.dart';
 import '../ai/ai_chat_screen.dart';
+import '../live/live_broadcast_screen.dart';
 import '../../core/providers.dart';
 import '../../core/session.dart';
 import '../../core/feature_flags.dart';
@@ -347,316 +348,498 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
       backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
       body: Row(
         children: [
-          // Side Nav (like web version)
-          SideNav(currentRoute: currentRoute),
+          // Side Nav (like web version) - Use RepaintBoundary to prevent unnecessary repaints
+          RepaintBoundary(
+            child: SideNav(currentRoute: currentRoute),
+          ),
           
-          // Sidebar
-          Container(
-            width: 400,
-            color: isDark ? const Color(0xFF111B21) : Colors.white,
-            child: Column(
-              children: [
-                // Header
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF202C33) : Colors.white,
-                    border: Border(
-                      bottom: BorderSide(
-                        color: isDark ? const Color(0xFF2A3942) : const Color(0xFFD1D7DB),
-                        width: 1,
-                      ),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      userProfileAsync.when(
-                        data: (userProfile) => CircleAvatar(
-                          radius: 24,
-                          backgroundImage: userProfile.avatarUrl != null
-                              ? CachedNetworkImageProvider(userProfile.avatarUrl!)
-                              : null,
-                          child: userProfile.avatarUrl == null
-                              ? Text(userProfile.name[0].toUpperCase(), style: const TextStyle(fontSize: 20))
-                              : null,
-                        ),
-                        loading: () => const CircleAvatar(radius: 24, child: CircularProgressIndicator()),
-                        error: (_, __) => const CircleAvatar(radius: 24, child: Icon(Icons.person)),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              userProfileAsync.value?.name ?? 'User',
-                              style: TextStyle(
-                                color: isDark ? Colors.white : Colors.black,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 16,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      // New chat/group button
-                      IconButton(
-                        icon: const Icon(Icons.add_circle_outline),
-                        color: isDark ? Colors.white70 : Colors.grey[600],
-                        tooltip: 'New chat',
-                        onPressed: () => _showNewChatMenu(context),
-                      ),
-                      // Account Switcher (if multi-account enabled)
-                      const AccountSwitcher(),
-                      Consumer(
-                        builder: (context, ref, child) {
-                          final worldFeedEnabled = featureEnabled(ref, 'world_feed');
-                          final emailChatEnabled = featureEnabled(ref, 'email_chat');
-                          final advancedAiEnabled = featureEnabled(ref, 'advanced_ai');
-                          
-                          final userProfileAsync = ref.watch(currentUserProvider);
-                          final hasUsername = userProfileAsync.when(
-                            data: (profile) => profile.hasUsername,
-                            loading: () => false,
-                            error: (_, __) => false,
-                          );
+          // Sidebar - Use RepaintBoundary and AutomaticKeepAliveClientMixin
+          RepaintBoundary(
+            child: Container(
+              width: 400,
+              color: isDark ? const Color(0xFF111B21) : Colors.white,
+              child: _buildSidebarContent(context, currentRoute, isDark),
+            ),
+          ),
+          // Main Content Area - This is what should reload, not the sidebar
+          Expanded(
+            child: _buildMainContent(context, currentRoute, isDark),
+          ),
+        ],
+      ),
+    );
+  }
 
-                          return PopupMenuButton<String>(
-                            icon: Icon(Icons.more_vert, color: isDark ? Colors.white70 : Colors.grey[600]),
-                            onSelected: (value) {
-                              switch (value) {
-                                case 'calls':
-                                  context.go('/calls');
-                                  break;
-                                case 'world':
-                                  context.go('/world');
-                                  break;
-                                case 'mail':
-                                  context.go('/mail');
-                                  break;
-                                case 'ai':
-                                  context.go('/ai');
-                                  break;
-                                case 'settings':
-                                  context.go('/settings');
-                                  break;
-                                case 'profile':
-                                  context.go('/profile');
-                                  break;
-                                case 'contacts':
-                                  context.go('/contacts');
-                                  break;
-                                case 'search':
-                                  context.go('/search');
-                                  break;
-                                case 'starred':
-                                  context.go('/starred');
-                                  break;
-                                case 'archived':
-                                  context.go('/archived');
-                                  break;
-                                case 'broadcast_lists':
-                                  context.go('/broadcast-lists');
-                                  break;
-                                case 'two_factor':
-                                  context.go('/two-factor');
-                                  break;
-                                case 'linked_devices':
-                                  context.go('/linked-devices');
-                                  break;
-                              }
-                            },
-                            itemBuilder: (context) => [
-                              const PopupMenuItem(value: 'calls', child: Row(
-                                children: [
-                                  Icon(Icons.phone, size: 20),
-                                  SizedBox(width: 12),
-                                  Text('Calls'),
-                                ],
-                              )),
-                              if (worldFeedEnabled && hasUsername)
-                                const PopupMenuItem(value: 'world', child: Row(
-                                  children: [
-                                    Icon(Icons.explore, size: 20),
-                                    SizedBox(width: 12),
-                                    Text('World'),
-                                  ],
-                                )),
-                              if (emailChatEnabled && hasUsername)
-                                const PopupMenuItem(value: 'mail', child: Row(
-                                  children: [
-                                    Icon(Icons.mail, size: 20),
-                                    SizedBox(width: 12),
-                                    Text('Mail'),
-                                  ],
-                                )),
-                              if (advancedAiEnabled)
-                                const PopupMenuItem(value: 'ai', child: Row(
-                                  children: [
-                                    Icon(Icons.smart_toy, size: 20),
-                                    SizedBox(width: 12),
-                                    Text('AI Assistant'),
-                                  ],
-                                )),
-                              const PopupMenuDivider(),
-                              const PopupMenuItem(value: 'settings', child: Text('Settings')),
-                              const PopupMenuItem(value: 'profile', child: Text('Profile')),
-                              const PopupMenuItem(value: 'contacts', child: Text('Contacts')),
-                              const PopupMenuItem(value: 'search', child: Text('Search')),
-                              const PopupMenuItem(value: 'starred', child: Text('Starred Messages')),
-                              const PopupMenuItem(value: 'archived', child: Text('Archived')),
-                              const PopupMenuItem(value: 'broadcast_lists', child: Text('Broadcast Lists')),
-                              const PopupMenuItem(value: 'two_factor', child: Text('Two-Step Verification')),
-                              const PopupMenuItem(value: 'linked_devices', child: Text('Linked Devices')),
-                            ],
-                          );
-                        },
+  Widget _buildSidebarContent(BuildContext context, String currentRoute, bool isDark) {
+    // Show channels list when on channels route
+    if (currentRoute == '/channels' || currentRoute.startsWith('/channels')) {
+      return _buildChannelsSidebar(context, isDark);
+    }
+    
+    // For other routes (world, mail, ai), show empty sidebar or hide it
+    // For now, we'll show the conversations sidebar for all other routes
+    return _buildConversationsSidebar(context, isDark);
+  }
+  
+  Widget _buildChannelsSidebar(BuildContext context, bool isDark) {
+    final chatRepo = ref.read(chatRepositoryProvider);
+    
+    return Column(
+      children: [
+        // Header
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF202C33) : Colors.white,
+            border: Border(
+              bottom: BorderSide(
+                color: isDark ? const Color(0xFF2A3942) : const Color(0xFFD1D7DB),
+                width: 1,
+              ),
+            ),
+          ),
+          child: Row(
+            children: [
+              const Text(
+                'Channels',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+              ),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.add),
+                onPressed: () => context.go('/create-group?type=channel'),
+                tooltip: 'New channel',
+              ),
+            ],
+          ),
+        ),
+        // Channels List
+        Expanded(
+          child: FutureBuilder<List<GroupSummary>>(
+            future: chatRepo.getGroups(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              
+              final groups = snapshot.data ?? [];
+              final channels = groups.where((g) => g.type == 'channel').toList();
+              
+              if (channels.isEmpty) {
+                return Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.campaign,
+                        size: 64,
+                        color: isDark ? Colors.white38 : Colors.grey[400],
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'No channels yet',
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.grey[600],
+                        ),
                       ),
                     ],
                   ),
-                ),
-                // Conversations/Groups List (Unified list - no tabs)
-                Expanded(
-                  child: FutureBuilder<List<ConversationSummary>>(
-                    future: _conversationsFuture,
-                    builder: (context, conversationsSnapshot) {
-                      return FutureBuilder<List<GroupSummary>>(
-                        future: _groupsFuture,
-                        builder: (context, groupsSnapshot) {
-                          if (conversationsSnapshot.connectionState == ConnectionState.waiting ||
-                              groupsSnapshot.connectionState == ConnectionState.waiting) {
-                            return const Center(child: CircularProgressIndicator());
-                          }
-                          
-                          final conversations = conversationsSnapshot.data ?? [];
-                          final groups = groupsSnapshot.data ?? [];
-                          final allItems = <Widget>[];
-                          
-                          // Add conversations
-                          for (final conversation in conversations) {
-                            final isSelected = _selectedConversationId == conversation.id;
-                            allItems.add(
-                              GestureDetector(
-                                onLongPress: () => _showConversationMenu(context, conversation),
-                                onSecondaryTapDown: (details) {
-                                  _showConversationMenuAtPosition(context, conversation, details.globalPosition);
-                                },
-                                child: ConversationListItem(
-                                  conversation: conversation,
-                                  isSelected: isSelected,
-                                  onTap: () {
-                                    setState(() {
-                                      _selectedConversation = conversation;
-                                      _selectedConversationId = conversation.id;
-                                      _selectedGroup = null;
-                                      _selectedGroupId = null;
-                                    });
-                                  },
-                                ),
-                              ),
-                            );
-                          }
-                          
-                          // Add groups
-                          for (final group in groups) {
-                            final isSelected = _selectedGroupId == group.id;
-                            allItems.add(
-                              GestureDetector(
-                                onLongPress: () => _showGroupMenu(context, group),
-                                onSecondaryTapDown: (details) {
-                                  _showGroupMenuAtPosition(context, group, details.globalPosition);
-                                },
-                                child: GroupListItem(
-                                  group: group,
-                                  isSelected: isSelected,
-                                  onTap: () {
-                                    setState(() {
-                                      _selectedGroup = group;
-                                      _selectedGroupId = group.id;
-                                      _selectedConversation = null;
-                                      _selectedConversationId = null;
-                                    });
-                                  },
-                                ),
-                              ),
-                            );
-                          }
-                          
-                          if (allItems.isEmpty) {
-                            return Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.chat_bubble_outline,
-                                    size: 64,
-                                    color: isDark ? Colors.white38 : Colors.grey[400],
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Text(
-                                    'No conversations or groups yet',
-                                    style: TextStyle(
-                                      color: isDark ? Colors.white70 : Colors.grey[600],
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }
-                          
-                          return ListView(
-                            children: allItems,
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ],
+                );
+              }
+              
+              return ListView.builder(
+                itemCount: channels.length,
+                itemBuilder: (context, index) {
+                  final channel = channels[index];
+                  final isSelected = _selectedGroupId == channel.id;
+                  return GestureDetector(
+                    onLongPress: () => _showGroupMenu(context, channel),
+                    child: GroupListItem(
+                      group: channel,
+                      isSelected: isSelected,
+                      onTap: () {
+                        setState(() {
+                          _selectedGroup = channel;
+                          _selectedGroupId = channel.id;
+                          _selectedConversation = null;
+                          _selectedConversationId = null;
+                        });
+                      },
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+  
+  Widget _buildConversationsSidebar(BuildContext context, bool isDark) {
+    final userProfileAsync = ref.watch(currentUserProvider);
+    
+    return Column(
+      children: [
+        // Header
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF202C33) : Colors.white,
+            border: Border(
+              bottom: BorderSide(
+                color: isDark ? const Color(0xFF2A3942) : const Color(0xFFD1D7DB),
+                width: 1,
+              ),
             ),
           ),
-          // Main Content Area
-          Expanded(
-            child: _selectedConversation != null
-                ? ChatView(
-                    conversationId: _selectedConversation!.id,
-                    contactName: _selectedConversation!.otherUser.name,
-                    contactAvatar: _selectedConversation!.otherUser.avatarUrl,
-                    otherUser: _selectedConversation!.otherUser,
-                  )
-                : _selectedGroup != null
-                    ? GroupChatView(
-                        groupId: _selectedGroup!.id,
-                        groupName: _selectedGroup!.name,
-                        groupAvatarUrl: _selectedGroup!.avatarUrl,
-                        memberCount: _selectedGroup!.memberCount,
-                      )
-                    : Container(
-                        color: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
-                        child: Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.chat_bubble_outline,
-                                size: 64,
-                                color: isDark ? Colors.white38 : Colors.grey[400],
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                'Select a conversation to start chatting',
-                                style: TextStyle(
-                                  color: isDark ? Colors.white70 : Colors.grey[600],
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ],
-                          ),
+          child: Row(
+            children: [
+              userProfileAsync.when(
+                data: (userProfile) => CircleAvatar(
+                  radius: 24,
+                  backgroundImage: userProfile.avatarUrl != null
+                      ? CachedNetworkImageProvider(userProfile.avatarUrl!)
+                      : null,
+                  child: userProfile.avatarUrl == null
+                      ? Text(userProfile.name[0].toUpperCase(), style: const TextStyle(fontSize: 20))
+                      : null,
+                ),
+                loading: () => const CircleAvatar(radius: 24, child: CircularProgressIndicator()),
+                error: (_, __) => const CircleAvatar(radius: 24, child: Icon(Icons.person)),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      userProfileAsync.value?.name ?? 'User',
+                      style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // New chat/group button
+              IconButton(
+                icon: const Icon(Icons.add_circle_outline),
+                color: isDark ? Colors.white70 : Colors.grey[600],
+                tooltip: 'New chat',
+                onPressed: () => _showNewChatMenu(context),
+              ),
+              // Account Switcher (if multi-account enabled)
+              const AccountSwitcher(),
+              Consumer(
+                builder: (context, ref, child) {
+                  final worldFeedEnabled = featureEnabled(ref, 'world_feed');
+                  final emailChatEnabled = featureEnabled(ref, 'email_chat');
+                  final advancedAiEnabled = featureEnabled(ref, 'advanced_ai');
+                  
+                  final userProfileAsync = ref.watch(currentUserProvider);
+                  final hasUsername = userProfileAsync.when(
+                    data: (profile) => profile.hasUsername,
+                    loading: () => false,
+                    error: (_, __) => false,
+                  );
+
+                  return PopupMenuButton<String>(
+                    icon: Icon(Icons.more_vert, color: isDark ? Colors.white70 : Colors.grey[600]),
+                    onSelected: (value) {
+                      switch (value) {
+                        case 'calls':
+                          context.go('/calls');
+                          break;
+                        case 'world':
+                          context.go('/world');
+                          break;
+                        case 'mail':
+                          context.go('/mail');
+                          break;
+                        case 'ai':
+                          context.go('/ai');
+                          break;
+                        case 'settings':
+                          context.go('/settings');
+                          break;
+                        case 'profile':
+                          context.go('/profile');
+                          break;
+                        case 'contacts':
+                          context.go('/contacts');
+                          break;
+                        case 'search':
+                          context.go('/search');
+                          break;
+                        case 'starred':
+                          context.go('/starred');
+                          break;
+                        case 'archived':
+                          context.go('/archived');
+                          break;
+                        case 'broadcast_lists':
+                          context.go('/broadcast-lists');
+                          break;
+                        case 'two_factor':
+                          context.go('/two-factor');
+                          break;
+                        case 'linked_devices':
+                          context.go('/linked-devices');
+                          break;
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(value: 'calls', child: Row(
+                        children: [
+                          Icon(Icons.phone, size: 20),
+                          SizedBox(width: 12),
+                          Text('Calls'),
+                        ],
+                      )),
+                      if (worldFeedEnabled && hasUsername)
+                        const PopupMenuItem(value: 'world', child: Row(
+                          children: [
+                            Icon(Icons.explore, size: 20),
+                            SizedBox(width: 12),
+                            Text('World'),
+                          ],
+                        )),
+                      if (emailChatEnabled && hasUsername)
+                        const PopupMenuItem(value: 'mail', child: Row(
+                          children: [
+                            Icon(Icons.mail, size: 20),
+                            SizedBox(width: 12),
+                            Text('Mail'),
+                          ],
+                        )),
+                      if (advancedAiEnabled)
+                        const PopupMenuItem(value: 'ai', child: Row(
+                          children: [
+                            Icon(Icons.smart_toy, size: 20),
+                            SizedBox(width: 12),
+                            Text('AI Assistant'),
+                          ],
+                        )),
+                      const PopupMenuDivider(),
+                      const PopupMenuItem(value: 'settings', child: Text('Settings')),
+                      const PopupMenuItem(value: 'profile', child: Text('Profile')),
+                      const PopupMenuItem(value: 'contacts', child: Text('Contacts')),
+                      const PopupMenuItem(value: 'search', child: Text('Search')),
+                      const PopupMenuItem(value: 'starred', child: Text('Starred Messages')),
+                      const PopupMenuItem(value: 'archived', child: Text('Archived')),
+                      const PopupMenuItem(value: 'broadcast_lists', child: Text('Broadcast Lists')),
+                      const PopupMenuItem(value: 'two_factor', child: Text('Two-Step Verification')),
+                      const PopupMenuItem(value: 'linked_devices', child: Text('Linked Devices')),
+                    ],
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+        // Conversations/Groups List (Unified list - no tabs)
+        Expanded(
+          child: FutureBuilder<List<ConversationSummary>>(
+            future: _conversationsFuture,
+            builder: (context, conversationsSnapshot) {
+              return FutureBuilder<List<GroupSummary>>(
+                future: _groupsFuture,
+                builder: (context, groupsSnapshot) {
+                  if (conversationsSnapshot.connectionState == ConnectionState.waiting ||
+                      groupsSnapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  
+                  final conversations = conversationsSnapshot.data ?? [];
+                  final groups = groupsSnapshot.data ?? [];
+                  final allItems = <Widget>[];
+                  
+                  // Add conversations (only regular chats, not channels)
+                  for (final conversation in conversations) {
+                    final isSelected = _selectedConversationId == conversation.id;
+                    allItems.add(
+                      GestureDetector(
+                        onLongPress: () => _showConversationMenu(context, conversation),
+                        onSecondaryTapDown: (details) {
+                          _showConversationMenuAtPosition(context, conversation, details.globalPosition);
+                        },
+                        child: ConversationListItem(
+                          conversation: conversation,
+                          isSelected: isSelected,
+                          onTap: () {
+                            setState(() {
+                              _selectedConversation = conversation;
+                              _selectedConversationId = conversation.id;
+                              _selectedGroup = null;
+                              _selectedGroupId = null;
+                            });
+                          },
                         ),
                       ),
+                    );
+                  }
+                  
+                  // Add groups (only regular groups, not channels)
+                  for (final group in groups) {
+                    if (group.type == 'channel') continue; // Skip channels
+                    final isSelected = _selectedGroupId == group.id;
+                    allItems.add(
+                      GestureDetector(
+                        onLongPress: () => _showGroupMenu(context, group),
+                        onSecondaryTapDown: (details) {
+                          _showGroupMenuAtPosition(context, group, details.globalPosition);
+                        },
+                        child: GroupListItem(
+                          group: group,
+                          isSelected: isSelected,
+                          onTap: () {
+                            setState(() {
+                              _selectedGroup = group;
+                              _selectedGroupId = group.id;
+                              _selectedConversation = null;
+                              _selectedConversationId = null;
+                            });
+                          },
+                        ),
+                      ),
+                    );
+                  }
+                  
+                  if (allItems.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.chat_bubble_outline,
+                            size: 64,
+                            color: isDark ? Colors.white38 : Colors.grey[400],
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'No conversations or groups yet',
+                            style: TextStyle(
+                              color: isDark ? Colors.white70 : Colors.grey[600],
+                              fontSize: 16,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+                  
+                  return ListView(
+                    children: allItems,
+                  );
+                },
+              );
+            },
           ),
-        ],
+        ),
+      ],
+    );
+  }
+  
+  Widget _buildMainContent(BuildContext context, String currentRoute, bool isDark) {
+    // Handle channels route
+    if (currentRoute == '/channels' || currentRoute.startsWith('/channels')) {
+      if (_selectedGroup != null) {
+        return GroupChatView(
+          groupId: _selectedGroup!.id,
+          groupName: _selectedGroup!.name,
+          groupAvatarUrl: _selectedGroup!.avatarUrl,
+          memberCount: _selectedGroup!.memberCount,
+        );
+      }
+      return Container(
+        color: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.campaign,
+                size: 64,
+                color: isDark ? Colors.white38 : Colors.grey[400],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Select a channel to view',
+                style: TextStyle(
+                  color: isDark ? Colors.white70 : Colors.grey[600],
+                  fontSize: 16,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    
+    // Handle other routes (world, mail, ai, calls, live-broadcast) - show their content
+    if (currentRoute == '/world') {
+      return const WorldFeedScreen();
+    }
+    if (currentRoute == '/mail') {
+      return const MailScreen();
+    }
+    if (currentRoute == '/ai') {
+      return const AiChatScreen();
+    }
+    if (currentRoute == '/calls') {
+      return const CallsScreen();
+    }
+    if (currentRoute == '/status') {
+      return const StatusListScreen();
+    }
+    if (currentRoute == '/live-broadcast' || currentRoute.startsWith('/live')) {
+      return const LiveBroadcastScreen();
+    }
+    
+    // Default: show conversations/group chats
+    if (_selectedConversation != null) {
+      return ChatView(
+        conversationId: _selectedConversation!.id,
+        contactName: _selectedConversation!.otherUser.name,
+        contactAvatar: _selectedConversation!.otherUser.avatarUrl,
+        otherUser: _selectedConversation!.otherUser,
+      );
+    }
+    
+    if (_selectedGroup != null) {
+      return GroupChatView(
+        groupId: _selectedGroup!.id,
+        groupName: _selectedGroup!.name,
+        groupAvatarUrl: _selectedGroup!.avatarUrl,
+        memberCount: _selectedGroup!.memberCount,
+      );
+    }
+    
+    // Empty state
+    return Container(
+      color: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.chat_bubble_outline,
+              size: 64,
+              color: isDark ? Colors.white38 : Colors.grey[400],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Select a conversation to start chatting',
+              style: TextStyle(
+                color: isDark ? Colors.white70 : Colors.grey[600],
+                fontSize: 16,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -12,8 +12,6 @@ import 'features/contacts/contacts_screen.dart';
 import 'features/search/search_screen.dart';
 import 'features/status/create_status_screen.dart';
 import 'features/chats/create_group_screen.dart';
-import 'features/calls/calls_screen.dart';
-import 'features/channels/channels_screen.dart';
 import 'features/starred/starred_screen.dart';
 import 'features/archive/archived_screen.dart';
 import 'features/broadcast/broadcast_lists_screen.dart';
@@ -23,9 +21,6 @@ import 'features/privacy/privacy_settings_screen.dart';
 import 'features/storage/storage_usage_screen.dart';
 import 'features/media_auto_download/media_auto_download_screen.dart';
 import 'features/notifications/notification_settings_screen.dart';
-import 'features/world/world_feed_screen.dart';
-import 'features/mail/mail_screen.dart';
-import 'features/ai/ai_chat_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -42,10 +37,41 @@ final routerProvider = Provider<GoRouter>((ref) {
           return OtpVerifyScreen(phone: phone);
         },
       ),
+      // Main app layout - all routes that should have sidebar
       GoRoute(
         path: '/chats',
         builder: (context, state) => const DesktopChatScreen(),
       ),
+      // Routes that should use DesktopChatScreen layout with sidebar
+      GoRoute(
+        path: '/channels',
+        builder: (context, state) => const DesktopChatScreen(),
+      ),
+      GoRoute(
+        path: '/world',
+        builder: (context, state) => const DesktopChatScreen(),
+      ),
+      GoRoute(
+        path: '/mail',
+        builder: (context, state) => const DesktopChatScreen(),
+      ),
+      GoRoute(
+        path: '/ai',
+        builder: (context, state) => const DesktopChatScreen(),
+      ),
+      GoRoute(
+        path: '/calls',
+        builder: (context, state) => const DesktopChatScreen(),
+      ),
+      GoRoute(
+        path: '/status',
+        builder: (context, state) => const DesktopChatScreen(),
+      ),
+      GoRoute(
+        path: '/live-broadcast',
+        builder: (context, state) => const DesktopChatScreen(),
+      ),
+      // Settings and other screens (full screen)
       GoRoute(
         path: '/settings',
         builder: (context, state) => const SettingsScreen(),
@@ -77,14 +103,6 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/create-group',
         builder: (context, state) => const CreateGroupScreen(),
-      ),
-      GoRoute(
-        path: '/calls',
-        builder: (context, state) => const CallsScreen(),
-      ),
-      GoRoute(
-        path: '/channels',
-        builder: (context, state) => const ChannelsScreen(),
       ),
       GoRoute(
         path: '/starred',
@@ -122,19 +140,6 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/notification-settings',
         builder: (context, state) => const NotificationSettingsScreen(),
       ),
-      // PHASE 2: New Features
-      GoRoute(
-        path: '/world',
-        builder: (context, state) => const WorldFeedScreen(),
-      ),
-      GoRoute(
-        path: '/mail',
-        builder: (context, state) => const MailScreen(),
-      ),
-      GoRoute(
-        path: '/ai',
-        builder: (context, state) => const AiChatScreen(),
-      ),
     ],
     redirect: (context, state) {
       final authState = ref.read(authProvider);
@@ -142,8 +147,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isLoggingIn = state.uri.path == '/login';
       final isVerifying = state.uri.path == '/verify';
 
+      // If not logged in and trying to access protected routes, go to login
       if (!isLoggedIn && !isLoggingIn && !isVerifying) return '/login';
-      if (isLoggedIn && (isLoggingIn || isVerifying)) return '/chats';
+      
+      // If logged in and on login/verify page, go to chats (but only if token is validated)
+      // Don't redirect if currently verifying - let user complete OTP flow
+      if (isLoggedIn && isLoggingIn && !isVerifying) return '/chats';
+      
       return null;
     },
   );

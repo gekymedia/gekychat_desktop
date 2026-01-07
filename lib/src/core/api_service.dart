@@ -50,10 +50,10 @@ class ApiService {
           final path = e.requestOptions.path;
           final statusCode = e.response?.statusCode;
           
-          // Don't log 401 for linked-devices if user might not be authenticated yet
+          // Don't log 401 for endpoints that are expected to fail when not authenticated
           // Don't log 404 for linked-devices/others as it might mean no other devices exist
           final shouldSuppress = 
-              (statusCode == 401 && path.contains('/linked-devices')) ||
+              (statusCode == 401 && (path.contains('/linked-devices') || path.contains('/feature-flags') || path == '/me' || path == '/api/v1/me')) ||
               (statusCode == 404 && path.contains('/linked-devices/others'));
           
           if (!shouldSuppress) {
@@ -291,12 +291,24 @@ class ApiService {
   Future<Response> updateProfile({
     String? name,
     String? about,
+    String? email,
+    String? phone,
+    String? username,
+    String? bio,
+    int? dobMonth,
+    int? dobDay,
     File? avatar,
   }) async {
     if (avatar != null) {
       final formData = FormData.fromMap({
         if (name != null) 'name': name,
         if (about != null) 'about': about,
+        if (email != null) 'email': email,
+        if (phone != null) 'phone': phone,
+        if (username != null) 'username': username,
+        if (bio != null) 'bio': bio,
+        if (dobMonth != null) 'dob_month': dobMonth,
+        if (dobDay != null) 'dob_day': dobDay,
         'avatar': await MultipartFile.fromFile(
           avatar.path,
           filename: avatar.path.split(Platform.pathSeparator).last,
@@ -307,6 +319,12 @@ class ApiService {
       final data = <String, dynamic>{};
       if (name != null) data['name'] = name;
       if (about != null) data['about'] = about;
+      if (email != null) data['email'] = email;
+      if (phone != null) data['phone'] = phone;
+      if (username != null) data['username'] = username;
+      if (bio != null) data['bio'] = bio;
+      if (dobMonth != null) data['dob_month'] = dobMonth;
+      if (dobDay != null) data['dob_day'] = dobDay;
       return put('/me', data: data.isEmpty ? null : data);
     }
   }
