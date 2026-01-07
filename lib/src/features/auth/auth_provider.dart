@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dio/dio.dart';
 import '../../core/providers.dart';
 import '../../core/api_service.dart';
+import '../../core/device_id.dart';
 
 final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
   final apiService = ref.read(apiServiceProvider);
@@ -91,13 +92,18 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<void> verifyOtp(String phone, String otp) async {
     state = state.copyWith(isLoading: true, error: null);
     try {
+      final deviceId = await getOrCreateDeviceId();
+      
       final response = await _apiService.post('/auth/verify', data: {
         'phone': phone,
         'code': otp,
+        'device_id': deviceId,
+        'device_type': 'desktop',
       });
       
       final token = response.data['token'];
       final user = response.data['user'];
+      final accountId = response.data['account_id'];
       
       if (token != null) {
         await _apiService.saveToken(token);
@@ -105,6 +111,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
         if (user != null && user['id'] != null) {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setInt('user_id', user['id']);
+          if (accountId != null) {
+            await prefs.setInt('current_account_id', accountId);
+          }
         }
         
         state = state.copyWith(isLoading: false, token: token);

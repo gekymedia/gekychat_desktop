@@ -26,8 +26,13 @@ import '../privacy/privacy_settings_screen.dart';
 import '../notifications/notification_settings_screen.dart';
 import '../media_auto_download/media_auto_download_screen.dart';
 import '../storage/storage_usage_screen.dart';
+import '../world/world_feed_screen.dart';
+import '../mail/mail_screen.dart';
+import '../ai/ai_chat_screen.dart';
 import '../../core/providers.dart';
 import '../../core/session.dart';
+import '../../core/feature_flags.dart';
+import '../multi_account/account_switcher.dart';
 import '../../theme/app_theme.dart';
 
 class DesktopChatScreen extends ConsumerStatefulWidget {
@@ -405,50 +410,111 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Sing
                         tooltip: 'New chat',
                         onPressed: () => _showNewChatMenu(context),
                       ),
-                      PopupMenuButton<String>(
-                        icon: Icon(Icons.more_vert, color: isDark ? Colors.white70 : Colors.grey[600]),
-                        onSelected: (value) {
-                          switch (value) {
-                            case 'settings':
-                              context.go('/settings');
-                              break;
-                            case 'profile':
-                              context.go('/profile');
-                              break;
-                            case 'contacts':
-                              context.go('/contacts');
-                              break;
-                            case 'search':
-                              context.go('/search');
-                              break;
-                            case 'starred':
-                              context.go('/starred');
-                              break;
-                            case 'archived':
-                              context.go('/archived');
-                              break;
-                            case 'broadcast_lists':
-                              context.go('/broadcast-lists');
-                              break;
-                            case 'two_factor':
-                              context.go('/two-factor');
-                              break;
-                            case 'linked_devices':
-                              context.go('/linked-devices');
-                              break;
-                          }
+                      // Account Switcher (if multi-account enabled)
+                      const AccountSwitcher(),
+                      Consumer(
+                        builder: (context, ref, child) {
+                          final worldFeedEnabled = featureEnabled(ref, 'world_feed');
+                          final emailChatEnabled = featureEnabled(ref, 'email_chat');
+                          final advancedAiEnabled = featureEnabled(ref, 'advanced_ai');
+                          
+                          final userProfileAsync = ref.watch(currentUserProvider);
+                          final hasUsername = userProfileAsync.when(
+                            data: (profile) => profile.hasUsername,
+                            loading: () => false,
+                            error: (_, __) => false,
+                          );
+
+                          return PopupMenuButton<String>(
+                            icon: Icon(Icons.more_vert, color: isDark ? Colors.white70 : Colors.grey[600]),
+                            onSelected: (value) {
+                              switch (value) {
+                                case 'calls':
+                                  context.go('/calls');
+                                  break;
+                                case 'world':
+                                  context.go('/world');
+                                  break;
+                                case 'mail':
+                                  context.go('/mail');
+                                  break;
+                                case 'ai':
+                                  context.go('/ai');
+                                  break;
+                                case 'settings':
+                                  context.go('/settings');
+                                  break;
+                                case 'profile':
+                                  context.go('/profile');
+                                  break;
+                                case 'contacts':
+                                  context.go('/contacts');
+                                  break;
+                                case 'search':
+                                  context.go('/search');
+                                  break;
+                                case 'starred':
+                                  context.go('/starred');
+                                  break;
+                                case 'archived':
+                                  context.go('/archived');
+                                  break;
+                                case 'broadcast_lists':
+                                  context.go('/broadcast-lists');
+                                  break;
+                                case 'two_factor':
+                                  context.go('/two-factor');
+                                  break;
+                                case 'linked_devices':
+                                  context.go('/linked-devices');
+                                  break;
+                              }
+                            },
+                            itemBuilder: (context) => [
+                              const PopupMenuItem(value: 'calls', child: Row(
+                                children: [
+                                  Icon(Icons.phone, size: 20),
+                                  SizedBox(width: 12),
+                                  Text('Calls'),
+                                ],
+                              )),
+                              if (worldFeedEnabled && hasUsername)
+                                const PopupMenuItem(value: 'world', child: Row(
+                                  children: [
+                                    Icon(Icons.explore, size: 20),
+                                    SizedBox(width: 12),
+                                    Text('World'),
+                                  ],
+                                )),
+                              if (emailChatEnabled && hasUsername)
+                                const PopupMenuItem(value: 'mail', child: Row(
+                                  children: [
+                                    Icon(Icons.mail, size: 20),
+                                    SizedBox(width: 12),
+                                    Text('Mail'),
+                                  ],
+                                )),
+                              if (advancedAiEnabled)
+                                const PopupMenuItem(value: 'ai', child: Row(
+                                  children: [
+                                    Icon(Icons.smart_toy, size: 20),
+                                    SizedBox(width: 12),
+                                    Text('AI Assistant'),
+                                  ],
+                                )),
+                              const PopupMenuDivider(),
+                              const PopupMenuItem(value: 'settings', child: Text('Settings')),
+                              const PopupMenuItem(value: 'profile', child: Text('Profile')),
+                              const PopupMenuItem(value: 'contacts', child: Text('Contacts')),
+                              const PopupMenuItem(value: 'search', child: Text('Search')),
+                              const PopupMenuItem(value: 'starred', child: Text('Starred Messages')),
+                              const PopupMenuItem(value: 'archived', child: Text('Archived')),
+                              const PopupMenuItem(value: 'broadcast_lists', child: Text('Broadcast Lists')),
+                              const PopupMenuItem(value: 'two_factor', child: Text('Two-Step Verification')),
+                              const PopupMenuItem(value: 'linked_devices', child: Text('Linked Devices')),
+                            ],
+                          );
                         },
-                        itemBuilder: (context) => [
-                          const PopupMenuItem(value: 'settings', child: Text('Settings')),
-                          const PopupMenuItem(value: 'profile', child: Text('Profile')),
-                          const PopupMenuItem(value: 'contacts', child: Text('Contacts')),
-                          const PopupMenuItem(value: 'search', child: Text('Search')),
-                          const PopupMenuItem(value: 'starred', child: Text('Starred Messages')),
-                          const PopupMenuItem(value: 'archived', child: Text('Archived')),
-                          const PopupMenuItem(value: 'broadcast_lists', child: Text('Broadcast Lists')),
-                          const PopupMenuItem(value: 'two_factor', child: Text('Two-Step Verification')),
-                          const PopupMenuItem(value: 'linked_devices', child: Text('Linked Devices')),
-                        ],
                       ),
                     ],
                   ),

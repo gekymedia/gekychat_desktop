@@ -22,8 +22,6 @@ import '../../quick_replies/quick_replies_repository.dart';
 import '../../../theme/app_theme.dart';
 import '../../calls/call_screen.dart';
 import '../../calls/providers.dart';
-import '../../calls/call_screen.dart';
-import '../../calls/providers.dart';
 
 class ChatView extends ConsumerStatefulWidget {
   final int conversationId;

@@ -556,5 +556,88 @@ class ApiService {
       });
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // PHASE 2: Feature Flags
+  // ---------------------------------------------------------------------------
+
+  Future<Response> getFeatureFlags({String? platform}) => 
+    get('/feature-flags', queryParameters: platform != null ? {'platform': platform} : null);
+
+  // ---------------------------------------------------------------------------
+  // PHASE 2: World Feed
+  // ---------------------------------------------------------------------------
+
+  Future<Response> getWorldFeed({int? page}) => 
+    get('/world-feed', queryParameters: page != null ? {'page': page} : null);
+  Future<Response> createWorldFeedPost({required String body, List<String>? mediaUrls, String? videoUrl}) =>
+    post('/world-feed/posts', data: {
+      'body': body,
+      if (mediaUrls != null && mediaUrls.isNotEmpty) 'media_urls': mediaUrls,
+      if (videoUrl != null) 'video_url': videoUrl,
+    });
+  Future<Response> likeWorldFeedPost(int postId) => post('/world-feed/posts/$postId/like');
+  Future<Response> getWorldFeedPostComments(int postId, {int? page}) =>
+    get('/world-feed/posts/$postId/comments', queryParameters: page != null ? {'page': page} : null);
+  Future<Response> addWorldFeedComment(int postId, {required String body, int? parentCommentId}) =>
+    post('/world-feed/posts/$postId/comments', data: {
+      'body': body,
+      if (parentCommentId != null) 'parent_comment_id': parentCommentId,
+    });
+  Future<Response> followWorldFeedCreator(int creatorId) =>
+    post('/world-feed/creators/$creatorId/follow');
+
+  // ---------------------------------------------------------------------------
+  // PHASE 2: Email Chat (Mail)
+  // ---------------------------------------------------------------------------
+
+  Future<Response> getMailConversations() => get('/mail');
+  Future<Response> checkUsername() => get('/mail/check-username');
+  Future<Response> getMailConversationMessages(int conversationId, {int? perPage}) =>
+    get('/mail/conversations/$conversationId/messages', queryParameters: perPage != null ? {'per_page': perPage} : null);
+  Future<Response> replyToMailMessage(int messageId, {required String body}) =>
+    post('/mail/messages/$messageId/reply', data: {'body': body});
+
+  // ---------------------------------------------------------------------------
+  // PHASE 2: Live Broadcast
+  // ---------------------------------------------------------------------------
+
+  Future<Response> startLiveBroadcast({required String title}) =>
+    post('/live/start', data: {'title': title});
+  Future<Response> joinLiveBroadcast(int broadcastId) =>
+    post('/live/$broadcastId/join');
+  Future<Response> endLiveBroadcast(int broadcastId) =>
+    post('/live/$broadcastId/end');
+  Future<Response> getActiveLiveBroadcasts() => get('/live/active');
+  Future<Response> sendLiveBroadcastChat(int broadcastId, {required String message}) =>
+    post('/live/$broadcastId/chat', data: {'message': message});
+  Future<Response> getLiveKitToken({required String roomName, required String role}) =>
+    post('/live/kit/token', data: {'room_name': roomName, 'role': role});
+
+  // ---------------------------------------------------------------------------
+  // PHASE 2: Multi-Account Support
+  // ---------------------------------------------------------------------------
+
+  Future<Response> getAccounts({required String deviceId, required String deviceType}) =>
+    get('/auth/accounts', queryParameters: {'device_id': deviceId, 'device_type': deviceType});
+  Future<Response> switchAccount({
+    required String deviceId,
+    required String deviceType,
+    required int accountId,
+  }) =>
+    post('/auth/switch-account', data: {
+      'device_id': deviceId,
+      'device_type': deviceType,
+      'account_id': accountId,
+    });
+  Future<Response> removeAccount({
+    required String deviceId,
+    required String deviceType,
+    required int accountId,
+  }) =>
+    delete('/auth/accounts/$accountId', data: {
+      'device_id': deviceId,
+      'device_type': deviceType,
+    });
 }
 

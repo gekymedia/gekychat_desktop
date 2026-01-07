@@ -22,6 +22,9 @@ import 'features/privacy/privacy_settings_screen.dart';
 import 'features/storage/storage_usage_screen.dart';
 import 'features/media_auto_download/media_auto_download_screen.dart';
 import 'features/notifications/notification_settings_screen.dart';
+import 'features/world/world_feed_screen.dart';
+import 'features/mail/mail_screen.dart';
+import 'features/ai/ai_chat_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -113,6 +116,19 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/notification-settings',
         builder: (context, state) => const NotificationSettingsScreen(),
+      ),
+      // PHASE 2: New Features
+      GoRoute(
+        path: '/world',
+        builder: (context, state) => const WorldFeedScreen(),
+      ),
+      GoRoute(
+        path: '/mail',
+        builder: (context, state) => const MailScreen(),
+      ),
+      GoRoute(
+        path: '/ai',
+        builder: (context, state) => const AiChatScreen(),
       ),
     ],
     redirect: (context, state) {

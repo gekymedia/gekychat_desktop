@@ -5,6 +5,8 @@ import 'package:intl/intl.dart';
 import 'call_repository.dart';
 import 'models.dart';
 import 'providers.dart';
+import '../../core/feature_flags.dart';
+import '../../core/session.dart';
 
 final callLogsProvider = FutureProvider<List<CallLog>>((ref) async {
   final repo = ref.read(callRepositoryProvider);
@@ -24,7 +26,29 @@ class CallsScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Call Logs'),
       ),
-      body: callLogsAsync.when(
+      body: Column(
+        children: [
+          // Live Broadcasts Section (if enabled and user has username)
+          Consumer(
+            builder: (context, ref, child) {
+              final liveBroadcastEnabled = featureEnabled(ref, 'live_broadcast');
+              final userProfileAsync = ref.watch(currentUserProvider);
+              
+              return userProfileAsync.when(
+                data: (userProfile) {
+                  if (!liveBroadcastEnabled || !userProfile.hasUsername) {
+                    return const SizedBox.shrink();
+                  }
+                  return _LiveBroadcastsSection(isDark: isDark);
+                },
+                loading: () => const SizedBox.shrink(),
+                error: (_, __) => const SizedBox.shrink(),
+              );
+            },
+          ),
+          // Call Logs Section
+          Expanded(
+            child: callLogsAsync.when(
         data: (callLogs) {
           if (callLogs.isEmpty) {
             return Center(
@@ -80,24 +104,27 @@ class CallsScreen extends ConsumerWidget {
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                'Error loading call logs',
-                style: TextStyle(
-                  color: isDark ? Colors.white70 : Colors.grey[600],
+              error: (error, _) => Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      'Error loading call logs',
+                      style: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.grey[600],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ElevatedButton(
+                      onPressed: () => ref.invalidate(callLogsProvider),
+                      child: const Text('Retry'),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 8),
-              ElevatedButton(
-                onPressed: () => ref.invalidate(callLogsProvider),
-                child: const Text('Retry'),
-              ),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -235,6 +262,84 @@ class _CallLogItem extends StatelessWidget {
 
   String _formatTime(DateTime time) {
     return DateFormat('h:mm a').format(time);
+  }
+}
+
+/// PHASE 2: Live Broadcasts Section
+class _LiveBroadcastsSection extends StatelessWidget {
+  final bool isDark;
+
+  const _LiveBroadcastsSection({required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF202C33) : Colors.white,
+        border: Border(
+          bottom: BorderSide(
+            color: isDark ? const Color(0xFF2A3942) : const Color(0xFFD1D7DB),
+            width: 1,
+          ),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.live_tv, color: Colors.red, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'Live Broadcasts',
+                style: TextStyle(
+                  color: isDark ? Colors.white : Colors.black,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Empty state for live broadcasts
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.videocam_off_outlined,
+                    size: 48,
+                    color: isDark ? Colors.white38 : Colors.grey[400],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'No active broadcasts',
+                    style: TextStyle(
+                      color: isDark ? Colors.white70 : Colors.grey[600],
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      // TODO: Start live broadcast
+                    },
+                    icon: const Icon(Icons.live_tv),
+                    label: const Text('Go Live'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
