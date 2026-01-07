@@ -46,13 +46,25 @@ class ApiService {
           return handler.next(options);
         },
         onError: (DioException e, handler) {
-          // Log detailed error information for debugging
-          if (e.response != null) {
-            debugPrint('❌ API Error ${e.response?.statusCode}: ${e.requestOptions.path}');
-            debugPrint('   Response: ${e.response?.data}');
-          } else {
-            debugPrint('❌ API Error: ${e.type} - ${e.message}');
-            debugPrint('   Path: ${e.requestOptions.path}');
+          // Suppress expected errors that are handled gracefully
+          final path = e.requestOptions.path;
+          final statusCode = e.response?.statusCode;
+          
+          // Don't log 401 for linked-devices if user might not be authenticated yet
+          // Don't log 404 for linked-devices/others as it might mean no other devices exist
+          final shouldSuppress = 
+              (statusCode == 401 && path.contains('/linked-devices')) ||
+              (statusCode == 404 && path.contains('/linked-devices/others'));
+          
+          if (!shouldSuppress) {
+            // Log detailed error information for debugging
+            if (e.response != null) {
+              debugPrint('❌ API Error ${e.response?.statusCode}: ${e.requestOptions.path}');
+              debugPrint('   Response: ${e.response?.data}');
+            } else {
+              debugPrint('❌ API Error: ${e.type} - ${e.message}');
+              debugPrint('   Path: ${e.requestOptions.path}');
+            }
           }
           return handler.next(e);
         },

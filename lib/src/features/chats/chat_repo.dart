@@ -257,6 +257,10 @@ class ChatRepository {
     } catch (e) {
       if (e is DioException) {
         final statusCode = e.response?.statusCode;
+        // Return empty list on 401 (unauthenticated) instead of throwing
+        if (statusCode == 401) {
+          return [];
+        }
         final message = e.response?.data is Map 
             ? e.response?.data['message'] ?? e.message
             : e.message;

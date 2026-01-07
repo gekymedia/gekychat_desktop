@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'linked_devices_repository.dart';
 import 'models.dart';
@@ -25,6 +26,16 @@ class LinkedDevicesScreen extends ConsumerWidget {
         title: const Text('Linked Devices'),
         backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
         foregroundColor: isDark ? Colors.white : Colors.black,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/chats');
+            }
+          },
+        ),
       ),
       body: devicesAsync.when(
         data: (devices) {

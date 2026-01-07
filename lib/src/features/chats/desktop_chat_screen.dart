@@ -33,6 +33,7 @@ import '../../core/providers.dart';
 import '../../core/session.dart';
 import '../../core/feature_flags.dart';
 import '../multi_account/account_switcher.dart';
+import '../../widgets/side_nav.dart';
 import '../../theme/app_theme.dart';
 
 class DesktopChatScreen extends ConsumerStatefulWidget {
@@ -42,8 +43,7 @@ class DesktopChatScreen extends ConsumerStatefulWidget {
   ConsumerState<DesktopChatScreen> createState() => _DesktopChatScreenState();
 }
 
-class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
-  late TabController _tabController;
+class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with WidgetsBindingObserver {
   ConversationSummary? _selectedConversation;
   GroupSummary? _selectedGroup;
   int? _selectedConversationId;
@@ -56,15 +56,6 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Sing
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _tabController = TabController(length: 4, vsync: this);
-    _tabController.addListener(() {
-      setState(() {
-        _selectedConversation = null;
-        _selectedGroup = null;
-        _selectedConversationId = null;
-        _selectedGroupId = null;
-      });
-    });
     _loadConversations();
     _loadGroups();
   }
@@ -72,7 +63,6 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Sing
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _tabController.dispose();
     super.dispose();
   }
   
@@ -350,10 +340,16 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Sing
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final userProfileAsync = ref.watch(currentUserProvider);
 
+    // Get current route for side nav
+    final currentRoute = GoRouterState.of(context).uri.path;
+
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
       body: Row(
         children: [
+          // Side Nav (like web version)
+          SideNav(currentRoute: currentRoute),
+          
           // Sidebar
           Container(
             width: 400,
@@ -519,76 +515,28 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Sing
                     ],
                   ),
                 ),
-                // Tabs
-                TabBar(
-                  controller: _tabController,
-                  labelColor: isDark ? Colors.white : Colors.black,
-                  unselectedLabelColor: isDark ? Colors.white54 : Colors.grey[600],
-                  indicatorColor: AppTheme.primaryGreen,
-                  tabs: const [
-                    Tab(text: 'Chats'),
-                    Tab(text: 'Status'),
-                    Tab(text: 'Groups'),
-                    Tab(text: 'Channels'),
-                  ],
-                ),
-                // Tab Views
+                // Conversations/Groups List (Unified list - no tabs)
                 Expanded(
-                  child: TabBarView(
-                    controller: _tabController,
-                    children: [
-                      // Chats Tab
-                      FutureBuilder<List<ConversationSummary>>(
-                        future: _conversationsFuture,
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState == ConnectionState.waiting) {
+                  child: FutureBuilder<List<ConversationSummary>>(
+                    future: _conversationsFuture,
+                    builder: (context, conversationsSnapshot) {
+                      return FutureBuilder<List<GroupSummary>>(
+                        future: _groupsFuture,
+                        builder: (context, groupsSnapshot) {
+                          if (conversationsSnapshot.connectionState == ConnectionState.waiting ||
+                              groupsSnapshot.connectionState == ConnectionState.waiting) {
                             return const Center(child: CircularProgressIndicator());
-                          } else if (snapshot.hasError) {
-                            return Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text('Error: ${snapshot.error}'),
-                                  ElevatedButton(
-                                    onPressed: _loadConversations,
-                                    child: const Text('Retry'),
-                                  ),
-                                ],
-                              ),
-                            );
-                          } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                            return Center(
-                              child: Padding(
-                                padding: const EdgeInsets.all(32.0),
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.chat_bubble_outline,
-                                      size: 64,
-                                      color: isDark ? Colors.white38 : Colors.grey[400],
-                                    ),
-                                    const SizedBox(height: 16),
-                                    Text(
-                                      'No conversations yet',
-                                      style: TextStyle(
-                                        color: isDark ? Colors.white70 : Colors.grey[600],
-                                        fontSize: 16,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
                           }
-
-                          final conversations = snapshot.data!;
-                          return ListView.builder(
-                            itemCount: conversations.length,
-                            itemBuilder: (context, index) {
-                              final conversation = conversations[index];
-                              final isSelected = _selectedConversationId == conversation.id;
-                              return GestureDetector(
+                          
+                          final conversations = conversationsSnapshot.data ?? [];
+                          final groups = groupsSnapshot.data ?? [];
+                          final allItems = <Widget>[];
+                          
+                          // Add conversations
+                          for (final conversation in conversations) {
+                            final isSelected = _selectedConversationId == conversation.id;
+                            allItems.add(
+                              GestureDetector(
                                 onLongPress: () => _showConversationMenu(context, conversation),
                                 onSecondaryTapDown: (details) {
                                   _showConversationMenuAtPosition(context, conversation, details.globalPosition);
@@ -605,57 +553,15 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Sing
                                     });
                                   },
                                 ),
-                              );
-                            },
-                          );
-                        },
-                      ),
-                      // Status Tab
-                      Container(
-                        color: isDark ? const Color(0xFF111B21) : Colors.white,
-                        child: const StatusListScreen(),
-                      ),
-                      // Groups Tab
-                      FutureBuilder<List<GroupSummary>>(
-                        future: _groupsFuture,
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState == ConnectionState.waiting) {
-                            return const Center(child: CircularProgressIndicator());
-                          } else if (snapshot.hasError) {
-                            return Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text('Error: ${snapshot.error}'),
-                                  ElevatedButton(
-                                    onPressed: _loadGroups,
-                                    child: const Text('Retry'),
-                                  ),
-                                ],
-                              ),
-                            );
-                          } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                            return Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const Text('No groups yet'),
-                                  ElevatedButton(
-                                    onPressed: () => context.go('/group/create'),
-                                    child: const Text('Create Group'),
-                                  ),
-                                ],
                               ),
                             );
                           }
-
-                          final groups = snapshot.data!;
-                          return ListView.builder(
-                            itemCount: groups.length,
-                            itemBuilder: (context, index) {
-                              final group = groups[index];
-                              final isSelected = _selectedGroupId == group.id;
-                              return GestureDetector(
+                          
+                          // Add groups
+                          for (final group in groups) {
+                            final isSelected = _selectedGroupId == group.id;
+                            allItems.add(
+                              GestureDetector(
                                 onLongPress: () => _showGroupMenu(context, group),
                                 onSecondaryTapDown: (details) {
                                   _showGroupMenuAtPosition(context, group, details.globalPosition);
@@ -672,78 +578,39 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Sing
                                     });
                                   },
                                 ),
-                              );
-                            },
-                          );
-                        },
-                      ),
-                      // Channels Tab
-                      FutureBuilder<List<GroupSummary>>(
-                        future: _groupsFuture,
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState == ConnectionState.waiting) {
-                            return const Center(child: CircularProgressIndicator());
-                          } else if (snapshot.hasError) {
+                              ),
+                            );
+                          }
+                          
+                          if (allItems.isEmpty) {
                             return Center(
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Text('Error: ${snapshot.error}'),
-                                  ElevatedButton(
-                                    onPressed: _loadGroups,
-                                    child: const Text('Retry'),
+                                  Icon(
+                                    Icons.chat_bubble_outline,
+                                    size: 64,
+                                    color: isDark ? Colors.white38 : Colors.grey[400],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    'No conversations or groups yet',
+                                    style: TextStyle(
+                                      color: isDark ? Colors.white70 : Colors.grey[600],
+                                      fontSize: 16,
+                                    ),
                                   ),
                                 ],
                               ),
                             );
                           }
-
-                          final allGroups = snapshot.data ?? [];
-                          final channels = allGroups.where((g) => g.type == 'channel').toList();
-
-                          if (channels.isEmpty) {
-                            return Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const Text('No channels yet'),
-                                  ElevatedButton(
-                                    onPressed: () => context.go('/create-group?type=channel'),
-                                    child: const Text('Create Channel'),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }
-
-                          return ListView.builder(
-                            itemCount: channels.length,
-                            itemBuilder: (context, index) {
-                              final channel = channels[index];
-                              final isSelected = _selectedGroupId == channel.id;
-                              return GestureDetector(
-                                onLongPress: () => _showGroupMenu(context, channel),
-                                onSecondaryTapDown: (details) {
-                                  _showGroupMenuAtPosition(context, channel, details.globalPosition);
-                                },
-                                child: GroupListItem(
-                                  group: channel,
-                                  isSelected: isSelected,
-                                  onTap: () {
-                                    setState(() {
-                                      _selectedGroup = channel;
-                                      _selectedGroupId = channel.id;
-                                      _selectedConversation = null;
-                                      _selectedConversationId = null;
-                                    });
-                                  },
-                                ),
-                              );
-                            },
+                          
+                          return ListView(
+                            children: allItems,
                           );
                         },
-                      ),
-                    ],
+                      );
+                    },
                   ),
                 ),
               ],

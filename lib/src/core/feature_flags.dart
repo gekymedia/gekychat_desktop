@@ -12,10 +12,20 @@ class FeatureFlagService {
     try {
       final response = await _apiService.getFeatureFlags(platform: platform);
       if (response.data is Map && response.data['data'] != null) {
-        return Map<String, bool>.from(response.data['data']);
+        // API returns array of flags, convert to map
+        final flags = response.data['data'] as List<dynamic>;
+        final Map<String, bool> result = {};
+        for (var flag in flags) {
+          if (flag is Map) {
+            result[flag['key'] as String] = flag['enabled'] as bool? ?? false;
+          }
+        }
+        return result;
       }
       return {};
     } catch (e) {
+      // Return empty map on error (e.g., 401 unauthenticated)
+      // Features will be disabled by default
       return {};
     }
   }
