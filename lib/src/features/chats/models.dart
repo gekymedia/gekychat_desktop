@@ -194,6 +194,13 @@ class MessageAttachment {
   final bool isImage;
   final bool isVideo;
   final bool isDocument;
+  // MEDIA COMPRESSION fields
+  final String? compressionStatus; // 'pending', 'processing', 'completed', 'failed'
+  final String? compressedUrl;
+  final String? thumbnailUrl;
+  final int? originalSize;
+  final int? compressedSize;
+  final String? compressionLevel; // 'low', 'medium', 'high'
 
   MessageAttachment({
     required this.id,
@@ -202,6 +209,12 @@ class MessageAttachment {
     required this.isImage,
     required this.isVideo,
     required this.isDocument,
+    this.compressionStatus,
+    this.compressedUrl,
+    this.thumbnailUrl,
+    this.originalSize,
+    this.compressedSize,
+    this.compressionLevel,
   });
 
   factory MessageAttachment.fromJson(Map<String, dynamic> json) {
@@ -212,8 +225,24 @@ class MessageAttachment {
       isImage: json['is_image'] ?? false,
       isVideo: json['is_video'] ?? false,
       isDocument: json['is_document'] ?? false,
+      // MEDIA COMPRESSION fields
+      compressionStatus: json['compression_status'] as String?,
+      compressedUrl: json['compressed_url'] as String?,
+      thumbnailUrl: json['thumbnail_url'] as String?,
+      originalSize: json['original_size'] as int?,
+      compressedSize: json['compressed_size'] as int?,
+      compressionLevel: json['compression_level'] as String?,
     );
   }
+
+  /// Get the best available URL (compressed if available, otherwise original)
+  String get displayUrl => compressedUrl ?? url;
+
+  /// Check if compression is complete
+  bool get isCompressed => compressionStatus == 'completed' && compressedUrl != null;
+
+  /// Check if compression is in progress
+  bool get isCompressing => compressionStatus == 'processing' || compressionStatus == 'pending';
 }
 
 class Reaction {

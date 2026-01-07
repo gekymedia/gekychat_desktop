@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/providers.dart';
 import 'profile_edit_screen.dart';
 import '../quick_replies/quick_replies_screen.dart';
+import '../auto_reply/auto_reply_screen.dart';
 import '../two_factor/two_factor_screen.dart';
 import '../linked_devices/linked_devices_screen.dart';
 import '../privacy/privacy_settings_screen.dart';
@@ -73,6 +74,19 @@ class SettingsScreen extends ConsumerWidget {
                         context,
                         MaterialPageRoute(
                           builder: (context) => const QuickRepliesScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  _SettingsTile(
+                    icon: Icons.smart_toy,
+                    title: 'Auto-Reply Rules',
+                    subtitle: 'Automatically reply to messages with keywords',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const AutoReplyScreen(),
                         ),
                       );
                     },

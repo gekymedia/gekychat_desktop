@@ -86,8 +86,14 @@ class ApiService {
     String path,
     List<File> files, {
     Map<String, dynamic>? data,
+    String? compressionLevel, // MEDIA COMPRESSION: Optional compression level
   }) async {
     final formData = FormData.fromMap({...?data});
+    
+    // MEDIA COMPRESSION: Add compression level if provided
+    if (compressionLevel != null) {
+      formData.fields.add(MapEntry('compression_level', compressionLevel));
+    }
 
     for (final file in files) {
       formData.files.add(
@@ -248,15 +254,21 @@ class ApiService {
   // Attachments
   // ---------------------------------------------------------------------------
 
-  Future<Response> uploadAttachment(File file) async {
+  Future<Response> uploadAttachment(File file, {String? compressionLevel}) async {
     final formData = FormData.fromMap({
       'file': await MultipartFile.fromFile(
         file.path,
         filename: file.path.split(Platform.pathSeparator).last,
       ),
+      // MEDIA COMPRESSION: Include compression level preference
+      if (compressionLevel != null) 'compression_level': compressionLevel,
     });
     return _dio.post(_normalize('/attachments'), data: formData);
   }
+
+  // MEDIA COMPRESSION: Get attachment details (to check compression status)
+  Future<Response> getAttachment(int attachmentId) =>
+    get('/attachments/$attachmentId');
 
   // ---------------------------------------------------------------------------
   // Profile

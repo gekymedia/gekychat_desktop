@@ -7,6 +7,7 @@ import 'features/chats/desktop_chat_screen.dart';
 import 'features/profile/settings_screen.dart';
 import 'features/profile/profile_edit_screen.dart';
 import 'features/quick_replies/quick_replies_screen.dart';
+import 'features/auto_reply/auto_reply_screen.dart';
 import 'features/contacts/contacts_screen.dart';
 import 'features/search/search_screen.dart';
 import 'features/status/create_status_screen.dart';
@@ -56,6 +57,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/quick-replies',
         builder: (context, state) => const QuickRepliesScreen(),
+      ),
+      GoRoute(
+        path: '/auto-replies',
+        builder: (context, state) => const AutoReplyScreen(),
       ),
       GoRoute(
         path: '/contacts',

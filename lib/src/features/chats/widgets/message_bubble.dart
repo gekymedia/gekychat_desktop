@@ -176,25 +176,52 @@ class MessageBubble extends StatelessWidget {
       constraints: const BoxConstraints(maxHeight: 300),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(8),
-        child: CachedNetworkImage(
-          imageUrl: attachment.url,
-          fit: BoxFit.cover,
-          placeholder: (context, url) => Container(
-            height: 200,
-            color: Colors.grey[300],
-            child: const Center(child: CircularProgressIndicator()),
-          ),
-          errorWidget: (context, url, error) => Container(
-            height: 200,
-            color: Colors.grey[300],
-            child: const Icon(Icons.broken_image, size: 48),
-          ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            CachedNetworkImage(
+              imageUrl: attachment.displayUrl, // MEDIA COMPRESSION: Use compressed URL if available
+              fit: BoxFit.cover,
+              placeholder: (context, url) => Container(
+                height: 200,
+                color: Colors.grey[300],
+                child: const Center(child: CircularProgressIndicator()),
+              ),
+              errorWidget: (context, url, error) => Container(
+                height: 200,
+                color: Colors.grey[300],
+                child: const Icon(Icons.broken_image, size: 48),
+              ),
+            ),
+            // MEDIA COMPRESSION: Show compression indicator overlay
+            if (attachment.isCompressing)
+              Container(
+                color: Colors.black.withOpacity(0.5),
+                child: const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(color: Colors.white),
+                      SizedBox(height: 8),
+                      Text(
+                        'Compressing...',
+                        style: TextStyle(color: Colors.white, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
   }
 
   Widget _buildVideoAttachment(MessageAttachment attachment) {
+    // MEDIA COMPRESSION: Use thumbnail if available, otherwise use video URL
+    final imageUrl = attachment.thumbnailUrl ?? attachment.displayUrl;
+    final isCompressing = attachment.isCompressing;
+    
     return Container(
       height: 200,
       margin: const EdgeInsets.only(bottom: 8),
@@ -205,11 +232,27 @@ class MessageBubble extends StatelessWidget {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          if (attachment.url.isNotEmpty)
+          if (imageUrl.isNotEmpty)
             CachedNetworkImage(
-              imageUrl: attachment.url,
+              imageUrl: imageUrl,
               fit: BoxFit.cover,
               width: double.infinity,
+            ),
+          // MEDIA COMPRESSION: Show compression indicator
+          if (isCompressing)
+            Container(
+              color: Colors.black.withOpacity(0.5),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircularProgressIndicator(color: Colors.white),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Compressing...',
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                ],
+              ),
             ),
           Container(
             decoration: BoxDecoration(

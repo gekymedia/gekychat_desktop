@@ -337,10 +337,11 @@ class ChatRepository {
       };
 
       // Upload attachments first and get their IDs
+      // MEDIA COMPRESSION: Use medium compression level by default
       if (attachments != null && attachments.isNotEmpty) {
         List<int> attachmentIds = [];
         for (final file in attachments) {
-          final uploadResponse = await apiService.uploadAttachment(file);
+          final uploadResponse = await apiService.uploadAttachment(file, compressionLevel: 'medium');
           final attachmentData = uploadResponse.data;
           final attachment = attachmentData is Map && attachmentData['data'] != null
               ? attachmentData['data'] as Map<String, dynamic>
