@@ -612,19 +612,25 @@ class ApiService {
 
   Future<Response> getWorldFeed({int? page}) => 
     get('/world-feed', queryParameters: page != null ? {'page': page} : null);
-  Future<Response> createWorldFeedPost({required String body, List<String>? mediaUrls, String? videoUrl}) =>
-    post('/world-feed/posts', data: {
-      'body': body,
-      if (mediaUrls != null && mediaUrls.isNotEmpty) 'media_urls': mediaUrls,
-      if (videoUrl != null) 'video_url': videoUrl,
+  Future<Response> createWorldFeedPost({
+    required File media,
+    String? caption,
+    List<String>? tags,
+  }) async {
+    final formData = FormData.fromMap({
+      'media': await MultipartFile.fromFile(media.path),
+      if (caption != null && caption.isNotEmpty) 'caption': caption,
+      if (tags != null && tags.isNotEmpty) 'tags': tags,
     });
+    return post('/world-feed/posts', data: formData);
+  }
   Future<Response> likeWorldFeedPost(int postId) => post('/world-feed/posts/$postId/like');
   Future<Response> getWorldFeedPostComments(int postId, {int? page}) =>
     get('/world-feed/posts/$postId/comments', queryParameters: page != null ? {'page': page} : null);
   Future<Response> addWorldFeedComment(int postId, {required String body, int? parentCommentId}) =>
     post('/world-feed/posts/$postId/comments', data: {
-      'body': body,
-      if (parentCommentId != null) 'parent_comment_id': parentCommentId,
+      'comment': body, // Backend expects 'comment' field
+      if (parentCommentId != null) 'parent_id': parentCommentId, // Backend expects 'parent_id'
     });
   Future<Response> followWorldFeedCreator(int creatorId) =>
     post('/world-feed/creators/$creatorId/follow');

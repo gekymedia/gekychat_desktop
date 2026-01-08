@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'status_repository.dart';
 
 class CreateStatusScreen extends ConsumerStatefulWidget {
@@ -17,6 +18,7 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
   File? _selectedMedia;
   bool _isVideo = false;
   bool _isLoading = false;
+  bool _showEmojiPicker = false;
   
   final List<Color> _backgroundColors = [
     const Color(0xFF00A884),
@@ -164,6 +166,55 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
                       textAlign: TextAlign.center,
                     ),
                   ),
+                
+                // Caption input for media
+                if (_selectedMedia != null) ...[
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _textController,
+                    style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                    decoration: InputDecoration(
+                      hintText: 'Add a caption...',
+                      hintStyle: TextStyle(color: isDark ? Colors.white54 : Colors.grey[600]),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _showEmojiPicker ? Icons.keyboard : Icons.emoji_emotions_outlined,
+                          color: isDark ? Colors.white70 : Colors.grey[600],
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _showEmojiPicker = !_showEmojiPicker;
+                          });
+                        },
+                      ),
+                    ),
+                    maxLines: 3,
+                  ),
+                  if (_showEmojiPicker)
+                    Container(
+                      height: 250,
+                      margin: const EdgeInsets.only(top: 8),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF202C33) : Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isDark ? const Color(0xFF3B4A54) : Colors.grey[300]!,
+                        ),
+                      ),
+                      child: EmojiPicker(
+                        onEmojiSelected: (category, emoji) {
+                          _textController.text = _textController.text + emoji.emoji;
+                        },
+                        config: const Config(
+                          height: 250,
+                          checkPlatformCompatibility: true,
+                        ),
+                      ),
+                    ),
+                ],
                 
                 const SizedBox(height: 24),
                 

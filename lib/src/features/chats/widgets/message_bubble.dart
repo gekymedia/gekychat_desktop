@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
 import '../models.dart';
@@ -15,6 +16,7 @@ class MessageBubble extends StatelessWidget {
   final VoidCallback? onReply;
   final Function(String)? onReact;
   final VoidCallback? onReplyPrivately;
+  final Function(String)? onEdit;
   final bool isGroupMessage;
 
   const MessageBubble({
@@ -27,6 +29,7 @@ class MessageBubble extends StatelessWidget {
     this.onReply,
     this.onReact,
     this.onReplyPrivately,
+    this.onEdit,
     this.isGroupMessage = false,
   });
 
@@ -383,8 +386,17 @@ class MessageBubble extends StatelessWidget {
               Text('Copy'),
             ],
           ),
-          onTap: () {
-            // TODO: Copy message to clipboard
+          onTap: () async {
+            await Clipboard.setData(ClipboardData(text: message.body ?? ''));
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Message copied to clipboard'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            }
+            Navigator.pop(context);
           },
         ),
         PopupMenuItem(
@@ -429,7 +441,12 @@ class MessageBubble extends StatelessWidget {
               ],
             ),
             onTap: () {
-              // TODO: Edit message
+              Navigator.pop(context);
+              Future.delayed(const Duration(milliseconds: 100), () {
+                if (widgetContext.mounted && onEdit != null) {
+                  _showEditDialog(widgetContext);
+                }
+              });
             },
           ),
         PopupMenuItem(
@@ -905,6 +922,59 @@ class MessageBubble extends StatelessWidget {
             }).toList(),
           ),
         ),
+      ),
+    );
+  }
+
+  void _showEditDialog(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final controller = TextEditingController(text: message.body);
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
+        title: const Text('Edit Message'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: 5,
+          style: TextStyle(
+            color: isDark ? Colors.white : Colors.black,
+          ),
+          decoration: InputDecoration(
+            hintText: 'Enter message',
+            hintStyle: TextStyle(
+              color: isDark ? Colors.white54 : Colors.grey[600],
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: AppTheme.primaryGreen),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              final newBody = controller.text.trim();
+              if (newBody.isNotEmpty && onEdit != null) {
+                onEdit!(newBody);
+              }
+              Navigator.pop(context);
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.primaryGreen,
+            ),
+            child: const Text('Save'),
+          ),
+        ],
       ),
     );
   }

@@ -362,6 +362,7 @@ class SettingsScreen extends ConsumerWidget {
 
   void _showDeleteAccountDialog(BuildContext context, WidgetRef ref) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final passwordController = TextEditingController();
 
     showDialog(
       context: context,
@@ -371,9 +372,32 @@ class SettingsScreen extends ConsumerWidget {
           'Delete Account',
           style: TextStyle(color: isDark ? Colors.white : Colors.black),
         ),
-        content: Text(
-          'Are you sure you want to delete your account? This action cannot be undone and all your data will be permanently deleted.',
-          style: TextStyle(color: isDark ? Colors.white70 : Colors.grey[700]),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Are you sure you want to delete your account? This action cannot be undone and all your data will be permanently deleted.',
+              style: TextStyle(color: isDark ? Colors.white70 : Colors.grey[700]),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: passwordController,
+              obscureText: true,
+              decoration: InputDecoration(
+                labelText: 'Enter your password to confirm',
+                labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.grey[600]),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: Colors.red),
+                ),
+              ),
+              style: TextStyle(color: isDark ? Colors.white : Colors.black),
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -381,12 +405,68 @@ class SettingsScreen extends ConsumerWidget {
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () {
-              // TODO: Implement account deletion
+            onPressed: () async {
+              final password = passwordController.text.trim();
+              if (password.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter your password')),
+                );
+                return;
+              }
+
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Account deletion coming soon')),
+              
+              // Show confirmation dialog
+              final confirmed = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
+                  title: Text(
+                    'Final Confirmation',
+                    style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                  ),
+                  content: Text(
+                    'This is your last chance. Your account and all data will be permanently deleted. This cannot be undone.',
+                    style: TextStyle(color: isDark ? Colors.white70 : Colors.grey[700]),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('Cancel'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      style: TextButton.styleFrom(foregroundColor: Colors.red),
+                      child: const Text('Delete Forever'),
+                    ),
+                  ],
+                ),
               );
+
+              if (confirmed != true) return;
+
+              try {
+                final apiService = ref.read(apiServiceProvider);
+                await apiService.deleteAccount({'password': password});
+                
+                // Clear local storage
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.clear();
+                
+                if (context.mounted) {
+                  // Navigate to login
+                  context.go('/login');
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Account deleted successfully')),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Failed to delete account: $e')),
+                  );
+                }
+              }
             },
             style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('Delete'),

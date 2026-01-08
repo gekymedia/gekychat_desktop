@@ -40,14 +40,56 @@ class ContactsRepository {
     }
   }
 
-  Future<List<GekyContact>> listContacts() async {
+  Future<List<GekyContact>> listContacts({int page = 1, int perPage = 50}) async {
     try {
-      final r = await api.fetchContacts();
-      final list = _ensureList(r.data);
+      final r = await api.get('/contacts', queryParameters: {
+        'page': page,
+        'per_page': perPage,
+      });
+      final responseData = r.data;
+      // Handle paginated response
+      final data = responseData is Map && responseData['data'] != null
+          ? responseData['data']
+          : (responseData is List ? responseData : []);
+      final list = _ensureList(data);
       final parsed = list
           .map((j) => GekyContact.fromJson(_ensureMap(j)))
           .toList(growable: false);
       return UnmodifiableListView(parsed);
+    } catch (e) {
+      throw ContactsException('Failed to fetch contacts: $e');
+    }
+  }
+  
+  Future<Map<String, dynamic>> listContactsPaginated({int page = 1, int perPage = 50}) async {
+    try {
+      final r = await api.get('/contacts', queryParameters: {
+        'page': page,
+        'per_page': perPage,
+      });
+      final responseData = r.data;
+      final data = responseData is Map && responseData['data'] != null
+          ? responseData['data']
+          : (responseData is List ? responseData : []);
+      final list = _ensureList(data);
+      final parsed = list
+          .map((j) => GekyContact.fromJson(_ensureMap(j)))
+          .toList(growable: false);
+      
+      // Extract pagination metadata
+      final meta = responseData is Map && responseData['meta'] != null
+          ? responseData['meta']
+          : {
+              'current_page': 1,
+              'last_page': 1,
+              'per_page': perPage,
+              'total': parsed.length,
+            };
+      
+      return {
+        'data': UnmodifiableListView(parsed),
+        'meta': meta,
+      };
     } catch (e) {
       throw ContactsException('Failed to fetch contacts: $e');
     }

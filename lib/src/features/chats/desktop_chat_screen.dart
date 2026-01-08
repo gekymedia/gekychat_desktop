@@ -28,6 +28,7 @@ import '../media_auto_download/media_auto_download_screen.dart';
 import '../storage/storage_usage_screen.dart';
 import '../world/world_feed_screen.dart';
 import '../mail/mail_screen.dart';
+import '../qr/qr_scanner_screen.dart';
 import '../ai/ai_chat_screen.dart';
 import '../live/live_broadcast_screen.dart';
 import '../../core/providers.dart';
@@ -52,6 +53,9 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
 
   late Future<List<ConversationSummary>> _conversationsFuture;
   late Future<List<GroupSummary>> _groupsFuture;
+  
+  final TextEditingController _searchController = TextEditingController();
+  String _selectedFilter = 'all';
 
   @override
   void initState() {
@@ -64,6 +68,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _searchController.dispose();
     super.dispose();
   }
   
@@ -323,13 +328,20 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
               Text('Scan QR code'),
             ],
           ),
-          onTap: () {
-            // TODO: Implement QR code scanner for desktop
-            Future.microtask(() {
+          onTap: () async {
+            final result = await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const QRScannerScreen(),
+              ),
+            );
+            if (result != null && context.mounted) {
+              // Handle scanned QR code result
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('QR code scanner coming soon')),
+                SnackBar(content: Text('Scanned: $result')),
               );
-            });
+              // TODO: Process the QR code (e.g., add contact, join group, etc.)
+            }
           },
         ),
       ],
@@ -592,37 +604,6 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                       }
                     },
                     itemBuilder: (context) => [
-                      const PopupMenuItem(value: 'calls', child: Row(
-                        children: [
-                          Icon(Icons.phone, size: 20),
-                          SizedBox(width: 12),
-                          Text('Calls'),
-                        ],
-                      )),
-                      if (worldFeedEnabled && hasUsername)
-                        const PopupMenuItem(value: 'world', child: Row(
-                          children: [
-                            Icon(Icons.explore, size: 20),
-                            SizedBox(width: 12),
-                            Text('World'),
-                          ],
-                        )),
-                      if (emailChatEnabled && hasUsername)
-                        const PopupMenuItem(value: 'mail', child: Row(
-                          children: [
-                            Icon(Icons.mail, size: 20),
-                            SizedBox(width: 12),
-                            Text('Mail'),
-                          ],
-                        )),
-                      if (advancedAiEnabled)
-                        const PopupMenuItem(value: 'ai', child: Row(
-                          children: [
-                            Icon(Icons.smart_toy, size: 20),
-                            SizedBox(width: 12),
-                            Text('AI Assistant'),
-                          ],
-                        )),
                       const PopupMenuDivider(),
                       const PopupMenuItem(value: 'settings', child: Text('Settings')),
                       const PopupMenuItem(value: 'profile', child: Text('Profile')),
@@ -638,6 +619,104 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                 },
               ),
             ],
+          ),
+        ),
+        // Search Input
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF202C33) : Colors.white,
+            border: Border(
+              bottom: BorderSide(
+                color: isDark ? const Color(0xFF2A3942) : const Color(0xFFD1D7DB),
+                width: 1,
+              ),
+            ),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _searchController,
+                  style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                  decoration: InputDecoration(
+                    hintText: 'Search or start new chat',
+                    hintStyle: TextStyle(color: isDark ? Colors.white54 : Colors.grey[600]),
+                    prefixIcon: Icon(Icons.search, color: isDark ? Colors.white54 : Colors.grey[600]),
+                    suffixIcon: _searchController.text.isNotEmpty
+                        ? IconButton(
+                            icon: Icon(Icons.clear, color: isDark ? Colors.white54 : Colors.grey[600]),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() {});
+                            },
+                          )
+                        : null,
+                    filled: true,
+                    fillColor: isDark ? const Color(0xFF2A3942) : Colors.grey[100],
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  ),
+                  onChanged: (value) {
+                    setState(() {});
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Filter button (for search filtering)
+              IconButton(
+                icon: Icon(Icons.filter_list, color: isDark ? Colors.white70 : Colors.grey[600]),
+                tooltip: 'Search filters',
+                onPressed: () {
+                  // TODO: Show search filter options dialog
+                },
+              ),
+            ],
+          ),
+        ),
+        // Filter Chips (for conversation list filtering)
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF202C33) : Colors.white,
+            border: Border(
+              bottom: BorderSide(
+                color: isDark ? const Color(0xFF2A3942) : const Color(0xFFD1D7DB),
+                width: 1,
+              ),
+            ),
+          ),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _buildFilterChip('all', 'All', isDark),
+                const SizedBox(width: 8),
+                _buildFilterChip('unread', 'Unread', isDark),
+                const SizedBox(width: 8),
+                _buildFilterChip('groups', 'Groups', isDark),
+                const SizedBox(width: 8),
+                _buildFilterChip('channels', 'Channels', isDark),
+                const SizedBox(width: 8),
+                _buildFilterChip('mail', 'Mail', isDark),
+                const SizedBox(width: 8),
+                // Add new filter button
+                FilterChip(
+                  label: const Icon(Icons.add, size: 16),
+                  selected: false,
+                  onSelected: (selected) {
+                    // TODO: Show dialog to add new filter
+                  },
+                  backgroundColor: isDark ? const Color(0xFF2A3942) : Colors.grey[200],
+                  side: BorderSide(
+                    color: isDark ? const Color(0xFF2A3942) : Colors.grey[300]!,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
         // Conversations/Groups List (Unified list - no tabs)
@@ -670,12 +749,29 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                           conversation: conversation,
                           isSelected: isSelected,
                           onTap: () {
-                            setState(() {
-                              _selectedConversation = conversation;
-                              _selectedConversationId = conversation.id;
-                              _selectedGroup = null;
-                              _selectedGroupId = null;
-                            });
+                            // Switch to chats route if not already there
+                            final router = GoRouter.of(context);
+                            if (router.routerDelegate.currentConfiguration.uri.path != '/chats') {
+                              context.go('/chats');
+                              // Wait for route change then select conversation
+                              Future.delayed(const Duration(milliseconds: 100), () {
+                                if (mounted) {
+                                  setState(() {
+                                    _selectedConversation = conversation;
+                                    _selectedConversationId = conversation.id;
+                                    _selectedGroup = null;
+                                    _selectedGroupId = null;
+                                  });
+                                }
+                              });
+                            } else {
+                              setState(() {
+                                _selectedConversation = conversation;
+                                _selectedConversationId = conversation.id;
+                                _selectedGroup = null;
+                                _selectedGroupId = null;
+                              });
+                            }
                           },
                         ),
                       ),
@@ -740,6 +836,33 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
           ),
         ),
       ],
+    );
+  }
+  
+  Widget _buildFilterChip(String filter, String label, bool isDark) {
+    final isSelected = _selectedFilter == filter;
+    return FilterChip(
+      label: Text(label),
+      selected: isSelected,
+      onSelected: (selected) {
+        setState(() {
+          _selectedFilter = filter;
+        });
+      },
+      selectedColor: const Color(0xFF008069).withOpacity(0.2),
+      checkmarkColor: const Color(0xFF008069),
+      labelStyle: TextStyle(
+        color: isSelected
+            ? const Color(0xFF008069)
+            : (isDark ? Colors.white70 : Colors.grey[700]),
+        fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+      ),
+      backgroundColor: isDark ? const Color(0xFF2A3942) : Colors.grey[200],
+      side: BorderSide(
+        color: isSelected
+            ? const Color(0xFF008069)
+            : (isDark ? const Color(0xFF2A3942) : Colors.grey[300]!),
+      ),
     );
   }
   

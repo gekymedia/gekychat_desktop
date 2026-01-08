@@ -47,6 +47,8 @@ dependencies:
   
   # Emoji picker
   emoji_picker_flutter: ^2.0.0
+  # Share functionality
+  share_plus: ^10.0.0
   
   # QR Code for 2FA
   qr_flutter: ^4.1.0

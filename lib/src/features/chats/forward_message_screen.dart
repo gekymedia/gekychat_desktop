@@ -85,12 +85,12 @@ class _ForwardMessageScreenState extends ConsumerState<ForwardMessageScreen>
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Dialog(
-      backgroundColor: Colors.transparent,
+      backgroundColor: Colors.black.withOpacity(0.5),
       insetPadding: const EdgeInsets.symmetric(horizontal: 100, vertical: 50),
       child: Container(
         constraints: const BoxConstraints(maxWidth: 600, maxHeight: 700),
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF202C33) : Colors.white,
+          color: (isDark ? const Color(0xFF202C33) : Colors.white).withOpacity(0.9),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Scaffold(
@@ -180,7 +180,10 @@ class _ConversationTab extends ConsumerWidget {
 
             return CheckboxListTile(
               value: checked,
-              onChanged: (v) => onToggle(conv.id, v == true),
+              onChanged: (v) {
+                // Prevent navigation when clicking checkbox
+                onToggle(conv.id, v == true);
+              },
               title: Text(conv.otherUser.name),
               subtitle: Text(conv.lastMessage ?? ''),
             );
@@ -227,7 +230,10 @@ class _GroupTab extends ConsumerWidget {
 
             return CheckboxListTile(
               value: checked,
-              onChanged: (v) => onToggle(group.id, v == true),
+              onChanged: (v) {
+                // Prevent navigation when clicking checkbox
+                onToggle(group.id, v == true);
+              },
               title: Text(group.name),
             );
           },

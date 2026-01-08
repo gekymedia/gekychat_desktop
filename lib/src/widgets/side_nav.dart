@@ -37,6 +37,12 @@ class SideNav extends ConsumerWidget {
         route: '/chats',
         isActive: currentRoute == '/chats',
       ),
+      _NavItem(
+        icon: Icons.circle_notifications,
+        label: 'Status',
+        route: '/status',
+        isActive: currentRoute == '/status',
+      ),
       if (channelsEnabled)
         _NavItem(
           icon: Icons.campaign,

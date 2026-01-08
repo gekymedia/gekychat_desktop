@@ -1,0 +1,315 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
+import '../../core/providers.dart';
+
+class CreatePostScreen extends ConsumerStatefulWidget {
+  const CreatePostScreen({super.key});
+
+  @override
+  ConsumerState<CreatePostScreen> createState() => _CreatePostScreenState();
+}
+
+class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
+  final _captionController = TextEditingController();
+  File? _selectedMedia; // Only one media file like TikTok
+  bool _isPosting = false;
+
+  @override
+  void dispose() {
+    _captionController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickMedia() async {
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Add Media'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Photo'),
+              onTap: () => Navigator.pop(context, 'photo'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam),
+              title: const Text('Video'),
+              onTap: () => Navigator.pop(context, 'video'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (result == null) return;
+
+    try {
+      if (result == 'photo') {
+        final picker = ImagePicker();
+        final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+        if (pickedFile != null) {
+          setState(() {
+            _selectedMedia = File(pickedFile.path);
+          });
+        }
+      } else if (result == 'video') {
+        final picker = ImagePicker();
+        final pickedFile = await picker.pickVideo(source: ImageSource.gallery);
+        if (pickedFile != null) {
+          setState(() {
+            _selectedMedia = File(pickedFile.path);
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to pick media: $e')),
+        );
+      }
+    }
+  }
+
+  void _removeMedia() {
+    setState(() {
+      _selectedMedia = null;
+    });
+  }
+
+  Future<void> _createPost() async {
+    // Media is required - World feed is like TikTok (no text-only posts)
+    if (_selectedMedia == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please add a photo or video to post')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isPosting = true;
+    });
+
+    try {
+      final apiService = ref.read(apiServiceProvider);
+      final caption = _captionController.text.trim();
+
+      await apiService.createWorldFeedPost(
+        media: _selectedMedia!,
+        caption: caption.isNotEmpty ? caption : null,
+      );
+
+      if (mounted) {
+        context.pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Post created successfully')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to create post: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isPosting = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF111B21) : const Color(0xFFF0F2F5),
+      appBar: AppBar(
+        title: const Text('Create Post'),
+        backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
+        foregroundColor: isDark ? Colors.white : Colors.black,
+        actions: [
+          TextButton(
+            onPressed: _isPosting ? null : _createPost,
+            child: _isPosting
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text(
+                    'Post',
+                    style: TextStyle(
+                      color: Color(0xFF008069),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Media preview - required
+            if (_selectedMedia == null)
+              Container(
+                height: 400,
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: isDark ? Colors.white24 : Colors.grey[300]!,
+                    width: 2,
+                    style: BorderStyle.solid,
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  color: isDark ? const Color(0xFF202C33) : Colors.grey[100],
+                ),
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.add_photo_alternate_outlined,
+                        size: 64,
+                        color: isDark ? Colors.white38 : Colors.grey[600],
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Add a photo or video',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w500,
+                          color: isDark ? Colors.white70 : Colors.grey[700],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Media is required',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: isDark ? Colors.white38 : Colors.grey[600],
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      ElevatedButton.icon(
+                        onPressed: _pickMedia,
+                        icon: const Icon(Icons.add_photo_alternate),
+                        label: const Text('Choose Media'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF008069),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              Stack(
+                children: [
+                  Container(
+                    width: double.infinity,
+                    height: 400,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      color: Colors.grey[300],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: _selectedMedia!.path.toLowerCase().endsWith('.mp4') ||
+                              _selectedMedia!.path.toLowerCase().endsWith('.mov') ||
+                              _selectedMedia!.path.toLowerCase().endsWith('.avi')
+                          ? Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(Icons.play_circle_filled, size: 64, color: Colors.white70),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Video selected',
+                                    style: TextStyle(
+                                      color: isDark ? Colors.white : Colors.black87,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : Image.file(
+                              _selectedMedia!,
+                              fit: BoxFit.cover,
+                            ),
+                    ),
+                  ),
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: IconButton(
+                      icon: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.close, color: Colors.white, size: 20),
+                      ),
+                      onPressed: _removeMedia,
+                    ),
+                  ),
+                ],
+              ),
+            const SizedBox(height: 16),
+            // Caption field (optional)
+            TextField(
+              controller: _captionController,
+              maxLines: 4,
+              maxLength: 500,
+              decoration: InputDecoration(
+                hintText: "Add a caption (optional)...",
+                hintStyle: TextStyle(
+                  color: isDark ? Colors.white38 : Colors.grey[600],
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(
+                    color: isDark ? Colors.white24 : Colors.grey[300]!,
+                  ),
+                ),
+                filled: true,
+                fillColor: isDark ? const Color(0xFF202C33) : Colors.white,
+              ),
+              style: TextStyle(
+                color: isDark ? Colors.white : Colors.black,
+                fontSize: 16,
+              ),
+            ),
+            if (_selectedMedia == null)
+              Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: ElevatedButton.icon(
+                  onPressed: _pickMedia,
+                  icon: const Icon(Icons.add_photo_alternate),
+                  label: const Text('Add Media'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF008069),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    minimumSize: const Size(double.infinity, 48),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

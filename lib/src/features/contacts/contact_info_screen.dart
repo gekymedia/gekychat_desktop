@@ -308,12 +308,24 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
-              // TODO: Implement block
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Block feature coming soon')),
-              );
+              try {
+                final apiService = ref.read(apiServiceProvider);
+                await apiService.blockUser(widget.user.id);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('${widget.user.name} has been blocked')),
+                  );
+                  Navigator.pop(context); // Close contact info screen
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Failed to block contact: $e')),
+                  );
+                }
+              }
             },
             style: ElevatedButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('Block'),
@@ -324,24 +336,70 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
   }
 
   void _showReportDialog(BuildContext context, bool isDark) {
+    final reasonController = TextEditingController();
+    
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
         title: const Text('Report Contact'),
-        content: const Text('Report this contact for inappropriate behavior?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Why are you reporting this contact?'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonController,
+              maxLines: 3,
+              decoration: InputDecoration(
+                hintText: 'Enter reason (e.g., spam, harassment, inappropriate content)',
+                hintStyle: TextStyle(
+                  color: isDark ? Colors.white38 : Colors.grey[600],
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: Colors.red),
+                ),
+              ),
+              style: TextStyle(color: isDark ? Colors.white : Colors.black),
+            ),
+          ],
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
+              final reason = reasonController.text.trim();
+              if (reason.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a reason')),
+                );
+                return;
+              }
+
               Navigator.pop(context);
-              // TODO: Implement report
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Report feature coming soon')),
-              );
+              try {
+                final apiService = ref.read(apiServiceProvider);
+                await apiService.reportUser(widget.user.id, reason);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Report submitted successfully')),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Failed to submit report: $e')),
+                  );
+                }
+              }
             },
             style: ElevatedButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('Report'),

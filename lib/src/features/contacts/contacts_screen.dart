@@ -15,20 +15,83 @@ class ContactsScreen extends ConsumerStatefulWidget {
 }
 
 class _ContactsScreenState extends ConsumerState<ContactsScreen> {
-  late Future<List<GekyContact>> _contactsFuture;
+  final List<GekyContact> _allContacts = [];
+  final ScrollController _scrollController = ScrollController();
   String _searchQuery = '';
+  int _currentPage = 1;
+  bool _isLoading = false;
+  bool _hasMore = true;
+  int _totalContacts = 0;
 
   @override
   void initState() {
     super.initState();
     _loadContacts();
+    _scrollController.addListener(_onScroll);
   }
 
-  void _loadContacts() {
-    final repo = ref.read(contactsRepositoryProvider);
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent * 0.8) {
+      if (!_isLoading && _hasMore) {
+        _loadMoreContacts();
+      }
+    }
+  }
+
+  Future<void> _loadContacts({bool reset = false}) async {
+    if (_isLoading) return;
     setState(() {
-      _contactsFuture = repo.listContacts();
+      _isLoading = true;
+      if (reset) {
+        _currentPage = 1;
+        _allContacts.clear();
+        _hasMore = true;
+      }
     });
+
+    try {
+      final repo = ref.read(contactsRepositoryProvider);
+      final result = await repo.listContactsPaginated(
+        page: _currentPage,
+        perPage: 50,
+      );
+
+      final newContacts = result['data'] as List<GekyContact>;
+      final meta = result['meta'] as Map<String, dynamic>;
+
+      setState(() {
+        _allContacts.addAll(newContacts);
+        _totalContacts = meta['total'] as int? ?? _allContacts.length;
+        _currentPage = meta['current_page'] as int? ?? _currentPage;
+        _hasMore = (meta['current_page'] as int? ?? _currentPage) <
+            (meta['last_page'] as int? ?? 1);
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading contacts: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _loadMoreContacts() async {
+    if (!_hasMore || _isLoading) return;
+    setState(() {
+      _currentPage++;
+    });
+    await _loadContacts();
   }
 
   Future<void> _startConversation(BuildContext context, GekyContact contact) async {
@@ -156,7 +219,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _loadContacts,
+            onPressed: () => _loadContacts(reset: true),
           ),
         ],
       ),
@@ -178,50 +241,39 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
             ),
           ),
           Expanded(
-            child: FutureBuilder<List<GekyContact>>(
-              future: _contactsFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
+            child: _allContacts.isEmpty && _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : Builder(
+                    builder: (context) {
+                      final filtered = _searchQuery.isEmpty
+                          ? _allContacts
+                          : _allContacts.where((c) {
+                              return c.name.toLowerCase().contains(_searchQuery) ||
+                                  (c.phone ?? '').toLowerCase().contains(_searchQuery);
+                            }).toList();
 
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text('Error: ${snapshot.error}'),
-                        ElevatedButton(
-                          onPressed: _loadContacts,
-                          child: const Text('Retry'),
-                        ),
-                      ],
-                    ),
-                  );
-                }
+                      if (filtered.isEmpty && !_isLoading) {
+                        return Center(
+                          child: Text(
+                            _searchQuery.isEmpty ? 'No contacts' : 'No contacts found',
+                            style: TextStyle(
+                              color: isDark ? Colors.white70 : Colors.grey[600],
+                            ),
+                          ),
+                        );
+                      }
 
-                final contacts = snapshot.data ?? [];
-                final filtered = _searchQuery.isEmpty
-                    ? contacts
-                    : contacts.where((c) {
-                        return c.name.toLowerCase().contains(_searchQuery) ||
-                            (c.phone ?? '').toLowerCase().contains(_searchQuery);
-                      }).toList();
-
-                if (filtered.isEmpty) {
-                  return Center(
-                    child: Text(
-                      _searchQuery.isEmpty ? 'No contacts' : 'No contacts found',
-                      style: TextStyle(
-                        color: isDark ? Colors.white70 : Colors.grey[600],
-                      ),
-                    ),
-                  );
-                }
-
-                return ListView.builder(
-                  itemCount: filtered.length,
-                  itemBuilder: (context, index) {
+                      return ListView.builder(
+                        controller: _scrollController,
+                        itemCount: filtered.length + (_hasMore && !_searchQuery.isNotEmpty ? 1 : 0),
+                        itemBuilder: (context, index) {
+                          if (index >= filtered.length) {
+                            // Loading indicator at bottom
+                            return const Padding(
+                              padding: EdgeInsets.all(16.0),
+                              child: Center(child: CircularProgressIndicator()),
+                            );
+                          }
                     final contact = filtered[index];
                     return ListTile(
                       leading: CircleAvatar(
@@ -269,11 +321,11 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                       onTap: contact.isRegistered
                           ? () => _startConversation(context, contact)
                           : () => _inviteContact(context, contact),
-                    );
-                  },
-                );
-              },
-            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
           ),
         ],
       ),

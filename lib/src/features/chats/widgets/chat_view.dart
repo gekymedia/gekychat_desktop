@@ -927,6 +927,30 @@ class _ChatViewState extends ConsumerState<ChatView> {
     }
   }
 
+  Future<void> _editMessage(Message message, String newBody) async {
+    try {
+      final chatRepo = ref.read(chatRepositoryProvider);
+      final updatedMessage = await chatRepo.editMessage(message.id, newBody);
+      setState(() {
+        final index = _messages.indexWhere((m) => m.id == message.id);
+        if (index != -1) {
+          _messages[index] = updatedMessage;
+        }
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Message updated')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to edit message: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -1106,6 +1130,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
                           onDelete: () => _deleteMessage(message),
                           onReply: () => _setReply(message),
                           onReact: (emoji) => _reactToMessage(message, emoji),
+                          onEdit: (newBody) => _editMessage(message, newBody),
                         );
                       },
                     ),
