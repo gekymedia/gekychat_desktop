@@ -61,7 +61,7 @@ class _CreateBroadcastScreenState extends ConsumerState<CreateBroadcastScreen> {
         );
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to create broadcast list: $e')),
         );
@@ -161,16 +161,22 @@ class _CreateBroadcastScreenState extends ConsumerState<CreateBroadcastScreen> {
                   itemCount: contacts.length,
                   itemBuilder: (context, index) {
                     final contact = contacts[index];
-                    final isSelected = _selectedContactIds.contains(contact.id);
+                    // Use contactUserId (user ID) instead of contact.id for broadcast lists
+                    final userId = contact.contactUserId ?? contact.contactUser?['id'];
+                    if (userId == null) {
+                      // Skip contacts without user IDs (not registered)
+                      return const SizedBox.shrink();
+                    }
+                    final isSelected = _selectedContactIds.contains(userId);
 
                     return CheckboxListTile(
                       value: isSelected,
                       onChanged: (value) {
                         setState(() {
                           if (value == true) {
-                            _selectedContactIds.add(contact.id);
+                            _selectedContactIds.add(userId);
                           } else {
-                            _selectedContactIds.remove(contact.id);
+                            _selectedContactIds.remove(userId);
                           }
                         });
                       },

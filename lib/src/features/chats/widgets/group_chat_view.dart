@@ -14,7 +14,7 @@ import '../chat_repo.dart';
 import '../models.dart';
 import 'message_bubble.dart';
 import 'emoji_picker_widget.dart';
-import 'chat_view.dart' show _DesktopAudioPreviewWidget;
+import 'chat_view.dart' show DesktopAudioPreviewWidget;
 import '../../contacts/contacts_repository.dart';
 import 'group_info_screen.dart'; // Provides groupInfoProvider
 import '../../media/media_gallery_screen.dart';
@@ -252,7 +252,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                 Text('Recording duration: ${_formatDuration(_recordingDuration)}'),
                 const SizedBox(height: 16),
                 // Audio preview player
-                _DesktopAudioPreviewWidget(
+                DesktopAudioPreviewWidget(
                   audioPath: path,
                   duration: _recordingDuration,
                   audioPlayer: _audioPlayer,

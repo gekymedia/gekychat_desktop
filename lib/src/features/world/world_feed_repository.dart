@@ -10,8 +10,9 @@ class WorldFeedRepository {
   WorldFeedRepository(this._apiService);
 
   /// Get world feed posts
-  Future<Map<String, dynamic>> getFeed({int? page}) async {
-    final response = await _apiService.getWorldFeed(page: page);
+  Future<Map<String, dynamic>> getFeed({int? page, String? query}) async {
+    // Use getWorldFeedPosts which supports query parameter
+    final response = await _apiService.getWorldFeedPosts(page: page, query: query);
     return Map<String, dynamic>.from(response.data);
   }
 

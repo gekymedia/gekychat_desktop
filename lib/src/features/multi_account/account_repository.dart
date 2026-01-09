@@ -35,6 +35,10 @@ class AccountRepository {
     if (responseData['token'] != null) {
       final token = responseData['token'] as String;
       await _apiService.saveToken(token);
+      // Force API service to reload token on next request
+      // The interceptor reads from SharedPreferences on each request, so this should work
+    } else {
+      throw Exception('No token received from switch account response');
     }
   }
 

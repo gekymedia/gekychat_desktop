@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:video_player/video_player.dart';
 import 'dart:io';
 import '../../core/providers.dart';
 
@@ -16,10 +17,12 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
   final _captionController = TextEditingController();
   File? _selectedMedia; // Only one media file like TikTok
   bool _isPosting = false;
+  VideoPlayerController? _videoController;
 
   @override
   void dispose() {
     _captionController.dispose();
+    _videoController?.dispose();
     super.dispose();
   }
 
@@ -61,8 +64,17 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
         final picker = ImagePicker();
         final pickedFile = await picker.pickVideo(source: ImageSource.gallery);
         if (pickedFile != null) {
+          final videoFile = File(pickedFile.path);
+          // Dispose previous controller
+          await _videoController?.dispose();
+          // Initialize video player
+          final controller = VideoPlayerController.file(videoFile);
+          await controller.initialize();
+          await controller.setLooping(true);
+          await controller.play();
           setState(() {
-            _selectedMedia = File(pickedFile.path);
+            _selectedMedia = videoFile;
+            _videoController = controller;
           });
         }
       }
@@ -75,9 +87,11 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
     }
   }
 
-  void _removeMedia() {
+  void _removeMedia() async {
+    await _videoController?.dispose();
     setState(() {
       _selectedMedia = null;
+      _videoController = null;
     });
   }
 
@@ -226,23 +240,16 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                       borderRadius: BorderRadius.circular(12),
                       child: _selectedMedia!.path.toLowerCase().endsWith('.mp4') ||
                               _selectedMedia!.path.toLowerCase().endsWith('.mov') ||
-                              _selectedMedia!.path.toLowerCase().endsWith('.avi')
-                          ? Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const Icon(Icons.play_circle_filled, size: 64, color: Colors.white70),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'Video selected',
-                                    style: TextStyle(
-                                      color: isDark ? Colors.white : Colors.black87,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
+                              _selectedMedia!.path.toLowerCase().endsWith('.avi') ||
+                              _selectedMedia!.path.toLowerCase().endsWith('.mkv')
+                          ? _videoController != null && _videoController!.value.isInitialized
+                              ? AspectRatio(
+                                  aspectRatio: _videoController!.value.aspectRatio,
+                                  child: VideoPlayer(_videoController!),
+                                )
+                              : const Center(
+                                  child: CircularProgressIndicator(),
+                                )
                           : Image.file(
                               _selectedMedia!,
                               fit: BoxFit.cover,

@@ -277,7 +277,7 @@ class LiveBroadcastScreen extends ConsumerWidget {
   Future<void> _joinBroadcast(BuildContext context, WidgetRef ref, int broadcastId) async {
     try {
       final repo = ref.read(liveBroadcastRepositoryProvider);
-      await repo.joinBroadcast(broadcastId);
+      final result = await repo.joinBroadcast(broadcastId);
       
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(

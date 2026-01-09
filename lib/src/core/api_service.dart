@@ -636,6 +636,12 @@ class ApiService {
 
   Future<Response> getWorldFeed({int? page}) => 
     get('/world-feed', queryParameters: page != null ? {'page': page} : null);
+  Future<Response> getWorldFeedPosts({int? page, int? creatorId, String? query}) =>
+    get('/world-feed/posts', queryParameters: {
+      if (page != null) 'page': page,
+      if (creatorId != null) 'creator_id': creatorId,
+      if (query != null && query.isNotEmpty) 'q': query,
+    });
   Future<Response> createWorldFeedPost({
     required File media,
     String? caption,

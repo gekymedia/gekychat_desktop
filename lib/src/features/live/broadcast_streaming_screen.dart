@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:livekit_client/livekit_client.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
 import 'live_broadcast_repository.dart';
 
 /// PHASE 2: Broadcast Streaming Screen for Desktop
@@ -64,8 +65,8 @@ class _BroadcastStreamingScreenState extends ConsumerState<BroadcastStreamingScr
       );
 
       // Enable camera and microphone
-      await room.localParticipant.setCameraEnabled(_cameraEnabled);
-      await room.localParticipant.setMicrophoneEnabled(_microphoneEnabled);
+      await room.localParticipant?.setCameraEnabled(_cameraEnabled);
+      await room.localParticipant?.setMicrophoneEnabled(_microphoneEnabled);
 
       setState(() {
         _room = room;
@@ -87,7 +88,7 @@ class _BroadcastStreamingScreenState extends ConsumerState<BroadcastStreamingScr
     
     try {
       _cameraEnabled = !_cameraEnabled;
-      await _room!.localParticipant.setCameraEnabled(_cameraEnabled);
+      await _room!.localParticipant?.setCameraEnabled(_cameraEnabled);
       setState(() {});
     } catch (e) {
       if (mounted) {
@@ -103,7 +104,7 @@ class _BroadcastStreamingScreenState extends ConsumerState<BroadcastStreamingScr
     
     try {
       _microphoneEnabled = !_microphoneEnabled;
-      await _room!.localParticipant.setMicrophoneEnabled(_microphoneEnabled);
+      await _room!.localParticipant?.setMicrophoneEnabled(_microphoneEnabled);
       setState(() {});
     } catch (e) {
       if (mounted) {
@@ -319,18 +320,25 @@ class _LocalVideoPreviewState extends State<_LocalVideoPreview> {
   @override
   void initState() {
     super.initState();
-    widget.room.localParticipant.addListener(_onLocalParticipantChanged);
+    widget.room.localParticipant?.addListener(_onLocalParticipantChanged);
     _onLocalParticipantChanged();
   }
 
   @override
   void dispose() {
-    widget.room.localParticipant.removeListener(_onLocalParticipantChanged);
+    widget.room.localParticipant?.removeListener(_onLocalParticipantChanged);
     super.dispose();
   }
 
   void _onLocalParticipantChanged() {
-    final videoTracks = widget.room.localParticipant.videoTracks.values
+    final localParticipant = widget.room.localParticipant;
+    if (localParticipant == null) {
+      setState(() => _localVideoTrack = null);
+      return;
+    }
+    
+    final trackPublications = localParticipant.trackPublications.values;
+    final videoTracks = trackPublications
         .where((pub) => pub.track != null && pub.track is LocalVideoTrack)
         .map((pub) => pub.track as LocalVideoTrack);
 
@@ -345,7 +353,7 @@ class _LocalVideoPreviewState extends State<_LocalVideoPreview> {
       return Center(
         child: VideoTrackRenderer(
           _localVideoTrack!,
-          fit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+          fit: rtc.RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
         ),
       );
     }

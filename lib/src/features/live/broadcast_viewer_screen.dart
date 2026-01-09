@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:livekit_client/livekit_client.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
 import 'live_broadcast_repository.dart';
 
 /// PHASE 2: Broadcast Viewer Screen for Desktop
@@ -33,9 +35,12 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
     _connectToRoom();
   }
 
+  EventsListener<RoomEvent>? _listener;
+
   @override
   void dispose() {
     _chatController.dispose();
+    _listener?.dispose();
     _room?.disconnect();
     super.dispose();
   }
@@ -55,13 +60,27 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
         throw Exception('Missing token or room name');
       }
 
+      if (websocketUrl.isEmpty) {
+        throw Exception('LiveKit server URL is not configured. Please check server settings.');
+      }
+
+      // Validate websocket URL format
+      if (!websocketUrl.startsWith('ws://') && !websocketUrl.startsWith('wss://')) {
+        throw Exception('Invalid LiveKit WebSocket URL format. Expected ws:// or wss://');
+      }
+
       // Create LiveKit room
       final room = Room();
       
-      // Connect to room
+      // Connect to room with timeout
       await room.connect(
         websocketUrl,
         token,
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw Exception('Connection timeout. LiveKit server may be unreachable at $websocketUrl');
+        },
       );
 
       // Listen for remote participants
@@ -77,23 +96,24 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
       });
 
       // Listen for participant events
-      room.on<RoomDisconnectedEvent>((event) {
-        if (mounted) {
-          setState(() {
-            _errorMessage = 'Disconnected from broadcast';
-            _isConnecting = false;
-            _broadcaster = null;
-          });
-        }
-      });
-
-      room.on<ParticipantConnectedEvent>((event) {
-        if (mounted) {
-          setState(() {
-            _broadcaster = event.participant as RemoteParticipant?;
-          });
-        }
-      });
+      _listener = room.createListener();
+      _listener!
+        ..on<RoomDisconnectedEvent>((event) {
+          if (mounted) {
+            setState(() {
+              _errorMessage = 'Disconnected from broadcast';
+              _isConnecting = false;
+              _broadcaster = null;
+            });
+          }
+        })
+        ..on<ParticipantConnectedEvent>((event) {
+          if (mounted) {
+            setState(() {
+              _broadcaster = event.participant as RemoteParticipant?;
+            });
+          }
+        });
 
       setState(() {
         _room = room;
@@ -101,8 +121,17 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
       });
     } catch (e) {
       if (mounted) {
+        String errorMsg = 'Failed to connect: $e';
+        // Provide more helpful error messages
+        if (e.toString().contains('Page Not Found') || e.toString().contains('404')) {
+          errorMsg = 'LiveKit server not found. Please check server configuration.\n\nError: $e';
+        } else if (e.toString().contains('timeout')) {
+          errorMsg = 'Connection timeout. LiveKit server may be unreachable.\n\nError: $e';
+        } else if (e.toString().contains('ConnectException')) {
+          errorMsg = 'Cannot connect to LiveKit server. Please verify the server is running and the URL is correct.\n\nError: $e';
+        }
         setState(() {
-          _errorMessage = 'Failed to connect: $e';
+          _errorMessage = errorMsg;
           _isConnecting = false;
         });
       }
@@ -414,7 +443,8 @@ class _BroadcastVideoViewState extends State<_BroadcastVideoView> {
   }
 
   void _onParticipantChanged() {
-    final subscribedVideos = widget.participant.videoTracks.values.where((pub) {
+    final trackPublications = widget.participant.trackPublications.values;
+    final subscribedVideos = trackPublications.where((pub) {
       return pub.kind == TrackType.VIDEO &&
           !pub.isScreenShare &&
           pub.subscribed &&
@@ -431,7 +461,7 @@ class _BroadcastVideoViewState extends State<_BroadcastVideoView> {
     if (_videoPub?.track != null && _videoPub!.track is VideoTrack) {
       return VideoTrackRenderer(
         _videoPub!.track as VideoTrack,
-        fit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+        fit: rtc.RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
       );
     }
     

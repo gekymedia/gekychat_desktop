@@ -465,7 +465,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
                 Text('Recording duration: ${_formatDuration(_recordingDuration)}'),
                 const SizedBox(height: 16),
                 // Audio preview player
-                _DesktopAudioPreviewWidget(
+                DesktopAudioPreviewWidget(
                   audioPath: path,
                   duration: _recordingDuration,
                   audioPlayer: _audioPlayer,
@@ -1530,22 +1530,23 @@ class _ChatViewState extends ConsumerState<ChatView> {
 }
 
 // Audio preview widget for voice recording playback (Desktop)
-class _DesktopAudioPreviewWidget extends StatefulWidget {
+class DesktopAudioPreviewWidget extends StatefulWidget {
   final String audioPath;
   final Duration duration;
   final AudioPlayer audioPlayer;
 
-  const _DesktopAudioPreviewWidget({
+  const DesktopAudioPreviewWidget({
     required this.audioPath,
     required this.duration,
     required this.audioPlayer,
   });
 
   @override
-  State<_DesktopAudioPreviewWidget> createState() => _DesktopAudioPreviewWidgetState();
+  @override
+  State<DesktopAudioPreviewWidget> createState() => DesktopAudioPreviewWidgetState();
 }
 
-class _DesktopAudioPreviewWidgetState extends State<_DesktopAudioPreviewWidget> {
+class DesktopAudioPreviewWidgetState extends State<DesktopAudioPreviewWidget> {
   bool _isPlaying = false;
   Duration _position = Duration.zero;
   Duration _totalDuration = Duration.zero;

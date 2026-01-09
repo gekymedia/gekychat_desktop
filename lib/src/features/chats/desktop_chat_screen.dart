@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
+import 'dart:async';
 import '../profile/settings_screen.dart';
 import '../profile/profile_edit_screen.dart';
 import '../contacts/contacts_screen.dart';
@@ -20,6 +21,7 @@ import '../channels/channels_screen.dart';
 import '../starred/starred_screen.dart';
 import '../archive/archived_screen.dart';
 import '../broadcast/broadcast_lists_screen.dart';
+import '../broadcast/broadcast_repository.dart';
 import '../two_factor/two_factor_screen.dart';
 import '../linked_devices/linked_devices_screen.dart';
 import '../privacy/privacy_settings_screen.dart';
@@ -27,6 +29,7 @@ import '../notifications/notification_settings_screen.dart';
 import '../media_auto_download/media_auto_download_screen.dart';
 import '../storage/storage_usage_screen.dart';
 import '../world/world_feed_screen.dart';
+import '../world/world_feed_repository.dart';
 import '../mail/mail_screen.dart';
 import '../qr/qr_scanner_screen.dart';
 import '../ai/ai_chat_screen.dart';
@@ -57,6 +60,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
   
   final TextEditingController _searchController = TextEditingController();
   String _selectedFilter = 'all';
+  Timer? _searchDebounceTimer;
 
   @override
   void initState() {
@@ -71,6 +75,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _searchController.dispose();
+    _searchDebounceTimer?.cancel();
     super.dispose();
   }
   
@@ -762,18 +767,33 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                   ),
                   onChanged: (value) {
                     setState(() {});
+                    // Debounce search for world feed
+                    _searchDebounceTimer?.cancel();
+                    if (currentRoute == '/world' && value.isNotEmpty) {
+                      _searchDebounceTimer = Timer(const Duration(milliseconds: 500), () async {
+                        try {
+                          final worldFeedRepo = ref.read(worldFeedRepositoryProvider);
+                          final response = await worldFeedRepo.getFeed(page: 1, query: value);
+                          // TODO: Display search results in a dialog or overlay
+                          debugPrint('World feed search results: ${response['data']?.length ?? 0} posts');
+                        } catch (e) {
+                          debugPrint('World feed search error: $e');
+                        }
+                      });
+                    }
                   },
                 ),
               ),
               const SizedBox(width: 8),
-              // Filter button (for search filtering)
-              IconButton(
-                icon: Icon(Icons.filter_list, color: isDark ? Colors.white70 : Colors.grey[600]),
-                tooltip: 'Search filters',
-                onPressed: () {
-                  // TODO: Show search filter options dialog
-                },
-              ),
+              // Filter button (for search filtering) - hide on world feed
+              if (currentRoute != '/world')
+                IconButton(
+                  icon: Icon(Icons.filter_list, color: isDark ? Colors.white70 : Colors.grey[600]),
+                  tooltip: 'Search filters',
+                  onPressed: () {
+                    // TODO: Show search filter options dialog
+                  },
+                ),
             ],
           ),
         ),
@@ -804,6 +824,8 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                 _buildFilterChip('mail', 'Mail', isDark),
                 const SizedBox(width: 8),
                 _buildFilterChip('archived', 'Archived', isDark),
+                const SizedBox(width: 8),
+                _buildFilterChip('broadcast', 'Broadcast', isDark),
                 const SizedBox(width: 8),
             // Add new filter button
             FilterChip(
@@ -870,6 +892,9 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                     // Mail filter - placeholder for now
                     filteredConversations = [];
                     filteredGroups = [];
+                  } else if (_selectedFilter == 'broadcast') {
+                    // Broadcast filter - show broadcast lists screen
+                    return const BroadcastListsScreen();
                   }
                   
                   final conversations = filteredConversations;
