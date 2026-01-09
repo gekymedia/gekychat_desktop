@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'live_broadcast_repository.dart';
+import 'broadcast_viewer_screen.dart';
+import 'broadcast_streaming_screen.dart';
 
 final liveBroadcastsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final repo = ref.read(liveBroadcastRepositoryProvider);
@@ -245,20 +247,23 @@ class LiveBroadcastScreen extends ConsumerWidget {
   Future<void> _startBroadcast(BuildContext context, WidgetRef ref, String title) async {
     try {
       final repo = ref.read(liveBroadcastRepositoryProvider);
-      await repo.startBroadcast(title: title);
+      final result = await repo.startBroadcast(title: title);
       
-      // Refresh the list
+      // Navigate to broadcast streaming screen
+      if (context.mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => BroadcastStreamingScreen(
+              broadcastId: result['broadcast_id'] as int? ?? 0,
+              startData: result,
+            ),
+          ),
+        );
+      }
+      
+      // Refresh the list in background
       ref.invalidate(liveBroadcastsProvider);
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Broadcast started successfully!'),
-          backgroundColor: Colors.green,
-        ),
-      );
-      
-      // TODO: Navigate to broadcast view/streaming screen
-      // For now, just show success message
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
