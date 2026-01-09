@@ -61,10 +61,6 @@ class _BroadcastStreamingScreenState extends ConsumerState<BroadcastStreamingScr
       await room.connect(
         websocketUrl,
         token,
-        roomOptions: const RoomOptions(
-          adaptiveStream: true,
-          dynacast: true,
-        ),
       );
 
       // Enable camera and microphone

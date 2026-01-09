@@ -62,10 +62,6 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
       await room.connect(
         websocketUrl,
         token,
-        roomOptions: const RoomOptions(
-          adaptiveStream: true,
-          dynacast: true,
-        ),
       );
 
       // Listen for remote participants

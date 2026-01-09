@@ -39,7 +39,7 @@ dependencies:
   cached_network_image: ^3.4.1
   video_player: ^2.8.1
   flutter_webrtc: ^0.11.4
-  livekit_client: ^1.0.0  # LiveKit SDK for live broadcasting
+  livekit_client: ^2.2.6  # LiveKit SDK for live broadcasting
   cupertino_icons: ^1.0.8
   json_annotation: ^4.8.1
   
