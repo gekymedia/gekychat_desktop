@@ -41,8 +41,9 @@ class LinkedDevicesRepository {
     }
   }
 
-  Future<void> deleteDevice(int deviceId) async {
+  Future<void> deleteDevice(String deviceId) async {
     try {
+      // The API now handles both int IDs (tokens) and string IDs (web sessions like 'web_session_id')
       await _api.deleteLinkedDevice(deviceId);
     } catch (e) {
       throw Exception('Failed to delete device: $e');

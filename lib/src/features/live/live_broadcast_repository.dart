@@ -9,15 +9,15 @@ class LiveBroadcastRepository {
   LiveBroadcastRepository(this._apiService);
 
   /// Start a live broadcast
-  Future<Map<String, dynamic>> startBroadcast({required String title}) async {
-    final response = await _apiService.startLiveBroadcast(title: title);
-    return Map<String, dynamic>.from(response.data['data'] ?? response.data);
+  Future<Map<String, dynamic>> startBroadcast({String? title}) async {
+    final response = await _apiService.startLiveBroadcast(title: title ?? '');
+    return Map<String, dynamic>.from(response.data);
   }
 
   /// Join a live broadcast
   Future<Map<String, dynamic>> joinBroadcast(int id) async {
     final response = await _apiService.joinLiveBroadcast(id);
-    return Map<String, dynamic>.from(response.data['data'] ?? response.data);
+    return Map<String, dynamic>.from(response.data);
   }
 
   /// End a live broadcast

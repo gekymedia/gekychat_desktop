@@ -441,6 +441,17 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
   }
 
   Future<void> _showCommentsDialog(int statusId) async {
+    // Pause video if it's currently playing
+    if (_videoController != null && _videoController!.value.isPlaying) {
+      // Pause the video
+      _videoController!.pause();
+      _autoAdvanceTimer?.cancel();
+      _progressController.stop();
+      setState(() {
+        _isPaused = true;
+      });
+    }
+    
     final repo = ref.read(statusRepositoryProvider);
     List<StatusComment> comments = [];
 

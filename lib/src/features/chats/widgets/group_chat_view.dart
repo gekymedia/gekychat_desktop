@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:record/record.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart' show Geolocator, LocationPermission, LocationAccuracy, Position;
 import 'package:path_provider/path_provider.dart';
@@ -13,6 +14,7 @@ import '../chat_repo.dart';
 import '../models.dart';
 import 'message_bubble.dart';
 import 'emoji_picker_widget.dart';
+import 'chat_view.dart' show _DesktopAudioPreviewWidget;
 import '../../contacts/contacts_repository.dart';
 import 'group_info_screen.dart'; // Provides groupInfoProvider
 import '../../media/media_gallery_screen.dart';
@@ -52,6 +54,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
   
   // Audio recording
   final AudioRecorder _audioRecorder = AudioRecorder();
+  final AudioPlayer _audioPlayer = AudioPlayer();
   bool _isRecording = false;
   String? _recordingPath;
   Duration _recordingDuration = Duration.zero;
@@ -75,6 +78,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
     _scrollController.dispose();
     _messageController.dispose();
     _audioRecorder.dispose();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -237,7 +241,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
       });
 
       if (path != null && mounted) {
-        // Show dialog to confirm sending or canceling
+        // Show dialog to confirm sending or canceling with audio preview
         final shouldSend = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
@@ -247,15 +251,28 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
               children: [
                 Text('Recording duration: ${_formatDuration(_recordingDuration)}'),
                 const SizedBox(height: 16),
+                // Audio preview player
+                _DesktopAudioPreviewWidget(
+                  audioPath: path,
+                  duration: _recordingDuration,
+                  audioPlayer: _audioPlayer,
+                ),
+                const SizedBox(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
                     TextButton(
-                      onPressed: () => Navigator.pop(context, false),
+                      onPressed: () {
+                        _audioPlayer.stop();
+                        Navigator.pop(context, false);
+                      },
                       child: const Text('Cancel'),
                     ),
                     ElevatedButton(
-                      onPressed: () => Navigator.pop(context, true),
+                      onPressed: () {
+                        _audioPlayer.stop();
+                        Navigator.pop(context, true);
+                      },
                       child: const Text('Send'),
                     ),
                   ],
@@ -663,7 +680,9 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                       ),
                     ),
                     Text(
-                      '${widget.memberCount ?? widget.memberNames.length} ${widget.memberCount == 1 ? 'member' : 'members'}',
+                      isChannel
+                          ? '${widget.memberCount ?? widget.memberNames.length} ${widget.memberCount == 1 ? 'follower' : 'followers'}'
+                          : '${widget.memberCount ?? widget.memberNames.length} ${widget.memberCount == 1 ? 'member' : 'members'}',
                       style: TextStyle(
                         color: isDark ? Colors.white70 : Colors.grey[600],
                         fontSize: 12,

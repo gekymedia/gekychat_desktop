@@ -75,7 +75,7 @@ class LinkedDevicesScreen extends ConsumerWidget {
                           horizontal: 8, vertical: 4),
                       child: ListTile(
                         leading: Icon(
-                          _getDeviceIcon(device.name),
+                          _getDeviceIcon(device.name, device.deviceType),
                           size: 32,
                           color: device.isCurrentDevice
                               ? AppTheme.primaryGreen
@@ -138,8 +138,8 @@ class LinkedDevicesScreen extends ConsumerWidget {
                               ),
                           ],
                         ),
-                        trailing: device.isCurrentDevice
-                            ? null
+                        trailing: device.isCurrentDevice || device.deviceType == 'web'
+                            ? null // Can't delete current device or web sessions
                             : IconButton(
                                 icon: const Icon(Icons.delete_outline),
                                 onPressed: () =>
@@ -192,7 +192,24 @@ class LinkedDevicesScreen extends ConsumerWidget {
     );
   }
 
-  IconData _getDeviceIcon(String name) {
+  IconData _getDeviceIcon(String name, String? deviceType) {
+    // Use device_type if available, otherwise parse from name
+    if (deviceType == 'web') {
+      return Icons.web;
+    } else if (deviceType == 'mobile_desktop') {
+      final lower = name.toLowerCase();
+      if (lower.contains('android') || lower.contains('mobile') || lower.contains('phone')) {
+        return Icons.smartphone;
+      } else if (lower.contains('windows')) {
+        return Icons.laptop_windows;
+      } else if (lower.contains('mac') || lower.contains('ios')) {
+        return Icons.laptop_mac;
+      } else if (lower.contains('linux')) {
+        return Icons.computer;
+      }
+    }
+    
+    // Fallback to parsing from name
     final lower = name.toLowerCase();
     if (lower.contains('windows')) return Icons.laptop_windows;
     if (lower.contains('mac') || lower.contains('ios')) return Icons.laptop_mac;
@@ -200,6 +217,8 @@ class LinkedDevicesScreen extends ConsumerWidget {
     if (lower.contains('linux')) return Icons.computer;
     if (lower.contains('mobile') || lower.contains('phone'))
       return Icons.smartphone;
+    if (lower.contains('web') || lower.contains('browser'))
+      return Icons.web;
     return Icons.devices;
   }
 

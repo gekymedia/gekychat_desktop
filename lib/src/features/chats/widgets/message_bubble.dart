@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../models.dart';
 import '../../../theme/app_theme.dart';
 import '../forward_message_screen.dart';
+import '../../../widgets/colored_avatar.dart';
 
 class MessageBubble extends StatelessWidget {
   final Message message;
@@ -68,6 +69,29 @@ class MessageBubble extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Sender name and avatar for group messages
+                    if (!isMe && isGroupMessage && message.sender != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Row(
+                          children: [
+                            ColoredAvatar(
+                              imageUrl: message.sender!['avatar_url'] as String? ?? message.sender!['avatar_path'] as String?,
+                              name: message.sender!['name'] as String? ?? message.sender!['phone'] as String? ?? 'Unknown',
+                              radius: 12,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              message.sender!['name'] as String? ?? message.sender!['phone'] as String? ?? 'Unknown',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: isDark ? Colors.white70 : Colors.grey[700],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     // Attachments
                     if (message.attachments.isNotEmpty)
                       ...message.attachments.map((attachment) {
@@ -315,7 +339,6 @@ class MessageBubble extends StatelessWidget {
   }
 
   void _showMessageMenu(BuildContext context, BuildContext widgetContext, {Offset? position}) {
-    final RenderBox? overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
     final screenSize = MediaQuery.of(context).size;
     
     // Use provided position or center of screen
@@ -387,7 +410,7 @@ class MessageBubble extends StatelessWidget {
             ],
           ),
           onTap: () async {
-            await Clipboard.setData(ClipboardData(text: message.body ?? ''));
+            await Clipboard.setData(ClipboardData(text: message.body));
             if (context.mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(

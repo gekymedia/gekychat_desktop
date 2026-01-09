@@ -184,6 +184,8 @@ class ApiService {
   Future<Response> verifyOtp(String phone, String code) =>
       post('/auth/verify', data: {'phone': phone, 'code': code});
 
+  Future<Response> logout() => post('/auth/logout');
+
   // ---------------------------------------------------------------------------
   // Contacts
   // ---------------------------------------------------------------------------
@@ -395,6 +397,24 @@ class ApiService {
       get('/conversations/archived');
 
   // ---------------------------------------------------------------------------
+  // Labels
+  // ---------------------------------------------------------------------------
+
+  Future<Response> getLabels() => get('/labels');
+  
+  Future<Response> createLabel(String name) =>
+      post('/labels', data: {'name': name});
+  
+  Future<Response> deleteLabel(int labelId) =>
+      delete('/labels/$labelId');
+  
+  Future<Response> attachLabelToConversation(int labelId, int conversationId) =>
+      post('/labels/$labelId/attach/$conversationId');
+  
+  Future<Response> detachLabelFromConversation(int labelId, int conversationId) =>
+      delete('/labels/$labelId/detach/$conversationId');
+
+  // ---------------------------------------------------------------------------
   // Two-Factor Authentication
   // ---------------------------------------------------------------------------
 
@@ -412,7 +432,7 @@ class ApiService {
   // ---------------------------------------------------------------------------
 
   Future<Response> getLinkedDevices() => get('/linked-devices');
-  Future<Response> deleteLinkedDevice(int id) => delete('/linked-devices/$id');
+  Future<Response> deleteLinkedDevice(dynamic id) => delete('/linked-devices/$id');
   Future<Response> deleteOtherLinkedDevices() => delete('/linked-devices/others');
 
   // ---------------------------------------------------------------------------
@@ -492,6 +512,10 @@ class ApiService {
   Future<Response> updateGroupNotificationSettings(
           int groupId, Map<String, dynamic> data) =>
       put('/groups/$groupId/notification-settings', data: data);
+  Future<Response> generateGroupInvite(int groupId) =>
+      post('/groups/$groupId/generate-invite');
+  Future<Response> getGroupInviteInfo(int groupId) =>
+      get('/groups/$groupId/invite-info');
 
   // ---------------------------------------------------------------------------
   // Media Auto-Download
@@ -634,6 +658,8 @@ class ApiService {
     });
   Future<Response> followWorldFeedCreator(int creatorId) =>
     post('/world-feed/creators/$creatorId/follow');
+  Future<Response> getWorldFeedPostShareUrl(int postId) =>
+    get('/world-feed/posts/$postId/share-url');
 
   // ---------------------------------------------------------------------------
   // PHASE 2: Email Chat (Mail)
@@ -650,8 +676,8 @@ class ApiService {
   // PHASE 2: Live Broadcast
   // ---------------------------------------------------------------------------
 
-  Future<Response> startLiveBroadcast({required String title}) =>
-    post('/live/start', data: {'title': title});
+  Future<Response> startLiveBroadcast({String? title}) =>
+    post('/live/start', data: title != null && title.isNotEmpty ? {'title': title} : {});
   Future<Response> joinLiveBroadcast(int broadcastId) =>
     post('/live/$broadcastId/join');
   Future<Response> endLiveBroadcast(int broadcastId) =>

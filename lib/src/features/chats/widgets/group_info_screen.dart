@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:flutter/foundation.dart';
 import '../../../core/providers.dart';
 import '../../../theme/app_theme.dart';
 import '../chat_repo.dart';
@@ -132,6 +134,12 @@ class GroupInfoScreen extends ConsumerWidget {
                             ),
                           );
                         },
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.share),
+                        title: Text(group['type'] == 'channel' ? 'Share channel link' : 'Share group link'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => _shareInviteLink(context, ref, groupId, group),
                       ),
                     ],
                   ),
@@ -376,6 +384,60 @@ class GroupInfoScreen extends ConsumerWidget {
         ],
       ),
     );
+  }
+  
+  Future<void> _shareInviteLink(BuildContext context, WidgetRef ref, int groupId, Map<String, dynamic> group) async {
+    try {
+      final api = ref.read(apiServiceProvider);
+      
+      // Get or generate invite link
+      String? inviteLink;
+      try {
+        final infoResponse = await api.getGroupInviteInfo(groupId);
+        if (infoResponse.data['success'] == true && infoResponse.data['invite_link'] != null) {
+          inviteLink = infoResponse.data['invite_link'];
+        }
+      } catch (e) {
+        debugPrint('Failed to get invite info: $e');
+      }
+      
+      // If no invite link, generate one (admin only)
+      if (inviteLink == null && (group['is_admin'] == true || group['is_owner'] == true)) {
+        try {
+          final generateResponse = await api.generateGroupInvite(groupId);
+          if (generateResponse.data['success'] == true) {
+            inviteLink = generateResponse.data['invite_link'];
+          }
+        } catch (e) {
+          debugPrint('Failed to generate invite: $e');
+        }
+      }
+      
+      if (inviteLink == null || inviteLink.isEmpty) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Unable to get invite link. Only admins can generate invite links.')),
+          );
+        }
+        return;
+      }
+      
+      // Share the invite link
+      final groupName = group['name'] as String? ?? 'Group';
+      final groupType = group['type'] == 'channel' ? 'channel' : 'group';
+      final shareText = 'Join my $groupType "$groupName" on GekyChat: $inviteLink';
+      
+      await Share.share(
+        shareText,
+        subject: 'Invitation to $groupName',
+      );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to share invite link: $e')),
+        );
+      }
+    }
   }
 }
 

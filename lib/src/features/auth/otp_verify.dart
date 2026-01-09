@@ -5,6 +5,30 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'auth_provider.dart';
 
+class PasteIntent extends Intent {
+  const PasteIntent();
+}
+
+class OtpPasteFormatter extends TextInputFormatter {
+  final Function(String) onPaste;
+  
+  OtpPasteFormatter(this.onPaste);
+  
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    // If the new value has more than 1 character, it's likely a paste
+    if (newValue.text.length > 1) {
+      onPaste(newValue.text);
+      // Return the old value to prevent the paste from going through
+      return oldValue;
+    }
+    return newValue;
+  }
+}
+
 class OtpVerifyScreen extends ConsumerStatefulWidget {
   final String phone;
   const OtpVerifyScreen({super.key, required this.phone});
@@ -95,11 +119,22 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
     setState(() {});
   }
 
+  Future<void> _handleClipboardPaste() async {
+    try {
+      final clipboardData = await Clipboard.getData(Clipboard.kTextPlain);
+      if (clipboardData?.text != null && clipboardData!.text!.isNotEmpty) {
+        _handlePaste(clipboardData.text!);
+      }
+    } catch (e) {
+      debugPrint('Failed to read clipboard: $e');
+    }
+  }
+
   Widget _otpBox(int i) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
-      width: 56,
+      width: 48,
       height: 56,
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF202C33) : Colors.white,
@@ -115,19 +150,26 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
         controller: _ctrls[i],
         focusNode: _nodes[i],
         textAlign: TextAlign.center,
-        maxLength: 1,
         keyboardType: TextInputType.number,
         style: TextStyle(
           fontSize: 24,
           fontWeight: FontWeight.w600,
           color: isDark ? Colors.white : Colors.black,
         ),
-        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        inputFormatters: [
+          FilteringTextInputFormatter.digitsOnly,
+          OtpPasteFormatter((text) => _handlePaste(text)),
+          LengthLimitingTextInputFormatter(1), // Limit to 1 character after paste handling
+        ],
         decoration: const InputDecoration(
           counterText: '',
           border: InputBorder.none,
           contentPadding: EdgeInsets.zero,
         ),
+        onTap: () {
+          // Check clipboard when user taps on any field
+          _handleClipboardPaste();
+        },
         onChanged: (v) {
           if (v.length > 1) {
             _handlePaste(v);
@@ -152,14 +194,14 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
       body: Center(
         child: Container(
           constraints: const BoxConstraints(maxWidth: 500),
-          padding: const EdgeInsets.all(48),
+          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
           child: Card(
             elevation: 8,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(24),
             ),
             child: Padding(
-              padding: const EdgeInsets.all(48),
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -183,9 +225,37 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
                   const SizedBox(height: 32),
                   
                   // OTP boxes
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: List.generate(6, (i) => _otpBox(i)),
+                  Shortcuts(
+                    shortcuts: {
+                      LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyV): const PasteIntent(),
+                      LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyV): const PasteIntent(),
+                    },
+                    child: Actions(
+                      actions: {
+                        PasteIntent: CallbackAction<PasteIntent>(
+                          onInvoke: (intent) => _handleClipboardPaste(),
+                        ),
+                      },
+                      child: Focus(
+                        autofocus: false,
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            mainAxisSize: MainAxisSize.min,
+                            children: List.generate(
+                              6,
+                              (i) => Padding(
+                                padding: EdgeInsets.only(
+                                  right: i < 5 ? 8 : 0,
+                                ),
+                                child: _otpBox(i),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 24),
                   

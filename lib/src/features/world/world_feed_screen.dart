@@ -9,6 +9,7 @@ import 'world_feed_repository.dart';
 import 'create_post_screen.dart';
 import 'widgets/comments_dialog.dart';
 import 'widgets/fullscreen_video_player.dart';
+import 'widgets/fullscreen_media_viewer.dart';
 
 /// PHASE 2: World Feed Screen - Instagram-like grid layout for desktop
 class WorldFeedScreen extends ConsumerStatefulWidget {
@@ -216,7 +217,7 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
     final caption = post['caption'] as String?;
     final creator = post['creator'] as Map<String, dynamic>?;
     final likesCount = post['likes_count'] ?? 0;
-    // final commentsCount = post['comments_count'] ?? 0;
+    final commentsCount = post['comments_count'] ?? 0;
     final isVideo = post['type'] == 'video';
     final isLiked = post['is_liked'] ?? false;
     final apiService = ref.read(apiServiceProvider);
@@ -389,24 +390,37 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
                     ),
                   ),
 
-                // Hover overlay
-                MouseRegion(
-                  child: Container(
-                    color: Colors.transparent,
+                // Click handler for images (videos handled separately above)
+                if (!isVideo)
+                  Positioned.fill(
                     child: Material(
                       color: Colors.transparent,
                       child: InkWell(
                         onTap: () {
-                          // TODO: Open full view/detail
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Post ${post['id']}')),
-                          );
+                          // Find all image posts from current feed
+                          final imagePosts = _posts
+                              .where((p) => p['type'] != 'video')
+                              .toList();
+                          final imageIndex = imagePosts.indexWhere((p) => p['id'] == post['id']);
+                          
+                          if (imageIndex >= 0) {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => FullscreenMediaViewer(
+                                  posts: imagePosts,
+                                  initialIndex: imageIndex,
+                                  baseUrl: baseUrl,
+                                ),
+                                fullscreenDialog: true,
+                              ),
+                            );
+                          }
                         },
                         child: const SizedBox.expand(),
                       ),
                     ),
                   ),
-                ),
               ],
             ),
           ),

@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:record/record.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart' show Geolocator, LocationPermission, LocationAccuracy, Position;
 import 'package:path_provider/path_provider.dart';
@@ -63,6 +64,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
   
   // Audio recording
   final AudioRecorder _audioRecorder = AudioRecorder();
+  final AudioPlayer _audioPlayer = AudioPlayer();
   bool _isRecording = false;
   String? _recordingPath;
   Duration _recordingDuration = Duration.zero;
@@ -285,6 +287,8 @@ class _ChatViewState extends ConsumerState<ChatView> {
     _messageController.removeListener(_onMessageChanged);
     _scrollController.dispose();
     _messageController.dispose();
+    _audioRecorder.dispose();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -450,7 +454,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
       });
 
       if (path != null && mounted) {
-        // Show dialog to confirm sending or canceling
+        // Show dialog to confirm sending or canceling with audio preview
         final shouldSend = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
@@ -460,15 +464,28 @@ class _ChatViewState extends ConsumerState<ChatView> {
               children: [
                 Text('Recording duration: ${_formatDuration(_recordingDuration)}'),
                 const SizedBox(height: 16),
+                // Audio preview player
+                _DesktopAudioPreviewWidget(
+                  audioPath: path,
+                  duration: _recordingDuration,
+                  audioPlayer: _audioPlayer,
+                ),
+                const SizedBox(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
                     TextButton(
-                      onPressed: () => Navigator.pop(context, false),
+                      onPressed: () {
+                        _audioPlayer.stop();
+                        Navigator.pop(context, false);
+                      },
                       child: const Text('Cancel'),
                     ),
                     ElevatedButton(
-                      onPressed: () => Navigator.pop(context, true),
+                      onPressed: () {
+                        _audioPlayer.stop();
+                        Navigator.pop(context, true);
+                      },
                       child: const Text('Send'),
                     ),
                   ],
@@ -1509,6 +1526,132 @@ class _ChatViewState extends ConsumerState<ChatView> {
         ),
       ),
     );
+  }
+}
+
+// Audio preview widget for voice recording playback (Desktop)
+class _DesktopAudioPreviewWidget extends StatefulWidget {
+  final String audioPath;
+  final Duration duration;
+  final AudioPlayer audioPlayer;
+
+  const _DesktopAudioPreviewWidget({
+    required this.audioPath,
+    required this.duration,
+    required this.audioPlayer,
+  });
+
+  @override
+  State<_DesktopAudioPreviewWidget> createState() => _DesktopAudioPreviewWidgetState();
+}
+
+class _DesktopAudioPreviewWidgetState extends State<_DesktopAudioPreviewWidget> {
+  bool _isPlaying = false;
+  Duration _position = Duration.zero;
+  Duration _totalDuration = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _totalDuration = widget.duration;
+    _setupListeners();
+  }
+
+  void _setupListeners() {
+    widget.audioPlayer.onPlayerStateChanged.listen((state) {
+      if (mounted) {
+        setState(() {
+          _isPlaying = state == PlayerState.playing;
+        });
+      }
+    });
+
+    widget.audioPlayer.onDurationChanged.listen((duration) {
+      if (mounted) {
+        setState(() {
+          _totalDuration = duration;
+        });
+      }
+    });
+
+    widget.audioPlayer.onPositionChanged.listen((position) {
+      if (mounted) {
+        setState(() {
+          _position = position;
+        });
+      }
+    });
+  }
+
+  Future<void> _togglePlayback() async {
+    if (_isPlaying) {
+      await widget.audioPlayer.pause();
+    } else {
+      await widget.audioPlayer.play(DeviceFileSource(widget.audioPath));
+    }
+  }
+
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final minutes = twoDigits(duration.inMinutes.remainder(60));
+    final seconds = twoDigits(duration.inSeconds.remainder(60));
+    return '$minutes:$seconds';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            IconButton(
+              icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow),
+              onPressed: _togglePlayback,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                children: [
+                  Slider(
+                    value: _position.inMilliseconds.toDouble(),
+                    min: 0,
+                    max: _totalDuration.inMilliseconds > 0
+                        ? _totalDuration.inMilliseconds.toDouble()
+                        : widget.duration.inMilliseconds.toDouble(),
+                    onChanged: (value) async {
+                      await widget.audioPlayer.seek(Duration(milliseconds: value.toInt()));
+                    },
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _formatDuration(_position),
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      Text(
+                        _formatDuration(_totalDuration > Duration.zero
+                            ? _totalDuration
+                            : widget.duration),
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  @override
+  void dispose() {
+    widget.audioPlayer.stop();
+    super.dispose();
   }
 }
 

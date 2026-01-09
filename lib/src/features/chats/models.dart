@@ -264,6 +264,7 @@ class Message {
   final int? conversationId; // Nullable because group messages don't have conversation_id
   final int? groupId; // Nullable because DM messages don't have group_id
   final int senderId;
+  final Map<String, dynamic>? sender; // Sender info (name, avatar) for group messages
   final String body;
   final DateTime createdAt;
   final int? replyToId;
@@ -283,6 +284,7 @@ class Message {
     this.conversationId,
     this.groupId,
     required this.senderId,
+    this.sender,
     required this.body,
     required this.createdAt,
     this.replyToId,
@@ -347,11 +349,18 @@ class Message {
       throw FormatException('Message missing sender_id', json);
     }
     
+    // Extract sender info for group messages
+    Map<String, dynamic>? senderInfo;
+    if (json['sender'] != null && json['sender'] is Map) {
+      senderInfo = Map<String, dynamic>.from(json['sender'] as Map);
+    }
+    
     return Message(
       id: json['id'] as int,
       conversationId: json['conversation_id'] as int?,
       groupId: json['group_id'] as int?,
       senderId: senderId as int,
+      sender: senderInfo,
       body: json['body'] ?? '',
       createdAt: DateTime.parse(json['created_at'] as String),
       replyToId: json['reply_to_id'] as int?,

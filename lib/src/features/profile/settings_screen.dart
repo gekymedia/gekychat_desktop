@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/providers.dart';
+import '../auth/auth_provider.dart';
 import 'profile_edit_screen.dart';
 import '../quick_replies/quick_replies_screen.dart';
 import '../auto_reply/auto_reply_screen.dart';
@@ -148,6 +150,14 @@ class SettingsScreen extends ConsumerWidget {
                           builder: (context) => const LinkedDevicesScreen(),
                         ),
                       );
+                    },
+                  ),
+                  _SettingsTile(
+                    icon: Icons.logout,
+                    title: 'Logout',
+                    subtitle: 'Sign out from your account',
+                    onTap: () {
+                      _showLogoutDialog(context, ref);
                     },
                   ),
                   _SettingsTile(
@@ -360,6 +370,70 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
+  Future<void> _showLogoutDialog(BuildContext context, WidgetRef ref) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
+        title: Text(
+          'Logout',
+          style: TextStyle(color: isDark ? Colors.white : Colors.black),
+        ),
+        content: Text(
+          'Are you sure you want to logout?',
+          style: TextStyle(color: isDark ? Colors.white70 : Colors.grey[700]),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel', style: TextStyle(color: isDark ? Colors.white70 : Colors.grey[700])),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFF008069)),
+            child: const Text('Logout', style: TextStyle(fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        // First, clear local storage immediately
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('auth_token');
+        await prefs.remove('user_id');
+        
+        // Try to call logout API first (but don't block if it fails)
+        try {
+          final apiService = ref.read(apiServiceProvider);
+          await apiService.logout();
+        } catch (e) {
+          // Ignore API errors - we'll clear local state anyway
+          debugPrint('Logout API call failed (continuing anyway): $e');
+        }
+        
+        // Clear auth state via provider
+        ref.read(authProvider.notifier).logout();
+        
+        if (context.mounted) {
+          // Navigate to login - use pushAndRemoveUntil to clear navigation stack
+          context.go('/login');
+        }
+      } catch (e) {
+        // Even if there's an error, clear local state and navigate
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.clear();
+        ref.read(authProvider.notifier).logout();
+        
+        if (context.mounted) {
+          context.go('/login');
+        }
+      }
+    }
+  }
+
   void _showDeleteAccountDialog(BuildContext context, WidgetRef ref) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final passwordController = TextEditingController();
@@ -508,7 +582,7 @@ class SettingsScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              'A WhatsApp-style chat application for desktop platforms.',
+              'A modern chat application for desktop platforms.',
               style: TextStyle(
                 color: isDark ? Colors.white70 : Colors.grey[700],
               ),
@@ -525,12 +599,30 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
-  void _showBirthdayDialog(BuildContext context, WidgetRef ref) {
+  Future<void> _showBirthdayDialog(BuildContext context, WidgetRef ref) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    int? selectedMonth;
-    int? selectedDay;
+    
+    // Load current birthday first
+    int? currentMonth;
+    int? currentDay;
+    
+    try {
+      final api = ref.read(apiServiceProvider);
+      final response = await api.getProfile();
+      if (response.data != null) {
+        currentMonth = response.data['dob_month'];
+        currentDay = response.data['dob_day'];
+      }
+    } catch (e) {
+      debugPrint('Failed to load birthday: $e');
+    }
+    
+    if (!context.mounted) return;
+    
+    int? selectedMonth = currentMonth;
+    int? selectedDay = currentDay;
     bool saving = false;
-
+    
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(

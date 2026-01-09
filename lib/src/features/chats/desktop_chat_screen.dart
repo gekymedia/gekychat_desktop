@@ -52,6 +52,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
   int? _selectedGroupId;
 
   late Future<List<ConversationSummary>> _conversationsFuture;
+  late Future<List<ConversationSummary>> _archivedConversationsFuture;
   late Future<List<GroupSummary>> _groupsFuture;
   
   final TextEditingController _searchController = TextEditingController();
@@ -62,6 +63,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadConversations();
+    _loadArchivedConversations();
     _loadGroups();
   }
 
@@ -85,6 +87,13 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     final chatRepo = ref.read(chatRepositoryProvider);
     setState(() {
       _conversationsFuture = chatRepo.getConversations();
+    });
+  }
+
+  void _loadArchivedConversations() {
+    final chatRepo = ref.read(chatRepositoryProvider);
+    setState(() {
+      _archivedConversationsFuture = chatRepo.getArchivedConversations();
     });
   }
 
@@ -179,8 +188,99 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
             }
           },
         ),
+        PopupMenuItem(
+          child: const Row(
+            children: [
+              Icon(Icons.label_outline),
+              SizedBox(width: 8),
+              Text('Add to List/Label'),
+            ],
+          ),
+          onTap: () {
+            _showAddToLabelDialog(context, conversation.id);
+          },
+        ),
       ],
     );
+  }
+
+  Future<void> _showAddToLabelDialog(BuildContext context, int conversationId) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    try {
+      final apiService = ref.read(apiServiceProvider);
+      final response = await apiService.getLabels();
+      final labels = (response.data['data'] as List?)?.map((e) => Map<String, dynamic>.from(e)).toList() ?? [];
+      
+      if (labels.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No filters available. Create one first.')),
+          );
+        }
+        return;
+      }
+
+      final selectedLabel = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
+          title: Text(
+            'Add to Filter',
+            style: TextStyle(color: isDark ? Colors.white : Colors.black),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: labels.length,
+              itemBuilder: (context, index) {
+                final label = labels[index];
+                return ListTile(
+                  title: Text(
+                    label['name'] ?? '',
+                    style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                  ),
+                  onTap: () => Navigator.pop(context, label),
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel', style: TextStyle(color: isDark ? Colors.white70 : Colors.grey[700])),
+            ),
+          ],
+        ),
+      );
+
+      if (selectedLabel != null) {
+        try {
+          await apiService.attachLabelToConversation(
+            selectedLabel['id'] as int,
+            conversationId,
+          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Added to ${selectedLabel['name']}')),
+            );
+            _loadConversations();
+          }
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Failed to add to filter: $e')),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load filters: $e')),
+        );
+      }
+    }
   }
 
   void _showConversationMenu(BuildContext context, ConversationSummary conversation) {
@@ -703,18 +803,20 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                 const SizedBox(width: 8),
                 _buildFilterChip('mail', 'Mail', isDark),
                 const SizedBox(width: 8),
-                // Add new filter button
-                FilterChip(
-                  label: const Icon(Icons.add, size: 16),
-                  selected: false,
-                  onSelected: (selected) {
-                    // TODO: Show dialog to add new filter
-                  },
-                  backgroundColor: isDark ? const Color(0xFF2A3942) : Colors.grey[200],
-                  side: BorderSide(
-                    color: isDark ? const Color(0xFF2A3942) : Colors.grey[300]!,
-                  ),
-                ),
+                _buildFilterChip('archived', 'Archived', isDark),
+                const SizedBox(width: 8),
+            // Add new filter button
+            FilterChip(
+              label: const Icon(Icons.add, size: 16),
+              selected: false,
+              onSelected: (selected) {
+                _showCreateLabelDialog(context, isDark);
+              },
+              backgroundColor: isDark ? const Color(0xFF2A3942) : Colors.grey[200],
+              side: BorderSide(
+                color: isDark ? const Color(0xFF2A3942) : Colors.grey[300]!,
+              ),
+            ),
               ],
             ),
           ),
@@ -722,7 +824,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
         // Conversations/Groups List (Unified list - no tabs)
         Expanded(
           child: FutureBuilder<List<ConversationSummary>>(
-            future: _conversationsFuture,
+            future: _selectedFilter == 'archived' ? _archivedConversationsFuture : _conversationsFuture,
             builder: (context, conversationsSnapshot) {
               return FutureBuilder<List<GroupSummary>>(
                 future: _groupsFuture,
@@ -732,11 +834,49 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                     return const Center(child: CircularProgressIndicator());
                   }
                   
-                  final conversations = conversationsSnapshot.data ?? [];
-                  final groups = groupsSnapshot.data ?? [];
+                  // Get base data
+                  List<ConversationSummary> allConversations = conversationsSnapshot.data ?? [];
+                  List<GroupSummary> allGroups = groupsSnapshot.data ?? [];
+                  
+                  // Apply filters
+                  List<ConversationSummary> filteredConversations = [];
+                  List<GroupSummary> filteredGroups = [];
+                  
+                  if (_selectedFilter == 'all') {
+                    // Show all conversations (excluding archived) and all groups (excluding channels)
+                    filteredConversations = allConversations.where((c) => c.archivedAt == null).toList();
+                    filteredGroups = allGroups.where((g) => g.type != 'channel').toList();
+                  } else if (_selectedFilter == 'unread') {
+                    // Show unread conversations and groups
+                    filteredConversations = allConversations
+                        .where((c) => c.unreadCount > 0 && c.archivedAt == null)
+                        .toList();
+                    filteredGroups = allGroups
+                        .where((g) => g.unreadCount > 0 && g.type != 'channel')
+                        .toList();
+                  } else if (_selectedFilter == 'groups') {
+                    // Show only groups (not channels, not conversations)
+                    filteredConversations = [];
+                    filteredGroups = allGroups.where((g) => g.type != 'channel').toList();
+                  } else if (_selectedFilter == 'channels') {
+                    // Show only channels (not regular groups, not conversations)
+                    filteredConversations = [];
+                    filteredGroups = allGroups.where((g) => g.type == 'channel').toList();
+                  } else if (_selectedFilter == 'archived') {
+                    // Show only archived conversations (already filtered by future)
+                    filteredConversations = allConversations; // Already filtered by _archivedConversationsFuture
+                    filteredGroups = []; // Don't show groups in archived
+                  } else if (_selectedFilter == 'mail') {
+                    // Mail filter - placeholder for now
+                    filteredConversations = [];
+                    filteredGroups = [];
+                  }
+                  
+                  final conversations = filteredConversations;
+                  final groups = filteredGroups;
                   final allItems = <Widget>[];
                   
-                  // Add conversations (only regular chats, not channels)
+                  // Add conversations
                   for (final conversation in conversations) {
                     final isSelected = _selectedConversationId == conversation.id;
                     allItems.add(
@@ -778,9 +918,8 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                     );
                   }
                   
-                  // Add groups (only regular groups, not channels)
+                  // Add groups/channels based on filter
                   for (final group in groups) {
-                    if (group.type == 'channel') continue; // Skip channels
                     final isSelected = _selectedGroupId == group.id;
                     allItems.add(
                       GestureDetector(
@@ -805,18 +944,47 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                   }
                   
                   if (allItems.isEmpty) {
+                    String emptyMessage;
+                    IconData emptyIcon;
+                    
+                    switch (_selectedFilter) {
+                      case 'archived':
+                        emptyMessage = 'No archived conversations';
+                        emptyIcon = Icons.archive_outlined;
+                        break;
+                      case 'groups':
+                        emptyMessage = 'No groups yet';
+                        emptyIcon = Icons.group_outlined;
+                        break;
+                      case 'channels':
+                        emptyMessage = 'No channels yet';
+                        emptyIcon = Icons.campaign_outlined;
+                        break;
+                      case 'unread':
+                        emptyMessage = 'No unread messages';
+                        emptyIcon = Icons.mark_email_read_outlined;
+                        break;
+                      case 'mail':
+                        emptyMessage = 'No mail conversations';
+                        emptyIcon = Icons.mail_outline;
+                        break;
+                      default:
+                        emptyMessage = 'No conversations or groups yet';
+                        emptyIcon = Icons.chat_bubble_outline;
+                    }
+                    
                     return Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(
-                            Icons.chat_bubble_outline,
+                            emptyIcon,
                             size: 64,
                             color: isDark ? Colors.white38 : Colors.grey[400],
                           ),
                           const SizedBox(height: 16),
                           Text(
-                            'No conversations or groups yet',
+                            emptyMessage,
                             style: TextStyle(
                               color: isDark ? Colors.white70 : Colors.grey[600],
                               fontSize: 16,
@@ -837,6 +1005,68 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
         ),
       ],
     );
+  }
+
+  Future<void> _showCreateLabelDialog(BuildContext context, bool isDark) async {
+    final nameController = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
+        title: Text(
+          'Create Filter',
+          style: TextStyle(color: isDark ? Colors.white : Colors.black),
+        ),
+        content: TextField(
+          controller: nameController,
+          autofocus: true,
+          style: TextStyle(color: isDark ? Colors.white : Colors.black),
+          decoration: InputDecoration(
+            labelText: 'Filter Name',
+            labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.grey[700]),
+            border: const OutlineInputBorder(),
+            focusedBorder: const OutlineInputBorder(
+              borderSide: BorderSide(color: Color(0xFF008069)),
+            ),
+          ),
+          maxLength: 50,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: TextStyle(color: isDark ? Colors.white70 : Colors.grey[700])),
+          ),
+          TextButton(
+            onPressed: () {
+              if (nameController.text.trim().isNotEmpty) {
+                Navigator.pop(context, nameController.text.trim());
+              }
+            },
+            child: const Text('Create', style: TextStyle(color: Color(0xFF008069), fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null && result.isNotEmpty) {
+      try {
+        final apiService = ref.read(apiServiceProvider);
+        await apiService.createLabel(result);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Filter created successfully')),
+          );
+          // Reload to show new filter
+          setState(() {});
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to create filter: $e')),
+          );
+        }
+      }
+    }
   }
   
   Widget _buildFilterChip(String filter, String label, bool isDark) {

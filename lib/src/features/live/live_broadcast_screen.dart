@@ -281,8 +281,18 @@ class LiveBroadcastScreen extends ConsumerWidget {
         ),
       );
       
-      // TODO: Navigate to broadcast viewer screen
-      // For now, just show success message
+      // Navigate to broadcast viewer screen
+      if (context.mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => BroadcastViewerScreen(
+              broadcastId: broadcastId,
+              joinData: result,
+            ),
+          ),
+        );
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -309,7 +319,8 @@ class _BroadcastCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final title = broadcast['title'] as String? ?? 'Untitled Broadcast';
     final viewersCount = broadcast['viewers_count'] as int? ?? 0;
-    final creatorName = broadcast['creator']?['name'] as String? ?? 'Unknown';
+    final broadcaster = broadcast['broadcaster'] as Map<String, dynamic>?;
+    final creatorName = broadcaster?['name'] as String? ?? 'Unknown';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
