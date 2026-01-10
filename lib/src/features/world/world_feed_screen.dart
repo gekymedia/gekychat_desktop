@@ -163,9 +163,9 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
   }
 
   Widget _buildGridFeed(BuildContext context, bool isDark) {
-    // Calculate number of columns based on screen width (Instagram-like)
+    // Instagram-style vertical scrolling feed (one post per row, centered)
     final screenWidth = MediaQuery.of(context).size.width;
-    final crossAxisCount = screenWidth > 1200 ? 4 : screenWidth > 800 ? 3 : 2;
+    final maxWidth = screenWidth > 1200 ? 614.0 : screenWidth * 0.8;
 
     return RefreshIndicator(
       onRefresh: () async {
@@ -179,25 +179,28 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
       child: CustomScrollView(
         controller: _scrollController,
         slivers: [
-          SliverPadding(
-            padding: const EdgeInsets.all(16.0),
-            sliver: SliverGrid(
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: crossAxisCount,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-                childAspectRatio: 0.8, // Portrait aspect ratio
-              ),
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  if (index >= _posts.length) {
-                    return _hasMore && _isLoading
-                        ? const Center(child: CircularProgressIndicator())
-                        : const SizedBox.shrink();
-                  }
-                  return _buildGridItem(context, _posts[index], index, isDark);
-                },
-                childCount: _posts.length + (_hasMore ? 1 : 0),
+          SliverToBoxAdapter(
+            child: Center(
+              child: Container(
+                constraints: BoxConstraints(maxWidth: maxWidth),
+                padding: const EdgeInsets.symmetric(vertical: 20.0),
+                child: Column(
+                  children: [
+                    ...(_posts.asMap().entries.map((entry) {
+                      final index = entry.key;
+                      final post = entry.value;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 24.0),
+                        child: _buildPostCard(context, post, index, isDark),
+                      );
+                    }).toList()),
+                    if (_hasMore && _isLoading)
+                      const Padding(
+                        padding: EdgeInsets.all(20.0),
+                        child: Center(child: CircularProgressIndicator()),
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -206,7 +209,7 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
     );
   }
 
-  Widget _buildGridItem(
+  Widget _buildPostCard(
     BuildContext context,
     Map<String, dynamic> post,
     int index,
@@ -237,217 +240,223 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
           : '$baseUrl/storage/$thumbnailUrl';
     }
 
+    // Instagram-style post card (full-width, vertical scrolling)
     return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(
+          color: isDark ? const Color(0xFF2B3A43) : const Color(0xFFDBDBDB),
+          width: 1,
+        ),
+      ),
       clipBehavior: Clip.antiAlias,
       color: isDark ? const Color(0xFF202C33) : Colors.white,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Header with creator info
+          // Header with creator info (Instagram-style)
           Padding(
-            padding: const EdgeInsets.all(12.0),
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
             child: Row(
               children: [
-                CircleAvatar(
-                  radius: 16,
-                  backgroundImage: creator != null && creator['avatar_url'] != null
-                      ? NetworkImage(
-                          creator['avatar_url']?.toString().startsWith('http') == true
-                              ? creator['avatar_url'] as String
-                              : '$baseUrl/storage/${creator['avatar_url']}',
-                        )
-                      : null,
-                  child: creator == null || creator['avatar_url'] == null
-                      ? const Icon(Icons.person, size: 16)
-                      : null,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        creator?['name'] ?? 'Unknown',
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                        ),
-                      ),
-                      if (creator != null && creator['username'] != null)
-                        Text(
-                          '@${creator['username']}',
-                          style: TextStyle(
-                            color: isDark ? Colors.white70 : Colors.grey[600],
-                            fontSize: 12,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Media
-          Expanded(
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                if (fullMediaUrl != null)
-                  CachedNetworkImage(
-                    imageUrl: fullMediaUrl,
-                    fit: BoxFit.cover,
-                    placeholder: (context, url) => fullThumbnailUrl != null
-                        ? CachedNetworkImage(
-                            imageUrl: fullThumbnailUrl,
-                            fit: BoxFit.cover,
+                GestureDetector(
+                  onTap: () {
+                    // Navigate to profile
+                  },
+                  child: CircleAvatar(
+                    radius: 16,
+                    backgroundImage: creator != null && creator['avatar_url'] != null
+                        ? NetworkImage(
+                            creator['avatar_url']?.toString().startsWith('http') == true
+                                ? creator['avatar_url'] as String
+                                : '$baseUrl/storage/${creator['avatar_url']}',
                           )
-                        : Container(
-                            color: isDark ? Colors.grey[900] : Colors.grey[200],
-                            child: const Center(
-                              child: CircularProgressIndicator(),
+                        : null,
+                    child: creator == null || creator['avatar_url'] == null
+                        ? const Icon(Icons.person, size: 16)
+                        : null,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      // Navigate to profile
+                    },
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          creator?['name'] ?? 'Unknown',
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
+                        ),
+                        if (creator != null && creator['username'] != null)
+                          Text(
+                            '@${creator['username']}',
+                            style: TextStyle(
+                              color: isDark ? Colors.white70 : Colors.grey[600],
+                              fontSize: 12,
                             ),
                           ),
-                    errorWidget: (context, url, error) => Container(
-                      color: isDark ? Colors.grey[900] : Colors.grey[200],
-                      child: Icon(
-                        Icons.error_outline,
-                        color: isDark ? Colors.white38 : Colors.grey[400],
-                      ),
-                    ),
-                  )
-                else
-                  Container(
-                    color: isDark ? Colors.grey[900] : Colors.grey[200],
-                    child: Icon(
-                      Icons.broken_image,
-                      color: isDark ? Colors.white38 : Colors.grey[400],
+                      ],
                     ),
                   ),
-
-                // Video indicator and click handler
-                if (isVideo)
-                  Positioned.fill(
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: () {
-                          // Find all video posts from current feed
-                          final videoPosts = _posts
-                              .where((p) => p['type'] == 'video')
-                              .toList();
-                          final videoIndex = videoPosts.indexWhere((p) => p['id'] == post['id']);
-                          
-                          if (videoIndex >= 0) {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => FullscreenVideoPlayer(
-                                  posts: videoPosts,
-                                  initialIndex: videoIndex,
-                                  baseUrl: baseUrl,
-                                ),
-                                fullscreenDialog: true,
-                              ),
-                            );
-                          }
-                        },
-                        child: Stack(
-                          children: [
-                            Positioned(
-                              top: 8,
-                              right: 8,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: Colors.black54,
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: const Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.play_arrow, color: Colors.white, size: 16),
-                                    SizedBox(width: 4),
-                                    Text(
-                                      'VIDEO',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-
-                // Click handler for images (videos handled separately above)
-                if (!isVideo)
-                  Positioned.fill(
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: () {
-                          // Find all image posts from current feed
-                          final imagePosts = _posts
-                              .where((p) => p['type'] != 'video')
-                              .toList();
-                          final imageIndex = imagePosts.indexWhere((p) => p['id'] == post['id']);
-                          
-                          if (imageIndex >= 0) {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => FullscreenMediaViewer(
-                                  posts: imagePosts,
-                                  initialIndex: imageIndex,
-                                  baseUrl: baseUrl,
-                                ),
-                                fullscreenDialog: true,
-                              ),
-                            );
-                          }
-                        },
-                        child: const SizedBox.expand(),
-                      ),
-                    ),
-                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.more_vert, size: 20),
+                  color: isDark ? Colors.white70 : Colors.black87,
+                  onPressed: () {},
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
               ],
             ),
           ),
 
-          // Footer with actions and caption
+          // Media (Instagram-style square aspect ratio)
+          AspectRatio(
+            aspectRatio: 1.0,
+            child: Container(
+              color: Colors.black,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (isVideo && fullMediaUrl != null)
+                    GestureDetector(
+                      onTap: () {
+                        final videoPosts = _posts
+                            .where((p) => p['type'] == 'video')
+                            .toList();
+                        final videoIndex = videoPosts.indexWhere((p) => p['id'] == post['id']);
+                        
+                        if (videoIndex >= 0) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => FullscreenVideoPlayer(
+                                posts: videoPosts,
+                                initialIndex: videoIndex,
+                                baseUrl: baseUrl,
+                              ),
+                              fullscreenDialog: true,
+                            ),
+                          );
+                        }
+                      },
+                      child: CachedNetworkImage(
+                        imageUrl: fullThumbnailUrl ?? fullMediaUrl!,
+                        fit: BoxFit.contain,
+                        placeholder: (context, url) => Container(
+                          color: Colors.black,
+                          child: const Center(child: CircularProgressIndicator(color: Colors.white)),
+                        ),
+                        errorWidget: (context, url, error) => Container(
+                          color: Colors.black,
+                          child: const Icon(Icons.error_outline, color: Colors.white38),
+                        ),
+                      ),
+                    )
+                  else if (fullMediaUrl != null)
+                    GestureDetector(
+                      onTap: () {
+                        final imagePosts = _posts
+                            .where((p) => p['type'] != 'video')
+                            .toList();
+                        final imageIndex = imagePosts.indexWhere((p) => p['id'] == post['id']);
+                        
+                        if (imageIndex >= 0) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => FullscreenMediaViewer(
+                                posts: imagePosts,
+                                initialIndex: imageIndex,
+                                baseUrl: baseUrl,
+                              ),
+                              fullscreenDialog: true,
+                            ),
+                          );
+                        }
+                      },
+                      child: CachedNetworkImage(
+                        imageUrl: fullMediaUrl!,
+                        fit: BoxFit.contain,
+                        placeholder: (context, url) => fullThumbnailUrl != null
+                            ? CachedNetworkImage(
+                                imageUrl: fullThumbnailUrl!,
+                                fit: BoxFit.contain,
+                              )
+                            : Container(
+                                color: Colors.black,
+                                child: const Center(child: CircularProgressIndicator(color: Colors.white)),
+                              ),
+                        errorWidget: (context, url, error) => Container(
+                          color: Colors.black,
+                          child: const Icon(Icons.error_outline, color: Colors.white38),
+                        ),
+                      ),
+                    )
+                  else
+                    Container(
+                      color: Colors.black,
+                      child: const Icon(Icons.broken_image, color: Colors.white38),
+                    ),
+
+                  // Video play indicator
+                  if (isVideo)
+                    Positioned.fill(
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.play_arrow,
+                            color: Colors.white,
+                            size: 48,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+
+          // Actions and Caption (Instagram-style)
           Padding(
-            padding: const EdgeInsets.all(12.0),
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Action buttons
+                // Action buttons row
                 Row(
                   children: [
                     IconButton(
                       icon: Icon(
                         isLiked ? Icons.favorite : Icons.favorite_border,
-                        color: isLiked ? Colors.red : (isDark ? Colors.white70 : Colors.black87),
+                        color: isLiked ? Colors.red : (isDark ? Colors.white : Colors.black),
+                        size: 28,
                       ),
                       onPressed: () => _toggleLike(post['id'], index),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 12),
                     IconButton(
                       icon: Icon(
                         Icons.comment_outlined,
-                        color: isDark ? Colors.white70 : Colors.black87,
+                        color: isDark ? Colors.white : Colors.black,
+                        size: 28,
                       ),
                       onPressed: () async {
                         final result = await showDialog<int>(
@@ -466,15 +475,27 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 12),
                     IconButton(
                       icon: Icon(
-                        Icons.share_outlined,
-                        color: isDark ? Colors.white70 : Colors.black87,
+                        Icons.send_outlined,
+                        color: isDark ? Colors.white : Colors.black,
+                        size: 28,
                       ),
                       onPressed: () async {
                         await _sharePost(post, index);
                       },
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: Icon(
+                        Icons.bookmark_border,
+                        color: isDark ? Colors.white : Colors.black,
+                        size: 28,
+                      ),
+                      onPressed: () {},
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                     ),
@@ -483,45 +504,100 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
                 const SizedBox(height: 4),
 
                 // Like count
-                if (likesCount > 0)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 4.0),
-                    child: Text(
-                      '$likesCount ${likesCount == 1 ? 'like' : 'likes'}',
-                      style: TextStyle(
-                        color: isDark ? Colors.white : Colors.black,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 14,
-                      ),
-                    ),
+                Text(
+                  '$likesCount ${likesCount == 1 ? 'like' : 'likes'}',
+                  style: TextStyle(
+                    color: isDark ? Colors.white : Colors.black,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
                   ),
+                ),
 
-                // Caption
-                if (caption != null && caption.isNotEmpty)
+                // Caption with username
+                if (caption != null && caption.isNotEmpty) ...[
+                  const SizedBox(height: 4),
                   RichText(
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
                     text: TextSpan(
                       style: TextStyle(
                         color: isDark ? Colors.white : Colors.black,
                         fontSize: 14,
                       ),
                       children: [
-                        if (creator != null)
-                          TextSpan(
-                            text: '${creator['username'] ?? creator['name'] ?? 'Unknown'} ',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
+                        TextSpan(
+                          text: '${creator?['name'] ?? 'Unknown'} ',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
                         TextSpan(text: caption),
                       ],
                     ),
                   ),
+                ],
+
+                // View all comments
+                if (commentsCount > 0) ...[
+                  const SizedBox(height: 4),
+                  GestureDetector(
+                    onTap: () async {
+                      final result = await showDialog<int>(
+                        context: context,
+                        builder: (context) => CommentsDialog(
+                          postId: post['id'],
+                          initialCommentsCount: commentsCount,
+                        ),
+                      );
+                      if (result != null && mounted) {
+                        setState(() {
+                          _posts[index]['comments_count'] = result;
+                        });
+                      }
+                    },
+                    child: Text(
+                      'View all $commentsCount ${commentsCount == 1 ? 'comment' : 'comments'}',
+                      style: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.grey[600],
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ],
+
+                // Time ago
+                const SizedBox(height: 8),
+                Text(
+                  _getTimeAgo(DateTime.parse(post['created_at'] ?? DateTime.now().toIso8601String())),
+                  style: TextStyle(
+                    color: isDark ? Colors.white54 : Colors.grey[500],
+                    fontSize: 10,
+                    letterSpacing: 0.5,
+                  ),
+                ),
               ],
             ),
           ),
         ],
       ),
     );
+  }
+
+  String _getTimeAgo(DateTime dateTime) {
+    final now = DateTime.now();
+    final difference = now.difference(dateTime);
+
+    if (difference.inMinutes < 1) {
+      return 'JUST NOW';
+    } else if (difference.inMinutes < 60) {
+      return '${difference.inMinutes}M AGO';
+    } else if (difference.inHours < 24) {
+      return '${difference.inHours}H AGO';
+    } else if (difference.inDays < 7) {
+      return '${difference.inDays}D AGO';
+    } else if (difference.inDays < 30) {
+      final weeks = (difference.inDays / 7).floor();
+      return '${weeks}W AGO';
+    } else {
+      final months = (difference.inDays / 30).floor();
+      return '${months}MO AGO';
+    }
   }
 
   Widget _buildLockedState(BuildContext context, bool isDark, bool isOptIn) {
