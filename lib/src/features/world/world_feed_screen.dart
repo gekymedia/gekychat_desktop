@@ -351,7 +351,7 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
                         }
                       },
                       child: CachedNetworkImage(
-                        imageUrl: fullThumbnailUrl ?? fullMediaUrl!,
+                        imageUrl: fullThumbnailUrl ?? fullMediaUrl ?? '',
                         fit: BoxFit.contain,
                         placeholder: (context, url) => Container(
                           color: Colors.black,
@@ -386,11 +386,11 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
                         }
                       },
                       child: CachedNetworkImage(
-                        imageUrl: fullMediaUrl!,
+                        imageUrl: fullMediaUrl,
                         fit: BoxFit.contain,
                         placeholder: (context, url) => fullThumbnailUrl != null
                             ? CachedNetworkImage(
-                                imageUrl: fullThumbnailUrl!,
+                                imageUrl: fullThumbnailUrl,
                                 fit: BoxFit.contain,
                               )
                             : Container(
