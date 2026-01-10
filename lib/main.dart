@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'src/app_router.dart';
-import 'src/theme/app_theme.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'src/features/auth/auth_provider.dart';
 import 'src/features/notifications/notification_manager.dart';
@@ -28,27 +27,47 @@ Future<void> main() async {
   );
 }
 
-class MyApp extends ConsumerWidget {
+class MyApp extends ConsumerStatefulWidget {
   const MyApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // Initialize notifications asynchronously (one-time)
-    Future.microtask(() async {
-      try {
-        final apiService = ref.read(apiServiceProvider);
-        final notificationManager = await NotificationManager.create(apiService);
-        await notificationManager.setup();
-        debugPrint('✅ Notifications initialized');
-      } catch (e) {
-        debugPrint('⚠️ Failed to initialize notifications: $e');
-      }
-    });
+  ConsumerState<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends ConsumerState<MyApp> {
+  static bool _notificationsInitialized = false;
+  static bool _authChecked = false;
+
+  @override
+  void initState() {
+    super.initState();
     
-    // Check auth status on startup - wait for it to complete before showing router
-    final authNotifier = ref.read(authProvider.notifier);
-    Future.microtask(() => authNotifier.checkAuthStatus());
+    // Initialize notifications asynchronously (one-time only)
+    if (!_notificationsInitialized) {
+      _notificationsInitialized = true;
+      Future.microtask(() async {
+        try {
+          final apiService = ref.read(apiServiceProvider);
+          final notificationManager = await NotificationManager.create(apiService);
+          await notificationManager.setup();
+          debugPrint('✅ Notifications initialized');
+        } catch (e) {
+          debugPrint('⚠️ Failed to initialize notifications: $e');
+          // Reset flag on error so we can retry
+          _notificationsInitialized = false;
+        }
+      });
+    }
     
+    // Check auth status on startup (one-time only)
+    if (!_authChecked) {
+      _authChecked = true;
+      Future.microtask(() => ref.read(authProvider.notifier).checkAuthStatus());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final router = ref.watch(routerProvider);
     final customThemeMode = ref.watch(custom_theme.themeModeProvider);
     final themeService = ref.watch(custom_theme.themeServiceProvider);

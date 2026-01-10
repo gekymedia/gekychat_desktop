@@ -167,20 +167,24 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
     ],
     redirect: (context, state) {
-      // Use captured authState from outer scope (will be updated when router provider rebuilds)
       final isLoggedIn = authState.token != null && authState.token!.isNotEmpty;
-      final isLoggingIn = state.uri.path == '/login';
-      final isVerifying = state.uri.path == '/verify';
+      final currentPath = state.uri.path;
+      final isLoggingIn = currentPath == '/login';
+      final isVerifying = currentPath == '/verify';
       final isOnAuthPage = isLoggingIn || isVerifying;
+
+      // Allow verify page to be accessed even if not logged in (for OTP flow)
+      if (isVerifying) {
+        return null;
+      }
 
       // If not logged in and trying to access protected routes, go to login
       if (!isLoggedIn && !isOnAuthPage) {
         return '/login';
       }
       
-      // If logged in and on login/verify page, go to chats
-      // Don't redirect if currently verifying - let user complete OTP flow
-      if (isLoggedIn && isLoggingIn && !isVerifying) {
+      // If logged in and on login page, redirect to chats
+      if (isLoggedIn && isLoggingIn) {
         return '/chats';
       }
       

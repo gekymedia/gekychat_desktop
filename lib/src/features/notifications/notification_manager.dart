@@ -7,13 +7,30 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 class NotificationManager {
   final NotificationService _service;
   final ApiService _api;
+  static NotificationManager? _instance;
 
   NotificationManager._(this._service, this._api);
 
   static Future<NotificationManager> create(ApiService api) async {
+    // Return existing instance if already created
+    if (_instance != null) {
+      debugPrint('⚠️ NotificationManager already exists, returning existing instance');
+      return _instance!;
+    }
+
     NotificationService service = DesktopNotificationService();
-    await service.initialize();
-    return NotificationManager._(service, api);
+    try {
+      await service.initialize();
+      _instance = NotificationManager._(service, api);
+      return _instance!;
+    } catch (e) {
+      debugPrint('❌ Failed to create NotificationManager: $e');
+      rethrow;
+    }
+  }
+
+  static void reset() {
+    _instance = null;
   }
 
   Future<void> setup() async {

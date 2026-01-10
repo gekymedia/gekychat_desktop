@@ -5,29 +5,45 @@ import 'package:flutter/foundation.dart';
 class DesktopNotificationService extends NotificationService {
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
+  bool _isInitialized = false;
 
   @override
   Future<void> initialize() async {
-    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const iosSettings = DarwinInitializationSettings();
-    const initSettings = InitializationSettings(
-      android: androidSettings,
-      iOS: iosSettings,
-      macOS: iosSettings,
-      linux: const LinuxInitializationSettings(
-        defaultActionName: 'Open notification',
-      ),
-      windows: const WindowsInitializationSettings(
-        appUserModelId: 'gekychat.desktop',
-        appName: 'GekyChat',
-        guid: 'gekychat-desktop-app',
-      ),
-    );
+    // Prevent multiple initializations
+    if (_isInitialized) {
+      debugPrint('⚠️ Notifications already initialized, skipping...');
+      return;
+    }
 
-    await _localNotifications.initialize(
-      initSettings,
-      onDidReceiveNotificationResponse: _onNotificationTapped,
-    );
+    try {
+      const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+      const iosSettings = DarwinInitializationSettings();
+      const initSettings = InitializationSettings(
+        android: androidSettings,
+        iOS: iosSettings,
+        macOS: iosSettings,
+        linux: const LinuxInitializationSettings(
+          defaultActionName: 'Open notification',
+        ),
+        windows: const WindowsInitializationSettings(
+          appUserModelId: 'gekychat.desktop',
+          appName: 'GekyChat',
+          guid: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890', // Valid GUID format for Windows notifications
+        ),
+      );
+
+      await _localNotifications.initialize(
+        initSettings,
+        onDidReceiveNotificationResponse: _onNotificationTapped,
+      );
+      
+      _isInitialized = true;
+      debugPrint('✅ Desktop notifications initialized successfully');
+    } catch (e) {
+      debugPrint('❌ Failed to initialize desktop notifications: $e');
+      _isInitialized = false;
+      rethrow;
+    }
   }
 
   void _onNotificationTapped(NotificationResponse response) {

@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
+import 'package:video_player/video_player.dart';
 import 'status_repository.dart';
+import '../../core/providers.dart';
+import '../world/widgets/video_trimmer_widget.dart';
 
 class CreateStatusScreen extends ConsumerStatefulWidget {
   const CreateStatusScreen({super.key});
@@ -19,6 +22,7 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
   bool _isVideo = false;
   bool _isLoading = false;
   bool _showEmojiPicker = false;
+  Map<String, dynamic>? _uploadLimits;
   
   final List<Color> _backgroundColors = [
     const Color(0xFF00A884),
@@ -36,9 +40,81 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
   Color _selectedColor = const Color(0xFF00A884);
 
   @override
+  void initState() {
+    super.initState();
+    _loadUploadLimits();
+  }
+
+  @override
   void dispose() {
     _textController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadUploadLimits() async {
+    try {
+      final apiService = ref.read(apiServiceProvider);
+      final response = await apiService.getUploadLimits();
+      
+      if (mounted) {
+        setState(() {
+          _uploadLimits = response.data;
+        });
+      }
+    } catch (e) {
+      // Limits will default to backend values
+    }
+  }
+
+  Future<void> _checkVideoAndTrim(File videoFile) async {
+    try {
+      final controller = VideoPlayerController.file(videoFile);
+      await controller.initialize();
+      final durationSeconds = controller.value.duration.inSeconds;
+      await controller.dispose();
+
+      final maxDuration = _uploadLimits?['status']?['max_duration'] ?? 180;
+      
+      if (durationSeconds > maxDuration) {
+        if (!mounted) return;
+        
+        final trimmedVideo = await showDialog<File>(
+          context: context,
+          builder: (context) => Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: const EdgeInsets.all(16),
+            child: VideoTrimmerWidget(
+              videoFile: videoFile,
+              maxDuration: maxDuration,
+              onTrimComplete: (trimmed) {
+                Navigator.pop(context, trimmed);
+              },
+              onCancel: () {
+                Navigator.pop(context);
+              },
+            ),
+          ),
+        );
+
+        if (trimmedVideo != null && mounted) {
+          setState(() {
+            _selectedMedia = trimmedVideo;
+            _isVideo = true;
+          });
+        }
+      } else {
+        setState(() {
+          _selectedMedia = videoFile;
+          _isVideo = true;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to check video: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _pickMedia() async {
@@ -50,11 +126,17 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
     if (result != null && result.files.single.path != null) {
       final file = File(result.files.single.path!);
       final extension = result.files.single.extension?.toLowerCase();
+      final isVideo = extension == 'mp4' || extension == 'mov' || extension == 'avi';
       
-      setState(() {
-        _selectedMedia = file;
-        _isVideo = extension == 'mp4' || extension == 'mov' || extension == 'avi';
-      });
+      if (isVideo) {
+        // Check video duration and show trim UI if needed
+        await _checkVideoAndTrim(file);
+      } else {
+        setState(() {
+          _selectedMedia = file;
+          _isVideo = false;
+        });
+      }
     }
   }
 

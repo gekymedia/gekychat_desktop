@@ -5,7 +5,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 import 'dart:io';
 import '../../core/providers.dart';
+import '../../core/api_service.dart';
 import '../audio/audio_search_screen.dart';
+import 'widgets/video_trimmer_widget.dart';
 
 class CreatePostScreen extends ConsumerStatefulWidget {
   const CreatePostScreen({super.key});
@@ -21,12 +23,93 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
   VideoPlayerController? _videoController;
   Map<String, dynamic>? _selectedAudio;
   int _audioVolume = 100;
+  Map<String, dynamic>? _uploadLimits;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUploadLimits();
+  }
 
   @override
   void dispose() {
     _captionController.dispose();
     _videoController?.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadUploadLimits() async {
+    try {
+      final apiService = ref.read(apiServiceProvider);
+      final response = await apiService.getUploadLimits();
+      
+      if (mounted) {
+        setState(() {
+          _uploadLimits = response.data;
+        });
+      }
+    } catch (e) {
+      // Limits will default to backend values
+    }
+  }
+
+  Future<void> _checkVideoAndTrim(File videoFile) async {
+    try {
+      final controller = VideoPlayerController.file(videoFile);
+      await controller.initialize();
+      final durationSeconds = controller.value.duration.inSeconds;
+      await controller.dispose();
+
+      final maxDuration = _uploadLimits?['world_feed']?['max_duration'] ?? 180;
+      
+      if (durationSeconds > maxDuration) {
+        if (!mounted) return;
+        
+        final trimmedVideo = await showDialog<File>(
+          context: context,
+          builder: (context) => Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: const EdgeInsets.all(16),
+            child: VideoTrimmerWidget(
+              videoFile: videoFile,
+              maxDuration: maxDuration,
+              onTrimComplete: (trimmed) {
+                Navigator.pop(context, trimmed);
+              },
+              onCancel: () {
+                Navigator.pop(context);
+              },
+            ),
+          ),
+        );
+
+        if (trimmedVideo != null && mounted) {
+          final trimmedController = VideoPlayerController.file(trimmedVideo);
+          await trimmedController.initialize();
+          await trimmedController.setLooping(true);
+          await trimmedController.play();
+          setState(() {
+            _selectedMedia = trimmedVideo;
+            _videoController = trimmedController;
+          });
+        }
+      } else {
+        final controller = VideoPlayerController.file(videoFile);
+        await controller.initialize();
+        await controller.setLooping(true);
+        await controller.play();
+        setState(() {
+          _selectedMedia = videoFile;
+          _videoController = controller;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to check video: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _pickMedia() async {
@@ -68,17 +151,8 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
         final pickedFile = await picker.pickVideo(source: ImageSource.gallery);
         if (pickedFile != null) {
           final videoFile = File(pickedFile.path);
-          // Dispose previous controller
           await _videoController?.dispose();
-          // Initialize video player
-          final controller = VideoPlayerController.file(videoFile);
-          await controller.initialize();
-          await controller.setLooping(true);
-          await controller.play();
-          setState(() {
-            _selectedMedia = videoFile;
-            _videoController = controller;
-          });
+          await _checkVideoAndTrim(videoFile);
         }
       }
     } catch (e) {

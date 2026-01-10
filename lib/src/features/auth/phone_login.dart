@@ -3,8 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'auth_provider.dart';
-import '../../core/providers.dart';
-import 'package:dio/dio.dart';
 
 class PhoneLoginScreen extends ConsumerStatefulWidget {
   const PhoneLoginScreen({super.key});
@@ -48,20 +46,41 @@ class _PhoneLoginState extends ConsumerState<PhoneLoginScreen> {
     });
 
     final phone = _phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
-    await ref.read(authProvider.notifier).loginWithPhone(phone);
+    
+    try {
+      await ref.read(authProvider.notifier).loginWithPhone(phone);
 
-    if (!mounted) return;
-    final err = ref.read(authProvider).error;
-    if (err != null) {
+      if (!mounted) return;
+      
+      // Wait a bit for state to update
+      await Future.delayed(const Duration(milliseconds: 100));
+      
+      if (!mounted) return;
+      
+      final authState = ref.read(authProvider);
+      if (authState.error != null) {
+        setState(() {
+          _error = authState.error;
+          _loading = false;
+        });
+        return;
+      }
+      
+      // Success - navigate to OTP verification page
       setState(() {
-        _error = err;
         _loading = false;
       });
-    } else {
+      
+      if (!mounted) return;
+      
+      // Use push instead of go to avoid redirect interference
+      context.push('/verify?phone=$phone');
+    } catch (e) {
+      if (!mounted) return;
       setState(() {
+        _error = e.toString();
         _loading = false;
       });
-      context.go('/verify?phone=$phone');
     }
   }
 

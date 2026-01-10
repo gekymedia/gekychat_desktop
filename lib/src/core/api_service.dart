@@ -16,7 +16,40 @@ class ApiService {
     }
 
     // Ensure baseUrl doesn't end with a slash to avoid redirects
-    final cleanBaseUrl = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+    var cleanBaseUrl = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+    
+    // Ensure base URL ends with /api/v1 for proper routing
+    // Laravel routes in api_user.php use Route::prefix('v1'), 
+    // so full path is /api/v1/auth/phone (when included in api.php)
+    // Base URL should be: https://chat.gekychat.com/api/v1
+    final normalizedBaseUrl = cleanBaseUrl.toLowerCase();
+    if (!normalizedBaseUrl.endsWith('/api/v1')) {
+      // Handle different cases
+      if (normalizedBaseUrl.endsWith('/api')) {
+        // Ends with /api, add /v1
+        cleanBaseUrl = '$cleanBaseUrl/v1';
+      } else if (normalizedBaseUrl.endsWith('/v1')) {
+        // Ends with /v1, check if /api/v1 exists earlier in the path
+        final segments = cleanBaseUrl.split('/');
+        final lastSegment = segments.last;
+        if (lastSegment == 'v1') {
+          // Check if previous segment is 'api'
+          if (segments.length >= 2 && segments[segments.length - 2] == 'api') {
+            // Already has /api/v1 at the end, keep it
+          } else {
+            // Has /v1 but not /api/v1, replace last segment
+            segments[segments.length - 1] = 'api';
+            segments.add('v1');
+            cleanBaseUrl = segments.join('/');
+          }
+        }
+      } else {
+        // Doesn't end with /api or /v1, append /api/v1
+        cleanBaseUrl = '$cleanBaseUrl/api/v1';
+      }
+    }
+    
+    debugPrint('🔗 API Base URL configured: $cleanBaseUrl');
     
     _dio = Dio(
       BaseOptions(
@@ -177,6 +210,9 @@ class ApiService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('auth_token', token);
   }
+
+  // Get upload limits for current user
+  Future<Response> getUploadLimits() => get('/upload-limits');
 
   Future<Response> requestOtp(String phone) =>
       post('/auth/phone', data: {'phone': phone});
