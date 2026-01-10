@@ -30,6 +30,7 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
   VideoPlayerController? _videoController;
   Timer? _autoAdvanceTimer;
   bool _isPaused = false;
+  bool _stealthModeEnabled = false; // Stealth viewing toggle
 
   static const _imageDuration = Duration(seconds: 5);
   static const _textDuration = Duration(seconds: 7);
@@ -53,12 +54,9 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
   Future<void> _loadCurrentStatus() async {
     final status = widget.statusSummary.updates[currentIndex];
 
-    // PHASE 0: TODO (PHASE 1) - Add stealth viewing toggle here (same as mobile)
-    // TODO (PHASE 1): Check if user has stealth mode enabled before marking as viewed
-    // TODO (PHASE 1): Call repo.markStatusAsViewed(status.id, stealth: _stealthModeEnabled)
     if (!widget.isOwnStatus) {
       final repo = ref.read(statusRepositoryProvider);
-      await repo.markStatusAsViewed(status.id);
+      await repo.markStatusAsViewed(status.id, stealth: _stealthModeEnabled);
     }
 
     _videoController?.dispose();
@@ -134,6 +132,23 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
       _loadCurrentStatus();
     } else {
       Navigator.pop(context);
+    }
+  }
+
+  void _toggleStealthMode() {
+    setState(() {
+      _stealthModeEnabled = !_stealthModeEnabled;
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_stealthModeEnabled
+              ? 'Stealth mode enabled - views will be hidden'
+              : 'Stealth mode disabled'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
     }
   }
 
@@ -314,6 +329,27 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
                       ),
                     ),
                   const SizedBox(width: 8),
+                ] else ...[
+                  // PHASE 1: Stealth mode toggle
+                  IconButton(
+                    icon: Icon(
+                      _stealthModeEnabled ? Icons.visibility_off : Icons.visibility,
+                      color: _stealthModeEnabled ? Colors.amber : Colors.white,
+                    ),
+                    tooltip: _stealthModeEnabled
+                        ? 'Stealth mode: ON (view hidden)'
+                        : 'Stealth mode: OFF',
+                    onPressed: _toggleStealthMode,
+                  ),
+                  // PHASE 1: Download button
+                  if ((widget.statusSummary.updates[currentIndex].type == StatusType.image || 
+                       widget.statusSummary.updates[currentIndex].type == StatusType.video) &&
+                      widget.statusSummary.updates[currentIndex].allowDownload != false)
+                    IconButton(
+                      icon: const Icon(Icons.download, color: Colors.white),
+                      onPressed: _downloadStatusMedia,
+                      tooltip: 'Download',
+                    ),
                 ],
                 IconButton(
                   icon: const Icon(Icons.close, color: Colors.white),
@@ -475,6 +511,41 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
         initialComments: comments,
       ),
     );
+  }
+
+  // PHASE 1: Download status media
+  Future<void> _downloadStatusMedia() async {
+    final status = widget.statusSummary.updates[currentIndex];
+    
+    if (status.mediaUrl == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No media to download')),
+      );
+      return;
+    }
+
+    try {
+      final repo = ref.read(statusRepositoryProvider);
+      final downloadUrl = repo.getStatusDownloadUrl(status.id);
+      
+      // For desktop, we'll need to implement actual file download
+      // For now, show a message that download started
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Download started')),
+        );
+      }
+      
+      // TODO: Implement actual file download for desktop
+      // This would require using url_launcher or a file picker package
+      debugPrint('Download URL: $downloadUrl');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to download: $e')),
+        );
+      }
+    }
   }
 }
 

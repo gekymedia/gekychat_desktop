@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 import 'dart:io';
 import '../../core/providers.dart';
+import '../audio/audio_search_screen.dart';
 
 class CreatePostScreen extends ConsumerStatefulWidget {
   const CreatePostScreen({super.key});
@@ -18,6 +19,8 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
   File? _selectedMedia; // Only one media file like TikTok
   bool _isPosting = false;
   VideoPlayerController? _videoController;
+  Map<String, dynamic>? _selectedAudio;
+  int _audioVolume = 100;
 
   @override
   void dispose() {
@@ -115,6 +118,9 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
       await apiService.createWorldFeedPost(
         media: _selectedMedia!,
         caption: caption.isNotEmpty ? caption : null,
+        audioId: _selectedAudio?['id'],
+        audioVolume: _selectedAudio != null ? _audioVolume : null,
+        audioLoop: _selectedAudio != null ? true : null,
       );
 
       if (mounted) {
@@ -298,6 +304,13 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                 fontSize: 16,
               ),
             ),
+            
+            const SizedBox(height: 16),
+            
+            // Audio selection (only for videos)
+            if (_selectedMedia != null && _isVideo(_selectedMedia!))
+              _buildAudioSection(isDark),
+            
             if (_selectedMedia == null)
               Padding(
                 padding: const EdgeInsets.only(top: 16),
@@ -315,6 +328,136 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
               ),
           ],
         ),
+      ),
+    );
+  }
+  
+  bool _isVideo(File file) {
+    final path = file.path.toLowerCase();
+    return path.endsWith('.mp4') || 
+           path.endsWith('.mov') || 
+           path.endsWith('.avi') || 
+           path.endsWith('.mkv');
+  }
+  
+  Widget _buildAudioSection(bool isDark) {
+    return Card(
+      color: isDark ? const Color(0xFF202C33) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Column(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.music_note, color: Color(0xFF008069)),
+            title: Text(
+              _selectedAudio == null ? 'Add Audio' : _selectedAudio!['name'] ?? 'Audio',
+              style: TextStyle(
+                color: isDark ? Colors.white : Colors.black,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            subtitle: _selectedAudio != null
+                ? Text(
+                    'by ${_selectedAudio!['freesound_username'] ?? 'Unknown'}',
+                    style: TextStyle(
+                      color: isDark ? Colors.white70 : Colors.grey[600],
+                      fontSize: 12,
+                    ),
+                  )
+                : Text(
+                    'Add background music to your video',
+                    style: TextStyle(
+                      color: isDark ? Colors.white70 : Colors.grey[600],
+                    ),
+                  ),
+            trailing: _selectedAudio == null
+                ? const Icon(Icons.add_circle_outline, color: Color(0xFF008069))
+                : IconButton(
+                    icon: const Icon(Icons.close, color: Colors.red),
+                    onPressed: () {
+                      setState(() => _selectedAudio = null);
+                    },
+                  ),
+            onTap: () async {
+              final audio = await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const AudioSearchScreen(),
+                ),
+              );
+              
+              if (audio != null) {
+                setState(() => _selectedAudio = audio);
+              }
+            },
+          ),
+          if (_selectedAudio != null) ...[
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.volume_up,
+                        size: 20,
+                        color: isDark ? Colors.white70 : Colors.grey[700],
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Slider(
+                          value: _audioVolume.toDouble(),
+                          min: 0,
+                          max: 100,
+                          divisions: 20,
+                          label: '$_audioVolume%',
+                          activeColor: const Color(0xFF008069),
+                          onChanged: (value) {
+                            setState(() => _audioVolume = value.toInt());
+                          },
+                        ),
+                      ),
+                      Text(
+                        '$_audioVolume%',
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.grey[700],
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_selectedAudio!['attribution_required'] == true) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline, size: 16, color: Colors.orange[700]),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Attribution: ${_selectedAudio!['attribution_text'] ?? ''}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: isDark ? Colors.white70 : Colors.grey[700],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

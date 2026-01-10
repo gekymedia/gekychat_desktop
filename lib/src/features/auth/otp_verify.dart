@@ -205,10 +205,18 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    Icons.sms_outlined,
-                    size: 64,
-                    color: Theme.of(context).colorScheme.primary,
+                  Image.asset(
+                    'assets/icons/gold_no_text/128x128.png',
+                    width: 128,
+                    height: 128,
+                    errorBuilder: (context, error, stackTrace) {
+                      // Fallback to icon if image not found
+                      return Icon(
+                        Icons.sms_outlined,
+                        size: 64,
+                        color: Theme.of(context).colorScheme.primary,
+                      );
+                    },
                   ),
                   const SizedBox(height: 24),
                   Text(

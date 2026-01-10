@@ -30,7 +30,26 @@ class AuthState {
 class AuthNotifier extends StateNotifier<AuthState> {
   final ApiService _apiService;
 
-  AuthNotifier(this._apiService) : super(AuthState());
+  AuthNotifier(this._apiService) : super(AuthState()) {
+    // Load token from storage immediately on initialization
+    // This ensures auth state is available when router is created
+    _loadTokenFromStorage();
+    // Then validate it asynchronously
+    checkAuthStatus();
+  }
+  
+  Future<void> _loadTokenFromStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
+      if (token != null && token.isNotEmpty) {
+        // Set token immediately so router can use it
+        state = state.copyWith(token: token);
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error loading token from storage: $e');
+    }
+  }
 
   String _formatError(dynamic e, String defaultMessage) {
     if (e is DioException) {
@@ -147,24 +166,39 @@ class AuthNotifier extends StateNotifier<AuthState> {
       return;
     }
     
+    // Token exists, set it first (already done in _loadTokenFromStorage, but ensure it's set)
+    if (state.token != token) {
+      state = state.copyWith(token: token);
+    }
+    
     // Validate token by calling /me endpoint to ensure it's still valid
     try {
       final response = await _apiService.getProfile();
       if (response.statusCode == 200 && response.data != null) {
-        // Token is valid, update state
+        // Token is valid, update state and user ID
         final userId = response.data['id'];
         if (userId != null) {
           await prefs.setInt('user_id', userId);
         }
-        state = state.copyWith(token: token);
+        // Token is already set, just ensure state is consistent
+        if (state.token != token) {
+          state = state.copyWith(token: token);
+        }
       } else {
         // Token is invalid, clear it
         await logout();
       }
     } catch (e) {
-      // Token is invalid or expired (401), clear it
-      debugPrint('⚠️ Token validation failed (this is normal if token expired): $e');
-      await logout();
+      // Only clear token if it's a 401 (Unauthorized) error
+      // Network errors should not clear a potentially valid token
+      if (e is DioException && e.response?.statusCode == 401) {
+        debugPrint('⚠️ Token is invalid (401): $e');
+        await logout();
+      } else {
+        // For network errors, keep the token and try again later
+        debugPrint('⚠️ Token validation failed (network error, keeping token): $e');
+        // Token stays in state, will be validated on next check
+      }
     }
   }
 

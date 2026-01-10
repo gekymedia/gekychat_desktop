@@ -371,9 +371,10 @@ class ChatRepository {
     }
   }
 
-  Future<void> deleteMessage(int messageId) async {
+  // PHASE 1: Delete message with optional "delete for everyone"
+  Future<void> deleteMessage(int messageId, {bool deleteForEveryone = false}) async {
     try {
-      await apiService.deleteMessage(messageId);
+      await apiService.deleteMessage(messageId, deleteForEveryone: deleteForEveryone);
     } catch (e) {
       throw Exception('Failed to delete message: $e');
     }

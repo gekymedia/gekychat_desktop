@@ -903,36 +903,75 @@ class _ChatViewState extends ConsumerState<ChatView> {
   }
 
   Future<void> _deleteMessage(Message message) async {
-    final confirmed = await showDialog<bool>(
+    // PHASE 1: Check if message is less than 1 hour old (for "delete for everyone")
+    final messageAge = DateTime.now().difference(message.createdAt);
+    final canDeleteForEveryone = messageAge.inHours < 1;
+
+    // Show confirmation dialog with options
+    final deleteType = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete Message'),
-        content: const Text('Are you sure you want to delete this message?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('How would you like to delete this message?'),
+            const SizedBox(height: 16),
+            if (canDeleteForEveryone)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.delete_sweep),
+                title: const Text('Delete for everyone'),
+                subtitle: const Text('Remove this message for all participants'),
+                onTap: () => Navigator.pop(context, 'everyone'),
+              ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('Delete for me'),
+              subtitle: const Text('Remove this message only from your device'),
+              onTap: () => Navigator.pop(context, 'me'),
+            ),
+          ],
+        ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(context),
             child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
           ),
         ],
       ),
     );
 
-    if (confirmed != true) return;
+    if (deleteType == null) return;
+
+    final deleteForEveryone = deleteType == 'everyone';
 
     try {
       final chatRepo = ref.read(chatRepositoryProvider);
-      await chatRepo.deleteMessage(message.id);
+      await chatRepo.deleteMessage(message.id, deleteForEveryone: deleteForEveryone);
+      
       setState(() {
-        _messages.removeWhere((m) => m.id == message.id);
+        if (deleteForEveryone) {
+          // Show deleted message indicator instead of removing
+          final index = _messages.indexWhere((m) => m.id == message.id);
+          if (index != -1) {
+            // Replace with a deleted message placeholder (you may need to update Message model)
+            _messages.removeAt(index);
+          }
+        } else {
+          _messages.removeWhere((m) => m.id == message.id);
+        }
       });
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Message deleted')),
+          SnackBar(
+            content: Text(deleteForEveryone 
+              ? 'Message deleted for everyone'
+              : 'Message deleted'),
+          ),
         );
       }
     } catch (e) {

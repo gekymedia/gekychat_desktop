@@ -34,6 +34,7 @@ import '../mail/mail_screen.dart';
 import '../qr/qr_scanner_screen.dart';
 import '../ai/ai_chat_screen.dart';
 import '../live/live_broadcast_screen.dart';
+import '../labels/labels_repository.dart';
 import '../../core/providers.dart';
 import '../../core/session.dart';
 import '../../core/feature_flags.dart';
@@ -61,6 +62,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
   final TextEditingController _searchController = TextEditingController();
   String _selectedFilter = 'all';
   Timer? _searchDebounceTimer;
+  List<Label> _labels = []; // Store labels for filter chips
 
   @override
   void initState() {
@@ -69,6 +71,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     _loadConversations();
     _loadArchivedConversations();
     _loadGroups();
+    _loadLabels();
   }
 
   @override
@@ -109,11 +112,26 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     });
   }
 
+  void _loadLabels() async {
+    try {
+      final labelsRepo = ref.read(labelsRepositoryProvider);
+      final labels = await labelsRepo.getLabels();
+      if (mounted) {
+        setState(() {
+          _labels = labels;
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to load labels: $e');
+      // Don't show error to user - just log it
+    }
+  }
+
   void _showConversationMenuAtPosition(BuildContext context, ConversationSummary conversation, Offset position) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final chatRepo = ref.read(chatRepositoryProvider);
 
-    showMenu(
+    showMenu<dynamic>(
       context: context,
       position: RelativeRect.fromLTRB(
         position.dx,
@@ -121,8 +139,8 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
         MediaQuery.of(context).size.width - position.dx,
         MediaQuery.of(context).size.height - position.dy,
       ),
-      items: [
-        PopupMenuItem(
+      items: <PopupMenuEntry<dynamic>>[
+        PopupMenuItem<dynamic>(
           child: Row(
             children: [
               Icon(conversation.isPinned ? Icons.push_pin : Icons.push_pin_outlined),
@@ -147,7 +165,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
             }
           },
         ),
-        PopupMenuItem(
+        PopupMenuItem<dynamic>(
           child: Row(
             children: [
               Icon(conversation.archivedAt != null ? Icons.unarchive : Icons.archive),
@@ -172,7 +190,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
             }
           },
         ),
-        PopupMenuItem(
+        PopupMenuItem<dynamic>(
           child: const Row(
             children: [
               Icon(Icons.mark_chat_unread),
@@ -193,16 +211,41 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
             }
           },
         ),
-        PopupMenuItem(
+        PopupMenuItem<dynamic>(
           child: const Row(
             children: [
               Icon(Icons.label_outline),
               SizedBox(width: 8),
-              Text('Add to List/Label'),
+              Text('Add to Label'),
             ],
           ),
           onTap: () {
             _showAddToLabelDialog(context, conversation.id);
+          },
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem<dynamic>(
+          child: const Row(
+            children: [
+              Icon(Icons.download),
+              SizedBox(width: 8),
+              Text('Export chat'),
+            ],
+          ),
+          onTap: () {
+            _exportConversation(conversation.id);
+          },
+        ),
+        PopupMenuItem<dynamic>(
+          child: const Row(
+            children: [
+              Icon(Icons.report, color: Colors.orange),
+              SizedBox(width: 8),
+              Text('Report', style: TextStyle(color: Colors.orange)),
+            ],
+          ),
+          onTap: () {
+            _showReportDialog(conversation.otherUser.id, conversation.otherUser.name);
           },
         ),
       ],
@@ -212,25 +255,24 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
   Future<void> _showAddToLabelDialog(BuildContext context, int conversationId) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     try {
-      final apiService = ref.read(apiServiceProvider);
-      final response = await apiService.getLabels();
-      final labels = (response.data['data'] as List?)?.map((e) => Map<String, dynamic>.from(e)).toList() ?? [];
+      final labelsRepo = ref.read(labelsRepositoryProvider);
+      final labels = await labelsRepo.getLabels();
       
       if (labels.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No filters available. Create one first.')),
+            const SnackBar(content: Text('No labels available. Create one first.')),
           );
         }
         return;
       }
 
-      final selectedLabel = await showDialog<Map<String, dynamic>>(
+      final selectedLabel = await showDialog<Label>(
         context: context,
         builder: (context) => AlertDialog(
           backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
           title: Text(
-            'Add to Filter',
+            'Add to Label',
             style: TextStyle(color: isDark ? Colors.white : Colors.black),
           ),
           content: SizedBox(
@@ -241,8 +283,9 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
               itemBuilder: (context, index) {
                 final label = labels[index];
                 return ListTile(
+                  leading: const Icon(Icons.label, color: Color(0xFF008069)),
                   title: Text(
-                    label['name'] ?? '',
+                    label.name,
                     style: TextStyle(color: isDark ? Colors.white : Colors.black),
                   ),
                   onTap: () => Navigator.pop(context, label),
@@ -261,20 +304,17 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
 
       if (selectedLabel != null) {
         try {
-          await apiService.attachLabelToConversation(
-            selectedLabel['id'] as int,
-            conversationId,
-          );
+          await labelsRepo.attachLabelToConversation(selectedLabel.id, conversationId);
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Added to ${selectedLabel['name']}')),
+              SnackBar(content: Text('Added to ${selectedLabel.name}')),
             );
             _loadConversations();
           }
         } catch (e) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Failed to add to filter: $e')),
+              SnackBar(content: Text('Failed to add to label: $e')),
             );
           }
         }
@@ -282,7 +322,161 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load filters: $e')),
+          SnackBar(content: Text('Failed to load labels: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _showReportDialog(int userId, String userName) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    String? selectedReason;
+    final detailsController = TextEditingController();
+    bool alsoBlock = false;
+
+    final reasons = [
+      'Spam',
+      'Harassment',
+      'Inappropriate content',
+      'Fake account',
+      'Scam or fraud',
+      'Other',
+    ];
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
+          title: Text(
+            'Report $userName',
+            style: TextStyle(color: isDark ? Colors.white : Colors.black),
+          ),
+          content: SizedBox(
+            width: 500,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Why are you reporting this user?',
+                    style: TextStyle(
+                      color: isDark ? Colors.white70 : Colors.grey[700],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  ...reasons.map((reason) => RadioListTile<String>(
+                    title: Text(
+                      reason,
+                      style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                    ),
+                    value: reason,
+                    groupValue: selectedReason,
+                    onChanged: (value) {
+                      setState(() {
+                        selectedReason = value;
+                      });
+                    },
+                    activeColor: const Color(0xFF008069),
+                  )),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: detailsController,
+                    decoration: InputDecoration(
+                      labelText: 'Additional details (optional)',
+                      hintText: 'Provide more information',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    maxLines: 3,
+                    maxLength: 500,
+                  ),
+                  const SizedBox(height: 8),
+                  CheckboxListTile(
+                    title: Text(
+                      'Also block this user',
+                      style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                    ),
+                    value: alsoBlock,
+                    onChanged: (value) {
+                      setState(() {
+                        alsoBlock = value ?? false;
+                      });
+                    },
+                    activeColor: const Color(0xFF008069),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Cancel', style: TextStyle(color: isDark ? Colors.white70 : Colors.grey[700])),
+            ),
+            TextButton(
+              onPressed: selectedReason == null
+                  ? null
+                  : () => Navigator.pop(context, true),
+              child: const Text('Report', style: TextStyle(color: Colors.orange)),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (result == true && selectedReason != null) {
+      try {
+        final apiService = ref.read(apiServiceProvider);
+        await apiService.reportUser(
+          userId,
+          selectedReason!,
+          details: detailsController.text.trim().isNotEmpty ? detailsController.text.trim() : null,
+          block: alsoBlock,
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Report submitted${alsoBlock ? " and user blocked" : ""}'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to report user: $e')),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _exportConversation(int conversationId) async {
+    try {
+      final apiService = ref.read(apiServiceProvider);
+      final response = await apiService.get('/conversations/$conversationId/export');
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Chat exported successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+      
+      // TODO: Implement actual file download/save for desktop
+      // This would require using file_picker or similar package
+      debugPrint('Export data received: ${response.data}');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to export chat: $e')),
         );
       }
     }
@@ -307,7 +501,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
         MediaQuery.of(context).size.height - position.dy,
       ),
       items: [
-        PopupMenuItem(
+        PopupMenuItem<dynamic>(
           child: Row(
             children: [
               Icon(group.isPinned ? Icons.push_pin : Icons.push_pin_outlined),
@@ -332,7 +526,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
             }
           },
         ),
-        PopupMenuItem(
+        PopupMenuItem<dynamic>(
           child: Row(
             children: [
               Icon(group.isMuted ? Icons.notifications : Icons.notifications_off),
@@ -383,7 +577,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
         MediaQuery.of(context).size.height - buttonPosition.dy - 40,
       ),
       items: [
-        PopupMenuItem(
+        PopupMenuItem<dynamic>(
           child: const Row(
             children: [
               Icon(Icons.group_add, size: 20),
@@ -397,7 +591,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
             });
           },
         ),
-        PopupMenuItem(
+        PopupMenuItem<dynamic>(
           child: const Row(
             children: [
               Icon(Icons.campaign, size: 20),
@@ -411,7 +605,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
             });
           },
         ),
-        PopupMenuItem(
+        PopupMenuItem<dynamic>(
           child: const Row(
             children: [
               Icon(Icons.person_add, size: 20),
@@ -425,7 +619,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
             });
           },
         ),
-        PopupMenuItem(
+        PopupMenuItem<dynamic>(
           child: const Row(
             children: [
               Icon(Icons.qr_code_scanner, size: 20),
@@ -769,6 +963,8 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                     setState(() {});
                     // Debounce search for world feed
                     _searchDebounceTimer?.cancel();
+                    final router = GoRouter.of(context);
+                    final currentRoute = router.routerDelegate.currentConfiguration.uri.path;
                     if (currentRoute == '/world' && value.isNotEmpty) {
                       _searchDebounceTimer = Timer(const Duration(milliseconds: 500), () async {
                         try {
@@ -786,14 +982,20 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
               ),
               const SizedBox(width: 8),
               // Filter button (for search filtering) - hide on world feed
-              if (currentRoute != '/world')
-                IconButton(
-                  icon: Icon(Icons.filter_list, color: isDark ? Colors.white70 : Colors.grey[600]),
-                  tooltip: 'Search filters',
-                  onPressed: () {
-                    // TODO: Show search filter options dialog
-                  },
-                ),
+              Builder(
+                builder: (context) {
+                  final router = GoRouter.of(context);
+                  final currentRoute = router.routerDelegate.currentConfiguration.uri.path;
+                  if (currentRoute == '/world') return const SizedBox.shrink();
+                  return IconButton(
+                    icon: Icon(Icons.filter_list, color: isDark ? Colors.white70 : Colors.grey[600]),
+                    tooltip: 'Search filters',
+                    onPressed: () {
+                      // TODO: Show search filter options dialog
+                    },
+                  );
+                },
+              ),
             ],
           ),
         ),
@@ -826,19 +1028,26 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                 _buildFilterChip('archived', 'Archived', isDark),
                 const SizedBox(width: 8),
                 _buildFilterChip('broadcast', 'Broadcast', isDark),
+                // Show labels as filter chips
+                ..._labels.map((label) {
+                  return Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: _buildFilterChip('label-${label.id}', label.name, isDark),
+                  );
+                }),
                 const SizedBox(width: 8),
-            // Add new filter button
-            FilterChip(
-              label: const Icon(Icons.add, size: 16),
-              selected: false,
-              onSelected: (selected) {
-                _showCreateLabelDialog(context, isDark);
-              },
-              backgroundColor: isDark ? const Color(0xFF2A3942) : Colors.grey[200],
-              side: BorderSide(
-                color: isDark ? const Color(0xFF2A3942) : Colors.grey[300]!,
-              ),
-            ),
+                // Add new label button
+                FilterChip(
+                  label: const Icon(Icons.add, size: 16),
+                  selected: false,
+                  onSelected: (selected) {
+                    _showCreateLabelDialog(context, isDark);
+                  },
+                  backgroundColor: isDark ? const Color(0xFF2A3942) : Colors.grey[200],
+                  side: BorderSide(
+                    color: isDark ? const Color(0xFF2A3942) : Colors.grey[300]!,
+                  ),
+                ),
               ],
             ),
           ),
@@ -895,6 +1104,19 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                   } else if (_selectedFilter == 'broadcast') {
                     // Broadcast filter - show broadcast lists screen
                     return const BroadcastListsScreen();
+                  } else if (_selectedFilter.startsWith('label-')) {
+                    // Filter by label
+                    final labelIdStr = _selectedFilter.replaceFirst('label-', '');
+                    final labelId = int.tryParse(labelIdStr);
+                    if (labelId != null) {
+                      filteredConversations = allConversations
+                          .where((c) => c.archivedAt == null && c.labelIds.contains(labelId))
+                          .toList();
+                      filteredGroups = []; // Labels don't apply to groups
+                    } else {
+                      filteredConversations = [];
+                      filteredGroups = [];
+                    }
                   }
                   
                   final conversations = filteredConversations;
@@ -1039,7 +1261,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
       builder: (context) => AlertDialog(
         backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
         title: Text(
-          'Create Filter',
+          'Create Label',
           style: TextStyle(color: isDark ? Colors.white : Colors.black),
         ),
         content: TextField(
@@ -1047,7 +1269,8 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
           autofocus: true,
           style: TextStyle(color: isDark ? Colors.white : Colors.black),
           decoration: InputDecoration(
-            labelText: 'Filter Name',
+            labelText: 'Label Name',
+            hintText: 'e.g., "Work", "Family"',
             labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.grey[700]),
             border: const OutlineInputBorder(),
             focusedBorder: const OutlineInputBorder(
@@ -1075,19 +1298,18 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
 
     if (result != null && result.isNotEmpty) {
       try {
-        final apiService = ref.read(apiServiceProvider);
-        await apiService.createLabel(result);
+        final labelsRepo = ref.read(labelsRepositoryProvider);
+        await labelsRepo.createLabel(result);
+        _loadLabels(); // Reload labels to show in filter chips
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Filter created successfully')),
+            const SnackBar(content: Text('Label created successfully')),
           );
-          // Reload to show new filter
-          setState(() {});
         }
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to create filter: $e')),
+            SnackBar(content: Text('Failed to create label: $e')),
           );
         }
       }

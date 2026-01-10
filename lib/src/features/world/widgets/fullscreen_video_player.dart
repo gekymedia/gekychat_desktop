@@ -80,6 +80,20 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
 
     try {
       final controller = VideoPlayerController.networkUrl(Uri.parse(fullUrl));
+      
+      // Add error listener before initialization
+      controller.addListener(() {
+        if (controller.value.hasError) {
+          debugPrint('Video player error: ${controller.value.errorDescription}');
+          if (mounted) {
+            setState(() {
+              _videoController = null;
+              _isPlaying = false;
+            });
+          }
+        }
+      });
+      
       await controller.initialize();
       
       if (mounted && _currentIndex == index) {
@@ -87,13 +101,28 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
           _videoController = controller;
           _isPlaying = true;
         });
-        controller.play();
-        controller.setLooping(true);
+        
+        try {
+          await controller.play();
+          controller.setLooping(true);
+        } catch (playError) {
+          debugPrint('Error playing video: $playError');
+        }
       } else {
         controller.dispose();
       }
     } catch (e) {
       debugPrint('Error loading video: $e');
+      // Dispose controller on error to prevent memory leaks
+      if (_videoController != null && _videoController!.value.hasError) {
+        _videoController?.dispose();
+        if (mounted) {
+          setState(() {
+            _videoController = null;
+            _isPlaying = false;
+          });
+        }
+      }
     }
   }
 

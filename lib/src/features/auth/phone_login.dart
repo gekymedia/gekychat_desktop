@@ -89,11 +89,19 @@ class _PhoneLoginState extends ConsumerState<PhoneLoginScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Logo/Icon
-                    Icon(
-                      Icons.chat_bubble_outline,
-                      size: 64,
-                      color: primaryColor,
+                    // Logo/Icon (without text)
+                    Image.asset(
+                      'assets/icons/gold_no_text/128x128.png',
+                      width: 128,
+                      height: 128,
+                      errorBuilder: (context, error, stackTrace) {
+                        // Fallback to icon if image not found
+                        return Icon(
+                          Icons.chat_bubble_outline,
+                          size: 64,
+                          color: primaryColor,
+                        );
+                      },
                     ),
                     const SizedBox(height: 24),
                     

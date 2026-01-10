@@ -160,16 +160,24 @@ class StatusRepository {
   }
 
   /// Mark a status as viewed
-  /// 
-  /// PHASE 0: TODO (PHASE 1) - Add stealth viewing support (same as mobile)
-  /// TODO (PHASE 1): Add 'stealth' boolean parameter to mark view as stealth
-  /// TODO (PHASE 1): Pass stealth parameter to backend API
-  Future<void> markStatusAsViewed(int statusId) async {
+  ///
+  /// Supports stealth viewing when [stealth] is true (view won't appear in
+  /// the owner's viewers list).
+  Future<void> markStatusAsViewed(int statusId, {bool stealth = false}) async {
     try {
-      await _api.post('/statuses/$statusId/view');
+      await _api.post('/statuses/$statusId/view', data: {
+        'stealth': stealth,
+      });
     } catch (e) {
       // Silently fail
     }
+  }
+
+  /// PHASE 1: Download status media (image or video)
+  /// Returns the download URL for the media
+  String getStatusDownloadUrl(int statusId) {
+    // Build download URL - the API service will handle auth headers
+    return '/statuses/$statusId/download';
   }
 
   /// Get comments for a status

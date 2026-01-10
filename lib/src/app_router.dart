@@ -1,5 +1,6 @@
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/material.dart';
 import 'features/auth/auth_provider.dart';
 import 'features/auth/phone_login.dart';
 import 'features/auth/otp_verify.dart';
@@ -22,9 +23,33 @@ import 'features/storage/storage_usage_screen.dart';
 import 'features/media_auto_download/media_auto_download_screen.dart';
 import 'features/notifications/notification_settings_screen.dart';
 
+// ChangeNotifier to trigger router refresh when auth state changes
+class _RouterRefreshNotifier extends ChangeNotifier {
+  void refresh() {
+    notifyListeners();
+  }
+}
+
+final routerRefreshNotifierProvider = Provider((ref) {
+  final notifier = _RouterRefreshNotifier();
+  
+  // Listen to auth state changes and refresh router
+  ref.listen<AuthState>(authProvider, (previous, next) {
+    // When auth state changes (e.g., token is loaded), refresh router
+    notifier.refresh();
+  });
+  
+  return notifier;
+});
+
 final routerProvider = Provider<GoRouter>((ref) {
+  // Watch auth state - when it changes, router provider will rebuild
+  final authState = ref.watch(authProvider);
+  final refreshNotifier = ref.watch(routerRefreshNotifierProvider);
+  
   return GoRouter(
-    initialLocation: '/login',
+    initialLocation: '/login', // Will be redirected by redirect function based on auth state
+    refreshListenable: refreshNotifier,
     routes: [
       GoRoute(
         path: '/login',
@@ -142,20 +167,24 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
     ],
     redirect: (context, state) {
-      final authState = ref.read(authProvider);
-      final isLoggedIn = authState.token != null;
+      // Use captured authState from outer scope (will be updated when router provider rebuilds)
+      final isLoggedIn = authState.token != null && authState.token!.isNotEmpty;
       final isLoggingIn = state.uri.path == '/login';
       final isVerifying = state.uri.path == '/verify';
+      final isOnAuthPage = isLoggingIn || isVerifying;
 
       // If not logged in and trying to access protected routes, go to login
-      if (!isLoggedIn && !isLoggingIn && !isVerifying) return '/login';
+      if (!isLoggedIn && !isOnAuthPage) {
+        return '/login';
+      }
       
-      // If logged in and on login/verify page, go to chats (but only if token is validated)
+      // If logged in and on login/verify page, go to chats
       // Don't redirect if currently verifying - let user complete OTP flow
-      if (isLoggedIn && isLoggingIn && !isVerifying) return '/chats';
+      if (isLoggedIn && isLoggingIn && !isVerifying) {
+        return '/chats';
+      }
       
       return null;
     },
   );
 });
-

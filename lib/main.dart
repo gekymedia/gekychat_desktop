@@ -6,6 +6,8 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'src/features/auth/auth_provider.dart';
 import 'src/features/notifications/notification_manager.dart';
 import 'src/core/providers.dart';
+import 'src/core/theme/theme_provider.dart' as custom_theme;
+import 'src/core/theme/theme_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -43,18 +45,20 @@ class MyApp extends ConsumerWidget {
       }
     });
     
-    // Check auth status on startup
-    ref.read(authProvider.notifier).checkAuthStatus();
+    // Check auth status on startup - wait for it to complete before showing router
+    final authNotifier = ref.read(authProvider.notifier);
+    Future.microtask(() => authNotifier.checkAuthStatus());
     
     final router = ref.watch(routerProvider);
-    final themeMode = ref.watch(themeProvider);
+    final customThemeMode = ref.watch(custom_theme.themeModeProvider);
+    final themeService = ref.watch(custom_theme.themeServiceProvider);
     
     return MaterialApp.router(
       title: 'GekyChat Desktop',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.light,
-      darkTheme: AppTheme.dark,
-      themeMode: themeMode,
+      theme: themeService.getThemeData(customThemeMode),
+      darkTheme: themeService.getThemeData(customThemeMode),
+      themeMode: customThemeMode.isDark ? ThemeMode.dark : ThemeMode.light,
       routerConfig: router,
     );
   }

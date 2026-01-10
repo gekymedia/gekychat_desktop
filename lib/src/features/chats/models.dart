@@ -77,6 +77,7 @@ class ConversationSummary {
   final bool isPinned;
   final bool isMuted;
   final DateTime? archivedAt;
+  final List<int> labelIds; // List of label IDs assigned to this conversation
 
   ConversationSummary({
     required this.id,
@@ -87,6 +88,7 @@ class ConversationSummary {
     this.isPinned = false,
     this.isMuted = false,
     this.archivedAt,
+    this.labelIds = const [],
   });
 
   factory ConversationSummary.fromJson(Map<String, dynamic> json) {
@@ -112,6 +114,21 @@ class ConversationSummary {
       lastMessage = null; // Hide scaffold messages
     }
     
+    // Parse labels - can be array of objects with 'id' or array of IDs
+    List<int> labelIds = [];
+    if (json['labels'] != null) {
+      if (json['labels'] is List) {
+        labelIds = (json['labels'] as List).map((label) {
+          if (label is Map) {
+            return label['id'] as int? ?? 0;
+          } else if (label is int) {
+            return label;
+          }
+          return 0;
+        }).where((id) => id > 0).toList();
+      }
+    }
+    
     return ConversationSummary(
       id: json['id'],
       otherUser: otherUser,
@@ -127,6 +144,7 @@ class ConversationSummary {
       archivedAt: json['archived_at'] != null
           ? DateTime.parse(json['archived_at'])
           : null,
+      labelIds: labelIds,
     );
   }
 }

@@ -927,26 +927,103 @@ class MessageBubble extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: ['👍', '❤️', '😂', '😮', '😢', '🙏'].map((emoji) {
-              return InkWell(
+            children: [
+              ...['👍', '❤️', '😂', '😮', '😢', '🙏'].map((emoji) {
+                return InkWell(
+                  onTap: () {
+                    Navigator.pop(context);
+                    onReact?.call(emoji);
+                  },
+                  borderRadius: BorderRadius.circular(28),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    child: Text(
+                      emoji,
+                      style: const TextStyle(fontSize: 28),
+                    ),
+                  ),
+                );
+              }),
+              // More reactions button (emoji picker)
+              InkWell(
                 onTap: () {
                   Navigator.pop(context);
-                  onReact?.call(emoji);
+                  _showCustomEmojiPicker(context);
                 },
                 borderRadius: BorderRadius.circular(28),
                 child: Container(
                   padding: const EdgeInsets.all(12),
-                  child: Text(
-                    emoji,
-                    style: const TextStyle(fontSize: 28),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                    borderRadius: BorderRadius.circular(28),
                   ),
+                  child: const Icon(Icons.add_circle_outline, size: 28),
                 ),
-              );
-            }).toList(),
+              ),
+            ],
           ),
         ),
       ),
     );
+  }
+
+  void _showCustomEmojiPicker(BuildContext context) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final emojis = [
+      '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇',
+      '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚',
+      '😋', '😛', '😝', '😜', '🤪', '🤨', '🧐', '🤓', '😎', '🤩',
+      '🥳', '😏', '😒', '😞', '😔', '😟', '😕', '🙁', '☹️', '😣',
+      '😖', '😫', '😩', '🥺', '😢', '😭', '😤', '😠', '😡', '🤬',
+      '🤯', '😳', '🥵', '🥶', '😱', '😨', '😰', '😥', '😓', '🤗',
+      '🤔', '🤭', '🤫', '🤥', '😶', '😐', '😑', '😬', '🙄', '😯',
+      '😦', '😧', '😮', '😲', '🥱', '😴', '🤤', '😪', '😵', '🤐',
+      '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔',
+      '👍', '👎', '👌', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉',
+      '👆', '👇', '☝️', '👏', '🙌', '👐', '🤲', '🤝', '🙏', '✍️',
+    ];
+
+    final emoji = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
+        title: Text(
+          'Choose Emoji',
+          style: TextStyle(color: isDark ? Colors.white : Colors.black),
+        ),
+        content: SizedBox(
+          width: 500,
+          height: 400,
+          child: GridView.builder(
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 10,
+              mainAxisSpacing: 4,
+              crossAxisSpacing: 4,
+            ),
+            itemCount: emojis.length,
+            itemBuilder: (context, index) {
+              return InkWell(
+                onTap: () => Navigator.pop(context, emojis[index]),
+                borderRadius: BorderRadius.circular(8),
+                child: Center(
+                  child: Text(emojis[index], style: const TextStyle(fontSize: 24)),
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: TextStyle(color: isDark ? Colors.white70 : Colors.grey[700])),
+          ),
+        ],
+      ),
+    );
+
+    if (emoji != null && emoji.isNotEmpty) {
+      onReact?.call(emoji);
+    }
   }
 
   void _showEditDialog(BuildContext context) {

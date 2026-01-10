@@ -240,8 +240,9 @@ class ApiService {
         if (day != null) 'day': day,
       });
 
-  Future<Response> deleteMessage(int messageId) =>
-      delete('/messages/$messageId');
+  // PHASE 1: Delete message with optional "delete for everyone" option
+  Future<Response> deleteMessage(int messageId, {bool deleteForEveryone = false}) =>
+      delete('/messages/$messageId?delete_for=${deleteForEveryone ? 'everyone' : 'me'}');
 
   Future<Response> editMessage(int messageId, String body) =>
       put('/messages/$messageId', data: {'body': body});
@@ -404,6 +405,9 @@ class ApiService {
   
   Future<Response> createLabel(String name) =>
       post('/labels', data: {'name': name});
+  
+  Future<Response> updateLabel(int id, String name) =>
+      put('/labels/$id', data: {'name': name});
   
   Future<Response> deleteLabel(int labelId) =>
       delete('/labels/$labelId');
@@ -646,11 +650,17 @@ class ApiService {
     required File media,
     String? caption,
     List<String>? tags,
+    int? audioId,
+    int? audioVolume,
+    bool? audioLoop,
   }) async {
     final formData = FormData.fromMap({
       'media': await MultipartFile.fromFile(media.path),
       if (caption != null && caption.isNotEmpty) 'caption': caption,
       if (tags != null && tags.isNotEmpty) 'tags': tags,
+      if (audioId != null) 'audio_id': audioId,
+      if (audioVolume != null) 'audio_volume': audioVolume,
+      if (audioLoop != null) 'audio_loop': audioLoop,
     });
     return post('/world-feed/posts', data: formData);
   }
@@ -715,9 +725,5 @@ class ApiService {
     required String deviceType,
     required int accountId,
   }) =>
-    delete('/auth/accounts/$accountId', data: {
-      'device_id': deviceId,
-      'device_type': deviceType,
-    });
+    delete('/auth/accounts/$accountId?device_id=$deviceId&device_type=$deviceType');
 }
-

@@ -8,6 +8,7 @@ import '../auth/auth_provider.dart';
 import 'profile_edit_screen.dart';
 import '../quick_replies/quick_replies_screen.dart';
 import '../auto_reply/auto_reply_screen.dart';
+import '../labels/labels_screen.dart';
 import '../two_factor/two_factor_screen.dart';
 import '../linked_devices/linked_devices_screen.dart';
 import '../privacy/privacy_settings_screen.dart';
@@ -15,6 +16,8 @@ import '../storage/storage_usage_screen.dart';
 import '../media/media_gallery_screen.dart';
 import '../media_auto_download/media_auto_download_screen.dart';
 import '../notifications/notification_settings_screen.dart';
+import '../../core/theme/theme_provider.dart' as custom_theme;
+import '../../core/theme/app_theme_mode.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -84,6 +87,19 @@ class SettingsScreen extends ConsumerWidget {
                         context,
                         MaterialPageRoute(
                           builder: (context) => const QuickRepliesScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  _SettingsTile(
+                    icon: Icons.label,
+                    title: 'Labels',
+                    subtitle: 'Organize conversations with labels',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const LabelsScreen(),
                         ),
                       );
                     },
@@ -236,26 +252,18 @@ class SettingsScreen extends ConsumerWidget {
               _SettingsSection(
                 title: 'App',
                 children: [
-                  _SettingsTile(
-                    icon: Icons.dark_mode,
-                    title: 'Theme',
-                    subtitle: 'Switch between light and dark mode',
-                    trailing: Consumer(
-                      builder: (context, ref, child) {
-                        final themeMode = ref.watch(themeProvider);
-                        final isDark = themeMode == ThemeMode.dark || 
-                            (themeMode == ThemeMode.system && 
-                             Theme.of(context).brightness == Brightness.dark);
-                        return Switch(
-                          value: isDark,
-                          onChanged: (value) {
-                            ref.read(themeProvider.notifier).setTheme(
-                              value ? ThemeMode.dark : ThemeMode.light,
-                            );
-                          },
-                        );
-                      },
-                    ),
+                  Consumer(
+                    builder: (context, ref, child) {
+                      final customThemeMode = ref.watch(custom_theme.themeModeProvider);
+                      return _SettingsTile(
+                        icon: Icons.palette,
+                        title: 'Theme',
+                        subtitle: customThemeMode.displayName,
+                        onTap: () {
+                          _showThemeSelector(context, ref);
+                        },
+                      );
+                    },
                   ),
                   _SettingsTile(
                     icon: Icons.info,
@@ -544,6 +552,67 @@ class SettingsScreen extends ConsumerWidget {
             },
             style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showThemeSelector(BuildContext context, WidgetRef ref) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final currentTheme = ref.read(custom_theme.themeModeProvider);
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
+        title: Text(
+          'Choose Theme',
+          style: TextStyle(color: isDark ? Colors.white : Colors.black),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: AppThemeMode.values.map((theme) {
+            final isSelected = theme == currentTheme;
+            return RadioListTile<AppThemeMode>(
+              title: Text(
+                theme.displayName,
+                style: TextStyle(
+                  color: isDark ? Colors.white : Colors.black,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+              subtitle: Text(
+                theme.isDark ? 'Dark mode' : 'Light mode',
+                style: TextStyle(
+                  color: isDark ? Colors.white70 : Colors.grey[600],
+                  fontSize: 12,
+                ),
+              ),
+              value: theme,
+              groupValue: currentTheme,
+              activeColor: const Color(0xFF008069),
+              onChanged: (value) async {
+                if (value != null) {
+                  await ref.read(custom_theme.themeModeProvider.notifier).setThemeMode(value);
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Theme changed to ${value.displayName}'),
+                        duration: const Duration(seconds: 2),
+                      ),
+                    );
+                  }
+                }
+              },
+            );
+          }).toList(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: TextStyle(color: isDark ? Colors.white70 : Colors.grey[700])),
           ),
         ],
       ),

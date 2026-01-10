@@ -24,6 +24,7 @@ class StatusUpdate {
   final DateTime expiresAt;
   final int viewCount;
   final bool viewed;
+  final bool? allowDownload;
 
   StatusUpdate({
     required this.id,
@@ -32,6 +33,7 @@ class StatusUpdate {
     this.text,
     this.mediaUrl,
     this.thumbnailUrl,
+    this.allowDownload,
     this.backgroundColor,
     this.fontFamily,
     required this.createdAt,
@@ -57,6 +59,7 @@ class StatusUpdate {
       expiresAt: DateTime.parse(json['expires_at']),
       viewCount: json['view_count'] ?? 0,
       viewed: json['viewed'] ?? false,
+      allowDownload: json['allow_download'],
     );
   }
 
