@@ -1163,6 +1163,21 @@ class _ChatViewState extends ConsumerState<ChatView> {
 
         // Messages List
         Expanded(
+          child: Container(
+            decoration: BoxDecoration(
+              image: DecorationImage(
+                image: AssetImage(isDark 
+                    ? 'assets/images/chatbg2.jpg' 
+                    : 'assets/images/chatbg.jpg'),
+                fit: BoxFit.cover,
+              ),
+            ),
+            child: Container(
+              decoration: BoxDecoration(
+                color: isDark 
+                    ? const Color(0xFF111B21).withOpacity(0.85)
+                    : Colors.white.withOpacity(0.85),
+              ),
           child: _isLoading
               ? const Center(child: CircularProgressIndicator())
               : _messages.isEmpty
@@ -1189,6 +1204,8 @@ class _ChatViewState extends ConsumerState<ChatView> {
                           onEdit: (newBody) => _editMessage(message, newBody),
                         );
                       },
+                        ),
+                    ),
                     ),
         ),
 

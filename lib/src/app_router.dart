@@ -25,6 +25,15 @@ import 'features/notifications/notification_settings_screen.dart';
 
 // ChangeNotifier to trigger router refresh when auth state changes
 class _RouterRefreshNotifier extends ChangeNotifier {
+  AuthState? _authState;
+  
+  AuthState? get authState => _authState;
+  
+  void updateAuthState(AuthState state) {
+    _authState = state;
+    notifyListeners();
+  }
+  
   void refresh() {
     notifyListeners();
   }
@@ -33,9 +42,15 @@ class _RouterRefreshNotifier extends ChangeNotifier {
 final routerRefreshNotifierProvider = Provider((ref) {
   final notifier = _RouterRefreshNotifier();
   
+  // Initialize with current auth state
+  final initialAuthState = ref.read(authProvider);
+  notifier.updateAuthState(initialAuthState);
+  
   // Listen to auth state changes and refresh router
   ref.listen<AuthState>(authProvider, (previous, next) {
-    // When auth state changes (e.g., token is loaded), refresh router
+    // Update the auth state in the notifier
+    notifier.updateAuthState(next);
+    // When auth state changes, refresh router
     notifier.refresh();
   });
   
@@ -43,12 +58,11 @@ final routerRefreshNotifierProvider = Provider((ref) {
 });
 
 final routerProvider = Provider<GoRouter>((ref) {
-  // Watch auth state - when it changes, router provider will rebuild
-  final authState = ref.watch(authProvider);
   final refreshNotifier = ref.watch(routerRefreshNotifierProvider);
   
-  // Determine initial location based on auth state
-  final initialLocation = (authState.token != null && authState.token!.isNotEmpty) ? '/chats' : '/login';
+  // Get initial auth state for initialLocation
+  final initialAuthState = ref.read(authProvider);
+  final initialLocation = (initialAuthState.token != null && initialAuthState.token!.isNotEmpty) ? '/chats' : '/login';
   
   return GoRouter(
     initialLocation: initialLocation, // Set initial location based on auth state
@@ -170,7 +184,9 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
     ],
     redirect: (context, state) {
-      final isLoggedIn = authState.token != null && authState.token!.isNotEmpty;
+      // Get current auth state from the refresh notifier
+      final currentAuthState = refreshNotifier.authState;
+      final isLoggedIn = currentAuthState?.token != null && currentAuthState!.token!.isNotEmpty;
       final currentPath = state.uri.path;
       final isLoggingIn = currentPath == '/login';
       final isVerifying = currentPath == '/verify';

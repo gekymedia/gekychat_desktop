@@ -73,7 +73,12 @@ class ApiService {
           if (token != null && token.isNotEmpty) {
             options.headers['Authorization'] = 'Bearer $token';
           } else {
-            debugPrint('⚠️ Warning: No auth token found for request to ${options.path}');
+            // Don't warn for auth endpoints that don't require tokens
+            final path = options.path.toLowerCase();
+            final isAuthEndpoint = path.contains('/auth/phone') || path.contains('/auth/verify');
+            if (!isAuthEndpoint) {
+              debugPrint('⚠️ Warning: No auth token found for request to ${options.path}');
+            }
           }
 
           return handler.next(options);

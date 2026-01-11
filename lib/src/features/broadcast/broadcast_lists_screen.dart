@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:intl/intl.dart';
+import 'package:go_router/go_router.dart';
 import 'broadcast_repository.dart';
 import 'models.dart';
 import 'create_broadcast_screen.dart';
 import 'edit_broadcast_screen.dart';
 import 'send_broadcast_screen.dart';
-import '../../core/providers.dart';
 
 final broadcastListsProvider = FutureProvider<List<BroadcastList>>((ref) async {
   final repo = ref.read(broadcastRepositoryProvider);
@@ -27,7 +25,13 @@ class BroadcastListsScreen extends ConsumerWidget {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/chats');
+            }
+          },
         ),
         title: const Text('Broadcast Lists'),
         actions: [

@@ -107,9 +107,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
     state = state.copyWith(token: null);
     
     try {
-      await _apiService.post('/auth/phone', data: {'phone': phone});
+      debugPrint('📱 Requesting OTP for phone: $phone');
+      final response = await _apiService.post('/auth/phone', data: {'phone': phone});
+      debugPrint('✅ OTP request successful: ${response.statusCode}');
       state = state.copyWith(isLoading: false);
     } catch (e) {
+      debugPrint('❌ OTP request failed: $e');
       state = state.copyWith(
         isLoading: false,
         error: _formatError(e, 'Failed to send verification code.'),

@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'call_repository.dart';
 import 'models.dart';
 import 'providers.dart';
+import 'call_screen.dart';
 import '../../core/feature_flags.dart';
 import '../../core/session.dart';
 
@@ -156,7 +157,7 @@ class CallsScreen extends ConsumerWidget {
   }
 }
 
-class _CallLogItem extends StatelessWidget {
+class _CallLogItem extends ConsumerWidget {
   final CallLog call;
   final bool isDark;
 
@@ -166,7 +167,7 @@ class _CallLogItem extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     if (call.otherUser == null) {
       return const SizedBox.shrink();
     }
@@ -213,19 +214,19 @@ class _CallLogItem extends StatelessWidget {
           ),
         ],
       ),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            _formatTime(call.createdAt),
-            style: TextStyle(
-              color: isDark ? Colors.white70 : Colors.grey[600],
-              fontSize: 12,
+          IconButton(
+            icon: Icon(
+              call.type == 'video' ? Icons.videocam : Icons.phone,
+              color: isDark ? Colors.green : Colors.green[700],
             ),
+            onPressed: () => _initiateCallback(context, ref),
+            tooltip: 'Call back',
           ),
           if (call.duration != null && !call.isMissed) ...[
-            const SizedBox(height: 4),
+            const SizedBox(width: 8),
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -243,6 +244,15 @@ class _CallLogItem extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+          ] else ...[
+            const SizedBox(width: 8),
+            Text(
+              _formatTime(call.createdAt),
+              style: TextStyle(
+                color: isDark ? Colors.white70 : Colors.grey[600],
+                fontSize: 12,
+              ),
             ),
           ],
         ],
@@ -262,6 +272,49 @@ class _CallLogItem extends StatelessWidget {
 
   String _formatTime(DateTime time) {
     return DateFormat('h:mm a').format(time);
+  }
+
+  Future<void> _initiateCallback(BuildContext context, WidgetRef ref) async {
+    if (call.otherUser == null) return;
+
+    try {
+      final callManager = ref.read(callManagerProvider);
+      final user = call.otherUser!;
+
+      // Start the call (desktop CallLog doesn't have conversationId, so we just use calleeId)
+      await callManager.startCall(
+        calleeId: user.id,
+        type: call.type,
+      );
+
+      // Get the call session from CallManager
+      final callSession = callManager.currentCall;
+      if (callSession != null) {
+        // Navigate to call screen
+        if (context.mounted) {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => CallScreen(
+                call: callSession,
+                userName: user.name,
+                userAvatar: user.avatarUrl,
+                isIncoming: false,
+                callManager: callManager,
+              ),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to start call: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 }
 

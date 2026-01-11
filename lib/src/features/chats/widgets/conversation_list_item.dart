@@ -3,6 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
 import '../models.dart';
 import '../../../theme/app_theme.dart';
+import '../../../utils/avatar_utils.dart';
 
 class ConversationListItem extends StatelessWidget {
   final ConversationSummary conversation;
@@ -45,34 +46,47 @@ class ConversationListItem extends StatelessWidget {
                 height: 56,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: isDark ? AppTheme.darkSurface : AppTheme.lightBorder,
+                  gradient: conversation.otherUser.avatarUrl == null
+                      ? AvatarUtils.getGradientForName(conversation.otherUser.name)
+                      : null,
+                  color: conversation.otherUser.avatarUrl != null
+                      ? (isDark ? AppTheme.darkSurface : AppTheme.lightBorder)
+                      : null,
                 ),
                 child: conversation.otherUser.avatarUrl != null
                     ? ClipOval(
                         child: CachedNetworkImage(
                           imageUrl: conversation.otherUser.avatarUrl!,
                           fit: BoxFit.cover,
-                          placeholder: (context, url) => Center(
+                          placeholder: (context, url) => Container(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: AvatarUtils.getGradientForName(conversation.otherUser.name),
+                            ),
+                            child: Center(
                             child: Text(
-                              _getInitials(conversation.otherUser.name),
-                              style: TextStyle(
-                                color: isDark
-                                    ? AppTheme.textPrimaryDark
-                                    : AppTheme.textPrimaryLight,
+                                AvatarUtils.getInitials(conversation.otherUser.name),
+                                style: const TextStyle(
+                                  color: Colors.white,
                                 fontSize: 20,
                                 fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ),
                           ),
-                          errorWidget: (context, url, error) => Center(
+                          errorWidget: (context, url, error) => Container(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: AvatarUtils.getGradientForName(conversation.otherUser.name),
+                            ),
+                            child: Center(
                             child: Text(
-                              _getInitials(conversation.otherUser.name),
-                              style: TextStyle(
-                                color: isDark
-                                    ? AppTheme.textPrimaryDark
-                                    : AppTheme.textPrimaryLight,
+                                AvatarUtils.getInitials(conversation.otherUser.name),
+                                style: const TextStyle(
+                                  color: Colors.white,
                                 fontSize: 20,
                                 fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ),
                           ),
@@ -80,11 +94,9 @@ class ConversationListItem extends StatelessWidget {
                       )
                     : Center(
                         child: Text(
-                          _getInitials(conversation.otherUser.name),
-                          style: TextStyle(
-                            color: isDark
-                                ? AppTheme.textPrimaryDark
-                                : AppTheme.textPrimaryLight,
+                          AvatarUtils.getInitials(conversation.otherUser.name),
+                          style: const TextStyle(
+                            color: Colors.white,
                             fontSize: 20,
                             fontWeight: FontWeight.w600,
                           ),
@@ -213,14 +225,6 @@ class ConversationListItem extends StatelessWidget {
     );
   }
 
-  String _getInitials(String name) {
-    if (name.isEmpty) return '?';
-    final parts = name.split(' ');
-    if (parts.length > 1) {
-      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
-    }
-    return name[0].toUpperCase();
-  }
 
   String _formatTime(DateTime time) {
     final now = DateTime.now();

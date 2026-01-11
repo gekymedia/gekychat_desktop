@@ -61,6 +61,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
   
   final TextEditingController _searchController = TextEditingController();
   String _selectedFilter = 'all';
+  String _searchQuery = ''; // Store search query for filtering conversations
   Timer? _searchDebounceTimer;
   List<Label> _labels = []; // Store labels for filter chips
 
@@ -947,7 +948,9 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                             icon: Icon(Icons.clear, color: isDark ? Colors.white54 : Colors.grey[600]),
                             onPressed: () {
                               _searchController.clear();
-                              setState(() {});
+                              setState(() {
+                                _searchQuery = '';
+                              });
                             },
                           )
                         : null,
@@ -960,7 +963,9 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   ),
                   onChanged: (value) {
-                    setState(() {});
+                    setState(() {
+                      _searchQuery = value;
+                    });
                     // Debounce search for world feed
                     _searchDebounceTimer?.cancel();
                     final router = GoRouter.of(context);
@@ -1073,29 +1078,48 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                   List<ConversationSummary> filteredConversations = [];
                   List<GroupSummary> filteredGroups = [];
                   
+                  // Apply search query filter first
+                  List<ConversationSummary> searchFilteredConversations = allConversations;
+                  List<GroupSummary> searchFilteredGroups = allGroups;
+                  
+                  if (_searchQuery.isNotEmpty) {
+                    final query = _searchQuery.toLowerCase();
+                    searchFilteredConversations = allConversations.where((c) {
+                      final name = c.otherUser.name.toLowerCase();
+                      final phone = c.otherUser.phone?.toLowerCase() ?? '';
+                      final lastMessage = (c.lastMessage ?? '').toLowerCase();
+                      return name.contains(query) || phone.contains(query) || lastMessage.contains(query);
+                    }).toList();
+                    searchFilteredGroups = allGroups.where((g) {
+                      final name = g.name.toLowerCase();
+                      final lastMessage = (g.lastMessage ?? '').toLowerCase();
+                      return name.contains(query) || lastMessage.contains(query);
+                    }).toList();
+                  }
+                  
                   if (_selectedFilter == 'all') {
                     // Show all conversations (excluding archived) and all groups (excluding channels)
-                    filteredConversations = allConversations.where((c) => c.archivedAt == null).toList();
-                    filteredGroups = allGroups.where((g) => g.type != 'channel').toList();
+                    filteredConversations = searchFilteredConversations.where((c) => c.archivedAt == null).toList();
+                    filteredGroups = searchFilteredGroups.where((g) => g.type != 'channel').toList();
                   } else if (_selectedFilter == 'unread') {
                     // Show unread conversations and groups
-                    filteredConversations = allConversations
+                    filteredConversations = searchFilteredConversations
                         .where((c) => c.unreadCount > 0 && c.archivedAt == null)
                         .toList();
-                    filteredGroups = allGroups
+                    filteredGroups = searchFilteredGroups
                         .where((g) => g.unreadCount > 0 && g.type != 'channel')
                         .toList();
                   } else if (_selectedFilter == 'groups') {
                     // Show only groups (not channels, not conversations)
                     filteredConversations = [];
-                    filteredGroups = allGroups.where((g) => g.type != 'channel').toList();
+                    filteredGroups = searchFilteredGroups.where((g) => g.type != 'channel').toList();
                   } else if (_selectedFilter == 'channels') {
                     // Show only channels (not regular groups, not conversations)
                     filteredConversations = [];
-                    filteredGroups = allGroups.where((g) => g.type == 'channel').toList();
+                    filteredGroups = searchFilteredGroups.where((g) => g.type == 'channel').toList();
                   } else if (_selectedFilter == 'archived') {
                     // Show only archived conversations (already filtered by future)
-                    filteredConversations = allConversations; // Already filtered by _archivedConversationsFuture
+                    filteredConversations = searchFilteredConversations; // Already filtered by _archivedConversationsFuture
                     filteredGroups = []; // Don't show groups in archived
                   } else if (_selectedFilter == 'mail') {
                     // Mail filter - placeholder for now
@@ -1109,7 +1133,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                     final labelIdStr = _selectedFilter.replaceFirst('label-', '');
                     final labelId = int.tryParse(labelIdStr);
                     if (labelId != null) {
-                      filteredConversations = allConversations
+                      filteredConversations = searchFilteredConversations
                           .where((c) => c.archivedAt == null && c.labelIds.contains(labelId))
                           .toList();
                       filteredGroups = []; // Labels don't apply to groups
@@ -1136,29 +1160,12 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                           conversation: conversation,
                           isSelected: isSelected,
                           onTap: () {
-                            // Switch to chats route if not already there
-                            final router = GoRouter.of(context);
-                            if (router.routerDelegate.currentConfiguration.uri.path != '/chats') {
-                              context.go('/chats');
-                              // Wait for route change then select conversation
-                              Future.delayed(const Duration(milliseconds: 100), () {
-                                if (mounted) {
-                                  setState(() {
-                                    _selectedConversation = conversation;
-                                    _selectedConversationId = conversation.id;
-                                    _selectedGroup = null;
-                                    _selectedGroupId = null;
-                                  });
-                                }
-                              });
-                            } else {
-                              setState(() {
-                                _selectedConversation = conversation;
-                                _selectedConversationId = conversation.id;
-                                _selectedGroup = null;
-                                _selectedGroupId = null;
-                              });
-                            }
+                            setState(() {
+                              _selectedConversation = conversation;
+                              _selectedConversationId = conversation.id;
+                              _selectedGroup = null;
+                              _selectedGroupId = null;
+                            });
                           },
                         ),
                       ),

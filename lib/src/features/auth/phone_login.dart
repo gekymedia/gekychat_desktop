@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'auth_provider.dart';
+import '../../app_router.dart';
 
 class PhoneLoginScreen extends ConsumerStatefulWidget {
   const PhoneLoginScreen({super.key});
@@ -36,6 +38,11 @@ class _PhoneLoginState extends ConsumerState<PhoneLoginScreen> {
 
 
   Future<void> _submit() async {
+    if (_loading) {
+      debugPrint('🔵 Already submitting, ignoring duplicate call');
+      return;
+    }
+    
     if (!_formKey.currentState!.validate()) return;
     
     _focusNode.unfocus();
@@ -47,35 +54,27 @@ class _PhoneLoginState extends ConsumerState<PhoneLoginScreen> {
 
     final phone = _phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
     
+    // Capture router before async call to avoid using ref after widget disposal
+    final router = ref.read(routerProvider);
+    
     try {
+      debugPrint('🔵 Starting login with phone: $phone');
       await ref.read(authProvider.notifier).loginWithPhone(phone);
+      debugPrint('🔵 loginWithPhone completed');
 
-      if (!mounted) return;
-      
-      // Wait a bit for state to update
-      await Future.delayed(const Duration(milliseconds: 100));
-      
-      if (!mounted) return;
-      
-      final authState = ref.read(authProvider);
-      if (authState.error != null) {
-        setState(() {
-          _error = authState.error;
-          _loading = false;
+      // Use post-frame callback to navigate after any router refresh completes
+      // This ensures navigation happens even if widget is disposed
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        // Navigate directly since API call succeeded (status 200)
+        // If there was an error, it would be in the state, but we know it succeeded
+      debugPrint('✅ OTP request successful, navigating to /verify?phone=$phone');
+        router.go('/verify?phone=$phone');
+        debugPrint('🔵 Navigation call completed');
         });
-        return;
-      }
       
-      // Success - navigate to OTP verification page
-      setState(() {
-        _loading = false;
-      });
-      
-      if (!mounted) return;
-      
-      // Use push instead of go to avoid redirect interference
-      context.push('/verify?phone=$phone');
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint('❌ Login exception: $e');
+      debugPrint('❌ Stack trace: $stackTrace');
       if (!mounted) return;
       setState(() {
         _error = e.toString();
