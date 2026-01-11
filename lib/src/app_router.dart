@@ -47,8 +47,11 @@ final routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authProvider);
   final refreshNotifier = ref.watch(routerRefreshNotifierProvider);
   
+  // Determine initial location based on auth state
+  final initialLocation = (authState.token != null && authState.token!.isNotEmpty) ? '/chats' : '/login';
+  
   return GoRouter(
-    initialLocation: '/login', // Will be redirected by redirect function based on auth state
+    initialLocation: initialLocation, // Set initial location based on auth state
     refreshListenable: refreshNotifier,
     routes: [
       GoRoute(
