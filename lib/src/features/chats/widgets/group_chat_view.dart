@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -17,6 +18,7 @@ import 'emoji_picker_widget.dart';
 import 'chat_view.dart' show DesktopAudioPreviewWidget;
 import '../../contacts/contacts_repository.dart';
 import 'group_info_screen.dart'; // Provides groupInfoProvider
+import '../../../widgets/slide_route.dart';
 import '../../media/media_gallery_screen.dart';
 import 'search_in_chat_screen.dart';
 import '../../calls/call_screen.dart';
@@ -58,6 +60,9 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
   bool _isRecording = false;
   String? _recordingPath;
   Duration _recordingDuration = Duration.zero;
+  
+  // Drag and drop
+  bool _isDragging = false;
 
   @override
   void initState() {
@@ -745,8 +750,8 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                 onPressed: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (context) => GroupInfoScreen(groupId: widget.groupId),
+                    SlideRightRoute(
+                      page: GroupInfoScreen(groupId: widget.groupId),
                     ),
                   );
                 },
@@ -780,8 +785,8 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                     case 'group_info':
                       Navigator.push(
                         context,
-                        MaterialPageRoute(
-                          builder: (context) => GroupInfoScreen(groupId: widget.groupId),
+                        SlideRightRoute(
+                          page: GroupInfoScreen(groupId: widget.groupId),
                         ),
                       );
                       break;
@@ -835,7 +840,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
           ),
         ),
 
-        // Messages List
+        // Messages List with drag and drop support
         Expanded(
           child: Container(
             decoration: BoxDecoration(
@@ -846,42 +851,88 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                 fit: BoxFit.cover,
               ),
             ),
-            child: Container(
-              decoration: BoxDecoration(
-                color: isDark 
-                    ? const Color(0xFF111B21).withOpacity(0.85)
-                    : Colors.white.withOpacity(0.85),
+            child: DropTarget(
+              onDragDone: (detail) {
+                setState(() {
+                  _attachments.addAll(
+                    detail.files
+                        .where((file) => file.path != null)
+                        .map((file) => File(file.path!))
+                        .toList(),
+                  );
+                  _isDragging = false;
+                });
+              },
+              onDragEntered: (detail) {
+                setState(() {
+                  _isDragging = true;
+                });
+              },
+              onDragExited: (detail) {
+                setState(() {
+                  _isDragging = false;
+                });
+              },
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isDark 
+                      ? const Color(0xFF111B21).withOpacity(_isDragging ? 0.70 : 0.85)
+                      : Colors.white.withOpacity(_isDragging ? 0.70 : 0.85),
+                  border: _isDragging
+                      ? Border.all(
+                          color: const Color(0xFF008069),
+                          width: 3,
+                        )
+                      : null,
+                ),
+                child: _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _messages.isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  _isDragging 
+                                      ? 'Drop files here to send'
+                                      : 'No messages yet. Start a conversation!',
+                                  style: TextStyle(
+                                    color: isDark ? Colors.white70 : Colors.grey[600],
+                                    fontSize: _isDragging ? 18 : 14,
+                                    fontWeight: _isDragging ? FontWeight.w600 : FontWeight.normal,
+                                  ),
+                                ),
+                                if (_isDragging) ...[
+                                  const SizedBox(height: 16),
+                                  Icon(
+                                    Icons.cloud_upload,
+                                    size: 48,
+                                    color: const Color(0xFF008069),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          )
+                        : ListView.builder(
+                            controller: _scrollController,
+                            padding: const EdgeInsets.all(16),
+                            itemCount: _messages.length,
+                            itemBuilder: (context, index) {
+                              final message = _messages[index];
+                              return MessageBubble(
+                                message: message,
+                                currentUserId: _currentUserId ?? 0,
+                                onDelete: () => _deleteMessage(message),
+                                onReplyPrivately: () => _replyPrivately(message),
+                                onReact: (emoji) => _reactToMessage(message, emoji),
+                                onEdit: (newBody) => _editMessage(message, newBody),
+                                isGroupMessage: true,
+                              );
+                            },
+                          ),
               ),
-          child: _isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : _messages.isEmpty
-                  ? Center(
-                      child: Text(
-                        'No messages yet. Start a conversation!',
-                        style: TextStyle(
-                          color: isDark ? Colors.white70 : Colors.grey[600],
-                        ),
-                      ),
-                    )
-                  : ListView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.all(16),
-                      itemCount: _messages.length,
-                      itemBuilder: (context, index) {
-                        final message = _messages[index];
-                        return MessageBubble(
-                          message: message,
-                          currentUserId: _currentUserId ?? 0,
-                          onDelete: () => _deleteMessage(message),
-                          onReplyPrivately: () => _replyPrivately(message),
-                          onReact: (emoji) => _reactToMessage(message, emoji),
-                          onEdit: (newBody) => _editMessage(message, newBody),
-                          isGroupMessage: true,
-                        );
-                      },
-                        ),
             ),
-                    ),
+          ),
         ),
 
         // Attachments Preview

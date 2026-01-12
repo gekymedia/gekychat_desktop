@@ -7,6 +7,7 @@ import '../models.dart';
 import '../../../theme/app_theme.dart';
 import '../forward_message_screen.dart';
 import '../../../widgets/colored_avatar.dart';
+import 'message_info_dialog.dart';
 
 class MessageBubble extends StatelessWidget {
   final Message message;
@@ -45,6 +46,12 @@ class MessageBubble extends StatelessWidget {
       child: GestureDetector(
         onLongPress: () => _showMessageMenu(context, context),
         onSecondaryTapDown: (details) => _showMessageMenuAtPosition(context, details.globalPosition),
+        onTap: () {
+          // Show message info on tap (for sent messages in groups)
+          if (isMe && isGroupMessage) {
+            _showMessageInfo(context);
+          }
+        },
         child: Container(
           margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           constraints: BoxConstraints(
@@ -120,8 +127,45 @@ class MessageBubble extends StatelessWidget {
                     if (message.linkPreviews != null && message.linkPreviews!.isNotEmpty)
                       ...message.linkPreviews!.map((preview) => _buildLinkPreview(preview, isDark)),
 
+                    // Deleted message indicator (WhatsApp style)
+                    if (message.isDeleted)
+                      Padding(
+                        padding: EdgeInsets.only(
+                          top: message.attachments.isNotEmpty || 
+                               message.locationData != null || 
+                               message.contactData != null ||
+                               message.callData != null ||
+                               (message.linkPreviews != null && message.linkPreviews!.isNotEmpty) ? 8 : 0,
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.info_outline,
+                              size: 16,
+                              color: (isMe
+                                  ? Colors.white.withOpacity(0.6)
+                                  : (isDark
+                                      ? AppTheme.textSecondaryDark
+                                      : AppTheme.textSecondaryLight)),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'This message was deleted',
+                              style: TextStyle(
+                                color: isMe
+                                    ? Colors.white.withOpacity(0.6)
+                                    : (isDark
+                                        ? AppTheme.textSecondaryDark
+                                        : AppTheme.textSecondaryLight),
+                                fontSize: 15,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
                     // Message body
-                    if (message.body.isNotEmpty && !_isSpecialMessage(message))
+                    else if (message.body.isNotEmpty && !_isSpecialMessage(message))
                       Padding(
                         padding: EdgeInsets.only(
                           top: message.attachments.isNotEmpty || 
@@ -333,6 +377,17 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
+  void _showMessageInfo(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => MessageInfoDialog(
+        messageId: message.id,
+        isGroupMessage: isGroupMessage,
+        currentUserId: currentUserId,
+      ),
+    );
+  }
+
   void _showMessageMenuAtPosition(BuildContext context, Offset position) {
     final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     _showMessageMenu(context, context, position: overlay.globalToLocal(position));
@@ -368,6 +423,22 @@ class MessageBubble extends StatelessWidget {
             });
           },
         ),
+        // Message Info (for sent messages in groups)
+        if (isGroupMessage && isMe)
+          PopupMenuItem(
+            child: const Row(
+              children: [
+                Icon(Icons.info_outline, size: 20),
+                SizedBox(width: 8),
+                Text('Message Info'),
+              ],
+            ),
+            onTap: () {
+              Future.delayed(Duration.zero, () {
+                _showMessageInfo(widgetContext);
+              });
+            },
+          ),
         if (isGroupMessage && !isMe)
           PopupMenuItem(
             child: const Row(

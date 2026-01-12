@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -18,6 +19,7 @@ import 'emoji_picker_widget.dart';
 import '../../media/media_gallery_screen.dart';
 import 'search_in_chat_screen.dart';
 import '../../contacts/contact_info_screen.dart';
+import '../../../widgets/slide_route.dart';
 import '../../quick_replies/quick_replies_repository.dart' show QuickReply, quickRepliesRepositoryProvider;
 import '../../quick_replies/quick_replies_repository.dart';
 import '../../../theme/app_theme.dart';
@@ -68,6 +70,9 @@ class _ChatViewState extends ConsumerState<ChatView> {
   bool _isRecording = false;
   String? _recordingPath;
   Duration _recordingDuration = Duration.zero;
+  
+  // Drag and drop
+  bool _isDragging = false;
 
   @override
   void initState() {
@@ -231,10 +236,35 @@ class _ChatViewState extends ConsumerState<ChatView> {
     
     // Subscribe to conversation channel
     final channelName = 'conversation.${widget.conversationId}';
-    pusherService.subscribePrivate(channelName, (data) {
-      // Handle real-time updates
-      if (mounted && data != null) {
-        _handleRealtimeUpdate(data);
+    
+    // Listen for typing events - use correct event name and data structure
+    pusherService.listen(channelName, 'UserTyping', (data) {
+      if (mounted && data != null && data is Map<String, dynamic>) {
+        final userId = data['user_id'] as int?;
+        final isTyping = data['is_typing'] as bool? ?? false;
+        
+        // Only show typing if it's from the OTHER user, not current user
+        if (userId != null && userId != _currentUserId && isTyping) {
+          setState(() {
+            _isTyping = true;
+          });
+          
+          // Auto-hide typing indicator after 3 seconds (consistent with mobile)
+          Future.delayed(const Duration(seconds: 3), () {
+            if (mounted) {
+              setState(() {
+                _isTyping = false;
+              });
+            }
+          });
+        } else if (userId != null && userId != _currentUserId && !isTyping) {
+          // Stop typing indicator when user stops typing
+          if (mounted) {
+            setState(() {
+              _isTyping = false;
+            });
+          }
+        }
       }
     });
     
@@ -254,22 +284,6 @@ class _ChatViewState extends ConsumerState<ChatView> {
         }
       }
     });
-  }
-  
-  void _handleRealtimeUpdate(dynamic data) {
-    // Handle various real-time events (typing, read receipts, etc.)
-    if (data is Map<String, dynamic> && data['type'] == 'typing') {
-      setState(() {
-        _isTyping = true;
-      });
-      Future.delayed(const Duration(seconds: 3), () {
-        if (mounted) {
-          setState(() {
-            _isTyping = false;
-          });
-        }
-      });
-    }
   }
   
   Future<void> _loadCurrentUserId() async {
@@ -534,6 +548,37 @@ class _ChatViewState extends ConsumerState<ChatView> {
         _updateRecordingDuration();
       }
     });
+  }
+
+  Widget _buildRecordingWave() {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: const Duration(milliseconds: 500),
+      onEnd: () {
+        if (_isRecording && mounted) {
+          setState(() {});
+        }
+      },
+      builder: (context, value, child) {
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(5, (index) {
+            final delay = index * 0.1;
+            final animationValue = ((value + delay) % 1.0);
+            final height = 4.0 + (animationValue * 20.0);
+            return Container(
+              width: 3,
+              height: height,
+              margin: const EdgeInsets.symmetric(horizontal: 2),
+              decoration: BoxDecoration(
+                color: Colors.red,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            );
+          }),
+        );
+      },
+    );
   }
 
   String _formatDuration(Duration duration) {
@@ -954,13 +999,37 @@ class _ChatViewState extends ConsumerState<ChatView> {
       
       setState(() {
         if (deleteForEveryone) {
-          // Show deleted message indicator instead of removing
+          // WhatsApp style: Show "This message was deleted" for other users
+          // For sender, message disappears (handled by backend filtering)
           final index = _messages.indexWhere((m) => m.id == message.id);
           if (index != -1) {
-            // Replace with a deleted message placeholder (you may need to update Message model)
-            _messages.removeAt(index);
+            // Create a deleted message version
+            final deletedMessage = Message(
+              id: message.id,
+              conversationId: message.conversationId,
+              groupId: message.groupId,
+              senderId: message.senderId,
+              sender: message.sender,
+              body: '', // Empty body for deleted message
+              createdAt: message.createdAt,
+              replyToId: message.replyToId,
+              forwardedFromId: message.forwardedFromId,
+              forwardChain: message.forwardChain,
+              attachments: [],
+              readAt: message.readAt,
+              deliveredAt: message.deliveredAt,
+              reactions: [],
+              locationData: null,
+              contactData: null,
+              callData: null,
+              linkPreviews: [],
+              isDeleted: true, // Mark as deleted
+              deletedForMe: false,
+            );
+            _messages[index] = deletedMessage;
           }
         } else {
+          // Delete for me: Remove message from list (Telegram style for sender)
           _messages.removeWhere((m) => m.id == message.id);
         }
       });
@@ -1105,8 +1174,8 @@ class _ChatViewState extends ConsumerState<ChatView> {
                   if (widget.otherUser != null) {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(
-                        builder: (context) => ContactInfoScreen(user: widget.otherUser!),
+                      SlideRightRoute(
+                        page: ContactInfoScreen(user: widget.otherUser!),
                       ),
                     );
                   }
@@ -1161,7 +1230,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
           ),
         ),
 
-        // Messages List
+        // Messages List with drag and drop support
         Expanded(
           child: Container(
             decoration: BoxDecoration(
@@ -1172,41 +1241,87 @@ class _ChatViewState extends ConsumerState<ChatView> {
                 fit: BoxFit.cover,
               ),
             ),
-            child: Container(
-              decoration: BoxDecoration(
-                color: isDark 
-                    ? const Color(0xFF111B21).withOpacity(0.85)
-                    : Colors.white.withOpacity(0.85),
+            child: DropTarget(
+              onDragDone: (detail) {
+                setState(() {
+                  _attachments.addAll(
+                    detail.files
+                        .where((file) => file.path != null)
+                        .map((file) => File(file.path!))
+                        .toList(),
+                  );
+                  _isDragging = false;
+                });
+              },
+              onDragEntered: (detail) {
+                setState(() {
+                  _isDragging = true;
+                });
+              },
+              onDragExited: (detail) {
+                setState(() {
+                  _isDragging = false;
+                });
+              },
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isDark 
+                      ? const Color(0xFF111B21).withOpacity(_isDragging ? 0.70 : 0.85)
+                      : Colors.white.withOpacity(_isDragging ? 0.70 : 0.85),
+                  border: _isDragging
+                      ? Border.all(
+                          color: const Color(0xFF008069),
+                          width: 3,
+                        )
+                      : null,
+                ),
+                child: _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _messages.isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  _isDragging 
+                                      ? 'Drop files here to send'
+                                      : 'No messages yet. Start a conversation!',
+                                  style: TextStyle(
+                                    color: isDark ? Colors.white70 : Colors.grey[600],
+                                    fontSize: _isDragging ? 18 : 14,
+                                    fontWeight: _isDragging ? FontWeight.w600 : FontWeight.normal,
+                                  ),
+                                ),
+                                if (_isDragging) ...[
+                                  const SizedBox(height: 16),
+                                  Icon(
+                                    Icons.cloud_upload,
+                                    size: 48,
+                                    color: const Color(0xFF008069),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          )
+                        : ListView.builder(
+                            controller: _scrollController,
+                            padding: const EdgeInsets.all(16),
+                            itemCount: _messages.length,
+                            itemBuilder: (context, index) {
+                              final message = _messages[index];
+                              return MessageBubble(
+                                message: message,
+                                currentUserId: _currentUserId ?? 0,
+                                onDelete: () => _deleteMessage(message),
+                                onReply: () => _setReply(message),
+                                onReact: (emoji) => _reactToMessage(message, emoji),
+                                onEdit: (newBody) => _editMessage(message, newBody),
+                              );
+                            },
+                          ),
               ),
-          child: _isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : _messages.isEmpty
-                  ? Center(
-                      child: Text(
-                        'No messages yet. Start a conversation!',
-                        style: TextStyle(
-                          color: isDark ? Colors.white70 : Colors.grey[600],
-                        ),
-                      ),
-                    )
-                  : ListView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.all(16),
-                      itemCount: _messages.length,
-                      itemBuilder: (context, index) {
-                        final message = _messages[index];
-                        return MessageBubble(
-                          message: message,
-                          currentUserId: _currentUserId ?? 0,
-                          onDelete: () => _deleteMessage(message),
-                          onReply: () => _setReply(message),
-                          onReact: (emoji) => _reactToMessage(message, emoji),
-                          onEdit: (newBody) => _editMessage(message, newBody),
-                        );
-                      },
-                        ),
-                    ),
-                    ),
+            ),
+          ),
         ),
 
         // Reply Preview
@@ -1435,6 +1550,30 @@ class _ChatViewState extends ConsumerState<ChatView> {
               ),
               const SizedBox(width: 8),
               if (_isRecording)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _buildRecordingWave(),
+                        const SizedBox(width: 8),
+                        Text(
+                          _formatDuration(_recordingDuration),
+                          style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else if (_messageController.text.trim().isNotEmpty || _attachments.isNotEmpty)
+                IconButton(
+                  icon: const Icon(Icons.send),
+                  color: const Color(0xFF008069),
+                  onPressed: _sendMessage,
+                  tooltip: 'Send Message',
+                )
+              else
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -1465,23 +1604,6 @@ class _ChatViewState extends ConsumerState<ChatView> {
                       ),
                     ),
                   ],
-                )
-              else
-                CircleAvatar(
-                  backgroundColor: const Color(0xFF008069),
-                  child: IconButton(
-                    icon: _isSending
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                            ),
-                          )
-                        : const Icon(Icons.send, color: Colors.white),
-                    onPressed: _isSending ? null : _sendMessage,
-                  ),
                 ),
             ],
               ),

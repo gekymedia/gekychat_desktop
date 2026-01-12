@@ -125,11 +125,9 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
           IconButton(
             icon: const Icon(Icons.add_box_outlined),
             onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const CreatePostScreen(),
-                ),
+              showDialog(
+                context: context,
+                builder: (context) => const CreatePostScreen(),
               );
             },
             tooltip: 'Create Post',

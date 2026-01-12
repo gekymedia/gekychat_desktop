@@ -36,6 +36,7 @@ dependencies:
   # Desktop-specific
   file_picker: ^10.3.2
   image_picker: ^1.1.2
+  desktop_drop: ^0.7.0
   cached_network_image: ^3.4.1
   video_player: ^2.8.1
   video_player_win: ^3.2.0  # Windows-specific video player support
@@ -47,6 +48,10 @@ dependencies:
   
   # Desktop notifications
   flutter_local_notifications: ^19.4.0
+  
+  # Window management and system tray
+  window_manager: ^0.3.9
+  system_tray: ^2.0.3
   
   # Emoji picker
   emoji_picker_flutter: ^2.0.0
@@ -74,6 +79,7 @@ dev_dependencies:
 
 dependency_overrides:
   record_linux: ^1.2.1
+  uuid: ^3.0.6  # Override for system_tray compatibility
 
 flutter:
   uses-material-design: true

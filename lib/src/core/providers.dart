@@ -37,3 +37,13 @@ class ThemeNotifier extends StateNotifier<ThemeMode> {
 
 final themeProvider = StateNotifierProvider<ThemeNotifier, ThemeMode>((ref) => ThemeNotifier());
 
+// Current section provider for desktop navigation
+class CurrentSectionNotifier extends StateNotifier<String> {
+  CurrentSectionNotifier() : super('/chats');
+  
+  void setSection(String section) {
+    state = section;
+  }
+}
+
+final currentSectionProvider = StateNotifierProvider<CurrentSectionNotifier, String>((ref) => CurrentSectionNotifier());

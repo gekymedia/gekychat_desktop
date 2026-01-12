@@ -30,17 +30,7 @@ class SettingsScreen extends ConsumerWidget {
       backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
       appBar: AppBar(
         title: const Text('Settings'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            // Use GoRouter navigation instead of Navigator.pop
-            if (context.canPop()) {
-              context.pop();
-            } else {
-              context.go('/chats');
-            }
-          },
-        ),
+        automaticallyImplyLeading: false, // Remove back button since side nav handles navigation
       ),
       body: Center(
         child: Container(

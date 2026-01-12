@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../core/feature_flags.dart';
 import '../core/session.dart';
+import '../core/providers.dart';
 
 class SideNav extends ConsumerWidget {
   final String currentRoute;
@@ -26,7 +27,7 @@ class SideNav extends ConsumerWidget {
     // Check username - use a simpler approach
     final userProfileAsync = ref.watch(currentUserProvider);
     final hasUsername = userProfileAsync.maybeWhen(
-      data: (profile) => profile.hasUsername ?? false,
+      data: (profile) => profile.hasUsername,
       orElse: () => false,
     );
 
@@ -106,20 +107,6 @@ class SideNav extends ConsumerWidget {
               )).toList(),
             ),
           ),
-          // Theme toggle at bottom
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: IconButton(
-              icon: Icon(
-                isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
-                color: isDark ? Colors.white70 : Colors.grey[600],
-              ),
-              onPressed: () {
-                // TODO: Implement theme toggle
-              },
-              tooltip: 'Toggle theme',
-            ),
-          ),
         ],
       ),
     );
@@ -140,7 +127,7 @@ class _NavItem {
   });
 }
 
-class _NavItemWidget extends StatelessWidget {
+class _NavItemWidget extends ConsumerWidget {
   final _NavItem item;
   final bool isDark;
 
@@ -150,11 +137,23 @@ class _NavItemWidget extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Main sections that should use provider instead of route navigation
+    final mainSections = ['/chats', '/status', '/channels', '/world', '/mail', '/ai', '/live-broadcast', '/calls'];
+    final isMainSection = mainSections.contains(item.route);
+    
     return Tooltip(
       message: item.label,
       child: InkWell(
-        onTap: () => context.go(item.route),
+        onTap: () {
+          if (isMainSection) {
+            // Use provider for main sections to avoid route navigation
+            ref.read(currentSectionProvider.notifier).setSection(item.route);
+          } else {
+            // Use context.go for external routes like /settings
+            context.go(item.route);
+          }
+        },
         borderRadius: BorderRadius.circular(12),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),

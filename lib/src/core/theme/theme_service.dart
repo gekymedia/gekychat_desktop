@@ -4,7 +4,8 @@ import 'app_theme_mode.dart';
 
 /// Service to manage app theme preferences
 class ThemeService {
-  static const String _themeKey = 'app_theme_mode';
+  // Use platform-specific key so mobile and desktop don't interfere with each other
+  static const String _themeKey = 'app_theme_mode_desktop';
   
   /// Get saved theme mode
   Future<AppThemeMode> getThemeMode() async {

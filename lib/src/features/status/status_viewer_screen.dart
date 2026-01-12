@@ -833,7 +833,7 @@ class _CommentsDialogState extends ConsumerState<_CommentsDialog> {
                     child: TextField(
                       controller: _commentController,
                       decoration: InputDecoration(
-                        hintText: 'Add a comment...',
+                        hintText: 'Reply to status...',
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(24),
                           borderSide: BorderSide.none,

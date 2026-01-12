@@ -198,7 +198,7 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
       );
 
       if (mounted) {
-        context.pop();
+        Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Post created successfully')),
         );
@@ -222,33 +222,42 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF111B21) : const Color(0xFFF0F2F5),
-      appBar: AppBar(
-        title: const Text('Create Post'),
-        backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
-        foregroundColor: isDark ? Colors.white : Colors.black,
-        actions: [
-          TextButton(
-            onPressed: _isPosting ? null : _createPost,
-            child: _isPosting
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text(
-                    'Post',
-                    style: TextStyle(
-                      color: Color(0xFF008069),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+    return Dialog(
+      backgroundColor: Colors.black.withOpacity(0.3),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 100, vertical: 50),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 800, maxHeight: 900),
+        decoration: BoxDecoration(
+          color: (isDark ? const Color(0xFF202C33) : Colors.white).withOpacity(0.95),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(
+            title: const Text('Create Post'),
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            actions: [
+              TextButton(
+                onPressed: _isPosting ? null : _createPost,
+                child: _isPosting
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text(
+                        'Post',
+                        style: TextStyle(
+                          color: Color(0xFF008069),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+              ),
+            ],
           ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -401,6 +410,8 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                 ),
               ),
           ],
+            ),
+          ),
         ),
       ),
     );

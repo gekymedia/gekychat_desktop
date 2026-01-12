@@ -653,8 +653,12 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final userProfileAsync = ref.watch(currentUserProvider);
 
-    // Get current route for side nav
+    // Use provider for main sections, fallback to route for external routes
+    final currentSection = ref.watch(currentSectionProvider);
     final currentRoute = GoRouterState.of(context).uri.path;
+    
+    // Use currentSection for main sections, currentRoute for external routes
+    final effectiveRoute = currentSection;
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
@@ -662,7 +666,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
         children: [
           // Side Nav (like web version) - Use RepaintBoundary to prevent unnecessary repaints
           RepaintBoundary(
-            child: SideNav(currentRoute: currentRoute),
+            child: SideNav(currentRoute: effectiveRoute),
           ),
           
           // Sidebar - Use RepaintBoundary and AutomaticKeepAliveClientMixin
@@ -670,12 +674,12 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
             child: Container(
               width: 400,
               color: isDark ? const Color(0xFF111B21) : Colors.white,
-              child: _buildSidebarContent(context, currentRoute, isDark),
+              child: _buildSidebarContent(context, effectiveRoute, isDark),
             ),
           ),
           // Main Content Area - This is what should reload, not the sidebar
           Expanded(
-            child: _buildMainContent(context, currentRoute, isDark),
+            child: _buildMainContent(context, effectiveRoute, isDark),
           ),
         ],
       ),
@@ -1160,6 +1164,11 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                           conversation: conversation,
                           isSelected: isSelected,
                           onTap: () {
+                            // Switch to chats tab if not already there
+                            final currentSection = ref.read(currentSectionProvider);
+                            if (currentSection != '/chats') {
+                              ref.read(currentSectionProvider.notifier).setSection('/chats');
+                            }
                             setState(() {
                               _selectedConversation = conversation;
                               _selectedConversationId = conversation.id;

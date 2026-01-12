@@ -6,6 +6,7 @@ import 'features/auth/phone_login.dart';
 import 'features/auth/otp_verify.dart';
 import 'features/chats/desktop_chat_screen.dart';
 import 'features/profile/settings_screen.dart';
+import 'features/profile/settings_wrapper.dart';
 import 'features/profile/profile_edit_screen.dart';
 import 'features/quick_replies/quick_replies_screen.dart';
 import 'features/auto_reply/auto_reply_screen.dart';
@@ -113,10 +114,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/live-broadcast',
         builder: (context, state) => const DesktopChatScreen(),
       ),
-      // Settings and other screens (full screen)
+      // Settings and other screens (full screen, but settings keeps side nav)
       GoRoute(
         path: '/settings',
-        builder: (context, state) => const SettingsScreen(),
+        builder: (context, state) => const SettingsWrapper(),
       ),
       GoRoute(
         path: '/profile',

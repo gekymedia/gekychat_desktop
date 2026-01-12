@@ -5,6 +5,7 @@ import '../../core/device_id.dart';
 import '../../core/feature_flags.dart';
 import '../../core/session.dart';
 import 'account_repository.dart';
+import '../chats/chat_repo.dart';
 
 /// PHASE 2: Account Switcher Widget
 class AccountSwitcher extends ConsumerStatefulWidget {
@@ -75,6 +76,8 @@ class _AccountSwitcherState extends ConsumerState<AccountSwitcher> {
               await repository.switchAccount(account['id'] as int);
               // Reload user profile and refresh
               ref.invalidate(currentUserProvider);
+              // Invalidate chat repository to reload conversations
+              ref.invalidate(chatRepositoryProvider);
               // Navigate back to chats to refresh
               Navigator.of(context).popUntil((route) => route.isFirst);
             } catch (e) {

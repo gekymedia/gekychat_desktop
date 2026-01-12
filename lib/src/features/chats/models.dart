@@ -296,6 +296,8 @@ class Message {
   final Map<String, dynamic>? contactData;
   final Map<String, dynamic>? callData;
   final List<dynamic>? linkPreviews;
+  final bool isDeleted; // True if message was deleted for everyone
+  final bool deletedForMe; // True if message was deleted for current user
 
   Message({
     required this.id,
@@ -316,6 +318,8 @@ class Message {
     this.contactData,
     this.callData,
     this.linkPreviews,
+    this.isDeleted = false,
+    this.deletedForMe = false,
   });
 
   factory Message.fromJson(Map<String, dynamic> json) {
@@ -402,6 +406,8 @@ class Message {
       linkPreviews: json['link_previews'] != null
           ? List<dynamic>.from(json['link_previews'] as List)
           : null,
+      isDeleted: json['deleted_for_everyone_at'] != null,
+      deletedForMe: json['deleted_at'] != null, // This should come from message_statuses
     );
   }
 }

@@ -85,12 +85,12 @@ class _ForwardMessageScreenState extends ConsumerState<ForwardMessageScreen>
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Dialog(
-      backgroundColor: Colors.black.withOpacity(0.5),
+      backgroundColor: Colors.black.withOpacity(0.3),
       insetPadding: const EdgeInsets.symmetric(horizontal: 100, vertical: 50),
       child: Container(
         constraints: const BoxConstraints(maxWidth: 600, maxHeight: 700),
         decoration: BoxDecoration(
-          color: (isDark ? const Color(0xFF202C33) : Colors.white).withOpacity(0.9),
+          color: (isDark ? const Color(0xFF202C33) : Colors.white).withOpacity(0.95),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Scaffold(
@@ -194,7 +194,7 @@ class _ConversationTab extends ConsumerWidget {
   }
 }
 
-class _GroupTab extends ConsumerWidget {
+class _GroupTab extends ConsumerStatefulWidget {
   final Set<int> selectedIds;
   final void Function(int, bool) onToggle;
 
@@ -204,39 +204,64 @@ class _GroupTab extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_GroupTab> createState() => _GroupTabState();
+}
+
+class _GroupTabState extends ConsumerState<_GroupTab> {
+  List<GroupSummary>? _cachedGroups;
+
+  @override
+  Widget build(BuildContext context) {
     final repo = ref.read(chatRepositoryProvider);
 
-    return FutureBuilder<List<GroupSummary>>(
-      future: repo.getGroups(),
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snap.hasError) {
-          return Center(child: Text('Error: ${snap.error}'));
-        }
+    // Load groups only once and cache them
+    if (_cachedGroups == null) {
+      return FutureBuilder<List<GroupSummary>>(
+        future: repo.getGroups(),
+        builder: (context, snap) {
+          if (snap.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snap.hasError) {
+            return Center(child: Text('Error: ${snap.error}'));
+          }
 
-        final groups = snap.data ?? [];
-        if (groups.isEmpty) {
-          return const Center(child: Text('No groups'));
-        }
+          final groups = snap.data ?? [];
+          if (groups.isEmpty) {
+            return const Center(child: Text('No groups'));
+          }
 
-        return ListView.builder(
-          itemCount: groups.length,
-          itemBuilder: (context, i) {
-            final group = groups[i];
-            final checked = selectedIds.contains(group.id);
+          // Cache the groups
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              setState(() {
+                _cachedGroups = groups;
+              });
+            }
+          });
 
-            return CheckboxListTile(
-              value: checked,
-              onChanged: (v) {
-                // Prevent navigation when clicking checkbox
-                onToggle(group.id, v == true);
-              },
-              title: Text(group.name),
-            );
+          return _buildList(groups);
+        },
+      );
+    }
+
+    return _buildList(_cachedGroups!);
+  }
+
+  Widget _buildList(List<GroupSummary> groups) {
+    return ListView.builder(
+      itemCount: groups.length,
+      itemBuilder: (context, i) {
+        final group = groups[i];
+        final checked = widget.selectedIds.contains(group.id);
+
+        return CheckboxListTile(
+          value: checked,
+          onChanged: (v) {
+            // Prevent navigation when clicking checkbox
+            widget.onToggle(group.id, v == true);
           },
+          title: Text(group.name),
         );
       },
     );
