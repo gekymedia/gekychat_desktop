@@ -73,6 +73,7 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
       Future.microtask(() async {
         try {
           final apiService = ref.read(apiServiceProvider);
+          // WidgetRef extends Ref, so we can pass it directly
           final notificationManager = await NotificationManager.create(apiService, ref);
           await notificationManager.setup();
           debugPrint('✅ Notifications initialized');

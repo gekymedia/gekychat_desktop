@@ -8,12 +8,12 @@ import '../chats/chat_repo.dart';
 class NotificationManager {
   final NotificationService _service;
   final ApiService _api;
-  final Ref? _ref; // Add ref for accessing providers
+  final dynamic _ref; // Use dynamic to accept both Ref and WidgetRef
   static NotificationManager? _instance;
 
   NotificationManager._(this._service, this._api, [this._ref]);
 
-  static Future<NotificationManager> create(ApiService api, [Ref? ref]) async {
+  static Future<NotificationManager> create(ApiService api, [dynamic ref]) async {
     // Return existing instance if already created
     if (_instance != null) {
       debugPrint('⚠️ NotificationManager already exists, returning existing instance');
