@@ -18,9 +18,17 @@ class User {
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
+    // Get name - prefer non-empty name, fallback to phone, then "Unknown"
+    String userName = 'Unknown';
+    if (json['name'] != null && json['name'].toString().isNotEmpty && json['name'].toString() != 'Unknown') {
+      userName = json['name'].toString();
+    } else if (json['phone'] != null && json['phone'].toString().isNotEmpty) {
+      userName = json['phone'].toString();
+    }
+    
     return User(
-      id: json['id'],
-      name: json['name'],
+      id: json['id'] ?? 0,
+      name: userName,
       phone: json['phone'],
       avatarUrl: json['avatar_url'],
       isOnline: json['online'] as bool?,
@@ -94,18 +102,34 @@ class ConversationSummary {
   factory ConversationSummary.fromJson(Map<String, dynamic> json) {
     final otherUserJson = json['other_user'];
     User otherUser;
-    if (otherUserJson != null && otherUserJson is Map && otherUserJson.isNotEmpty) {
-      otherUser = User.fromJson(Map<String, dynamic>.from(otherUserJson));
+    
+    // Try to parse other_user first
+    if (otherUserJson != null && otherUserJson is Map) {
+      final otherUserMap = Map<String, dynamic>.from(otherUserJson);
+      // Even if map is empty, try to parse it (might have null values)
+      if (otherUserMap.containsKey('id') || otherUserMap.containsKey('name') || otherUserMap.containsKey('phone')) {
+        otherUser = User.fromJson(otherUserMap);
+        // If name is still "Unknown" or empty after parsing, try to use title
+        if ((otherUser.name == 'Unknown' || otherUser.name.isEmpty) && json['title'] != null) {
+          final title = json['title'].toString();
+          if (title.isNotEmpty && !title.startsWith('DM #')) {
+            otherUser = User(
+              id: otherUser.id,
+              name: title,
+              phone: otherUser.phone,
+              avatarUrl: otherUser.avatarUrl,
+              isOnline: otherUser.isOnline,
+              lastSeenAt: otherUser.lastSeenAt,
+            );
+          }
+        }
+      } else {
+        // Empty map - use fallback
+        otherUser = ConversationSummary._createFallbackUser(json);
+      }
     } else {
-      // Fallback: create a minimal user object
-      otherUser = User(
-        id: json['other_user_id'] ?? 0,
-        name: json['title'] ?? 'Unknown',
-        phone: null,
-        avatarUrl: null,
-        isOnline: null,
-        lastSeenAt: null,
-      );
+      // No other_user - use fallback
+      otherUser = ConversationSummary._createFallbackUser(json);
     }
     
     // Filter out scaffold/test messages from preview
@@ -145,6 +169,37 @@ class ConversationSummary {
           ? DateTime.parse(json['archived_at'])
           : null,
       labelIds: labelIds,
+    );
+  }
+  
+  // Helper method to create fallback user
+  static User _createFallbackUser(Map<String, dynamic> json) {
+    int otherUserId = 0;
+    if (json['other_user_id'] != null) {
+      if (json['other_user_id'] is int) {
+        otherUserId = json['other_user_id'] as int;
+      } else if (json['other_user_id'] is String) {
+        otherUserId = int.tryParse(json['other_user_id'] as String) ?? 0;
+      }
+    }
+    
+    // Use title if it's not a "DM #X" format, otherwise use "Unknown"
+    String fallbackName = 'Unknown';
+    final title = json['title']?.toString() ?? '';
+    if (title.isNotEmpty && !title.startsWith('DM #')) {
+      fallbackName = title;
+    } else if (otherUserId > 0) {
+      // If we have an ID but no name, use a generic name
+      fallbackName = 'User $otherUserId';
+    }
+    
+    return User(
+      id: otherUserId,
+      name: fallbackName,
+      phone: null,
+      avatarUrl: null,
+      isOnline: null,
+      lastSeenAt: null,
     );
   }
 }
