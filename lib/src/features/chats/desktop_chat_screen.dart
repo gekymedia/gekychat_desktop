@@ -1240,10 +1240,18 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(
-                            emptyIcon,
-                            size: 64,
-                            color: isDark ? Colors.white38 : Colors.grey[400],
+                          Image.asset(
+                            'assets/icons/gold_no_text/128x128.png',
+                            width: 128,
+                            height: 128,
+                            errorBuilder: (context, error, stackTrace) {
+                              // Fallback to icon if image fails to load
+                              return Icon(
+                                emptyIcon,
+                                size: 64,
+                                color: isDark ? Colors.white38 : Colors.grey[400],
+                              );
+                            },
                           ),
                           const SizedBox(height: 16),
                           Text(
@@ -1441,10 +1449,18 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.chat_bubble_outline,
-              size: 64,
-              color: isDark ? Colors.white38 : Colors.grey[400],
+            Image.asset(
+              'assets/icons/gold_no_text/128x128.png',
+              width: 128,
+              height: 128,
+              errorBuilder: (context, error, stackTrace) {
+                // Fallback to icon if image fails to load
+                return Icon(
+                  Icons.chat_bubble_outline,
+                  size: 64,
+                  color: isDark ? Colors.white38 : Colors.grey[400],
+                );
+              },
             ),
             const SizedBox(height: 16),
             Text(

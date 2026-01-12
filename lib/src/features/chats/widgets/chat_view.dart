@@ -82,6 +82,8 @@ class _ChatViewState extends ConsumerState<ChatView> {
     _setupRealtimeListener();
     _loadQuickReplies();
     _messageController.addListener(_onMessageChanged);
+    // Ensure recording state is false on init
+    _isRecording = false;
   }
   
   void _onMessageChanged() {
@@ -1472,7 +1474,9 @@ class _ChatViewState extends ConsumerState<ChatView> {
               ),
               IconButton(
                 icon: Icon(_isRecording ? Icons.stop : Icons.mic,
-                    color: isDark ? Colors.white70 : Colors.grey[600]),
+                    color: _isRecording 
+                        ? Colors.red 
+                        : (isDark ? Colors.white70 : Colors.grey[600])),
                 onPressed: _recordAudio,
                 tooltip: _isRecording ? 'Stop Recording' : 'Record Audio',
               ),
