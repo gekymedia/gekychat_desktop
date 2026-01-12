@@ -97,7 +97,8 @@ class NotificationManager {
     try {
       // Access chat repository via provider if ref is available
       if (_ref != null) {
-        final chatRepo = _ref!.read(chatRepositoryProvider);
+        // Use dynamic cast to handle both Ref and WidgetRef
+        final chatRepo = (_ref as dynamic).read(chatRepositoryProvider);
         await chatRepo.sendMessageToConversation(
           conversationId: conversationId,
           body: replyText,

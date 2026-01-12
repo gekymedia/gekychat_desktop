@@ -7,7 +7,6 @@ import 'src/features/auth/auth_provider.dart';
 import 'src/features/notifications/notification_manager.dart';
 import 'src/core/providers.dart';
 import 'src/core/theme/theme_provider.dart' as custom_theme;
-import 'src/core/theme/theme_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
