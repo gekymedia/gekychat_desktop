@@ -10,16 +10,23 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart' show Geolocator, LocationPermission, LocationAccuracy, Position;
 import 'package:path_provider/path_provider.dart';
+import 'package:dio/dio.dart';
 import '../chat_repo.dart';
 import '../models.dart';
 import 'message_bubble.dart';
+import 'date_divider.dart';
+import '../../../utils/date_formatter.dart';
 import '../../../core/providers.dart';
+import '../../../core/services/taskbar_badge_service.dart';
+import '../../../core/database/message_queue_service.dart';
+import '../../../core/providers/connectivity_provider.dart';
 import '../../contacts/contacts_repository.dart' show contactsRepositoryProvider;
 import 'emoji_picker_widget.dart';
 import '../../media/media_gallery_screen.dart';
 import 'search_in_chat_screen.dart';
 import '../../contacts/contact_info_screen.dart';
 import '../../../widgets/slide_route.dart';
+import '../../../widgets/constrained_slide_route.dart';
 import '../../quick_replies/quick_replies_repository.dart' show QuickReply, quickRepliesRepositoryProvider;
 import '../../quick_replies/quick_replies_repository.dart';
 import '../../../theme/app_theme.dart';
@@ -281,6 +288,8 @@ class _ChatViewState extends ConsumerState<ChatView> {
             }
           });
           _scrollToBottom();
+          // Update badge when new message arrives
+          _updateTaskbarBadge();
         } catch (e) {
           debugPrint('Error handling real-time message: $e');
         }
@@ -322,6 +331,8 @@ class _ChatViewState extends ConsumerState<ChatView> {
         _isLoading = false;
       });
       _scrollToBottom();
+      // Update badge after loading messages (may have changed unread count)
+      _updateTaskbarBadge();
     } catch (e) {
       setState(() {
         _isLoading = false;
@@ -332,6 +343,58 @@ class _ChatViewState extends ConsumerState<ChatView> {
         );
       }
     }
+  }
+  
+  void _updateTaskbarBadge() {
+    if (!mounted) return;
+    Future.microtask(() async {
+      if (!mounted) return;
+      try {
+        final badgeService = ref.read(taskbarBadgeServiceProvider);
+        await badgeService.updateBadge();
+      } catch (e) {
+        // Silently ignore errors when widget is disposed
+        if (mounted) {
+          debugPrint('Failed to update taskbar badge: $e');
+        }
+      }
+    });
+  }
+
+  /// Build list of widgets including messages and date dividers
+  List<Widget> _buildMessageList() {
+    if (_messages.isEmpty) return [];
+
+    final List<Widget> items = [];
+    DateTime? previousDate;
+
+    for (final message in _messages) {
+      final messageDate = DateTime(
+        message.createdAt.year,
+        message.createdAt.month,
+        message.createdAt.day,
+      );
+
+      // Add date divider if this is a new day
+      if (previousDate == null || messageDate != previousDate) {
+        items.add(DateDivider(date: message.createdAt));
+        previousDate = messageDate;
+      }
+
+      // Add the message
+      items.add(
+        MessageBubble(
+          message: message,
+          currentUserId: _currentUserId ?? 0,
+          onDelete: () => _deleteMessage(message),
+          onReply: () => _setReply(message),
+          onReact: (emoji) => _reactToMessage(message, emoji),
+          onEdit: (newBody) => _editMessage(message, newBody),
+        ),
+      );
+    }
+
+    return items;
   }
 
   void _scrollToBottom() {
@@ -352,27 +415,91 @@ class _ChatViewState extends ConsumerState<ChatView> {
       _isSending = true;
     });
 
+    final isOnline = ref.read(connectivityProvider);
+    final messageQueue = ref.read(messageQueueServiceProvider);
+
     try {
-      final chatRepo = ref.read(chatRepositoryProvider);
-      final newMessage = await chatRepo.sendMessageToConversation(
-        conversationId: widget.conversationId,
-        body: message.isEmpty ? null : message,
-        replyTo: _replyingToId,
-        attachments: _attachments.isNotEmpty ? _attachments : null,
-      );
-      
-      setState(() {
-        _messages.add(newMessage);
-        _messageController.clear();
-        _attachments.clear();
-        _replyingToId = null;
-        _replyingToMessage = null;
-      });
-      _scrollToBottom();
+      if (!isOnline) {
+        // Queue message for offline sending
+        await messageQueue.queueMessage(
+          conversationId: widget.conversationId,
+          groupId: null,
+          body: message,
+          replyToId: _replyingToId,
+          attachments: _attachments.isNotEmpty ? _attachments : null,
+        );
+
+        // Create a temporary message object for UI display
+        final tempMessage = Message(
+          id: DateTime.now().millisecondsSinceEpoch, // Temporary ID
+          conversationId: widget.conversationId,
+          senderId: _currentUserId ?? 0,
+          body: message,
+          createdAt: DateTime.now(),
+          replyToId: _replyingToId,
+          attachments: _attachments.map((file) {
+            // Create temporary attachment objects
+            return MessageAttachment(
+              id: 0,
+              url: file.path,
+              mimeType: 'application/octet-stream',
+              isImage: false,
+              isVideo: false,
+              isDocument: true,
+            );
+          }).toList(),
+          reactions: [],
+        );
+
+        setState(() {
+          _messages.add(tempMessage);
+          _messageController.clear();
+          _attachments.clear();
+          _replyingToId = null;
+          _replyingToMessage = null;
+        });
+        _scrollToBottom();
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Message queued. Will be sent when you\'re online.'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        // Send immediately when online
+        final chatRepo = ref.read(chatRepositoryProvider);
+        final newMessage = await chatRepo.sendMessageToConversation(
+          conversationId: widget.conversationId,
+          body: message.isEmpty ? null : message,
+          replyTo: _replyingToId,
+          attachments: _attachments.isNotEmpty ? _attachments : null,
+        );
+        
+        setState(() {
+          _messages.add(newMessage);
+          _messageController.clear();
+          _attachments.clear();
+          _replyingToId = null;
+          _replyingToMessage = null;
+        });
+        _scrollToBottom();
+      }
     } catch (e) {
+      debugPrint('Error sending message: $e');
       if (mounted) {
+        final errorMessage = e.toString().replaceAll('Exception: ', '');
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to send message: $e')),
+          SnackBar(
+            content: Text('Failed to send message: $errorMessage'),
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'Dismiss',
+              onPressed: () {},
+            ),
+          ),
         );
       }
     } finally {
@@ -512,9 +639,8 @@ class _ChatViewState extends ConsumerState<ChatView> {
         );
 
         if (shouldSend == true) {
-          setState(() {
-            _attachments.add(File(path));
-          });
+          // Send voice message immediately instead of adding to attachments
+          await _sendVoiceMessage(path);
         } else {
           // Delete the recording file
           try {
@@ -536,6 +662,42 @@ class _ChatViewState extends ConsumerState<ChatView> {
           SnackBar(content: Text('Failed to stop recording: $e')),
         );
       }
+    }
+  }
+
+  Future<void> _sendVoiceMessage(String audioPath) async {
+    setState(() {
+      _isSending = true;
+    });
+
+    try {
+      final chatRepo = ref.read(chatRepositoryProvider);
+      // Send voice message with no compression
+      final newMessage = await chatRepo.sendMessageToConversation(
+        conversationId: widget.conversationId,
+        body: null,
+        replyTo: _replyingToId,
+        attachments: [File(audioPath)],
+        skipCompression: true, // Voice messages shouldn't be compressed
+      );
+      
+      setState(() {
+        _messages.add(newMessage);
+        _replyingToId = null;
+        _replyingToMessage = null;
+      });
+      _scrollToBottom();
+    } catch (e) {
+      debugPrint('Error sending voice message: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send voice message: $e')),
+        );
+      }
+    } finally {
+      setState(() {
+        _isSending = false;
+      });
     }
   }
 
@@ -696,9 +858,39 @@ class _ChatViewState extends ConsumerState<ChatView> {
       if (mounted) {
         Navigator.pop(context); // Close loading dialog
 
-        // Note: Reverse geocoding (getting address from coordinates) requires the geocoding package
-        // For now, we'll just use coordinates. To enable address lookup, add geocoding package.
+        // Reverse geocoding using OpenStreetMap Nominatim API (free, no key required)
         String? address;
+        String? placeName;
+        
+        try {
+          final response = await Dio().get(
+            'https://nominatim.openstreetmap.org/reverse',
+            queryParameters: {
+              'format': 'json',
+              'lat': position.latitude,
+              'lon': position.longitude,
+              'zoom': 18,
+              'addressdetails': 1,
+            },
+            options: Options(
+              headers: {
+                'User-Agent': 'GekyChat-Desktop/1.0', // Required by Nominatim
+              },
+            ),
+          );
+          
+          if (response.statusCode == 200 && response.data != null) {
+            final data = response.data;
+            if (data['display_name'] != null) {
+              address = data['display_name'] as String;
+              placeName = data['name'] as String? ?? 
+                         (address.contains(',') ? address.split(',')[0] : address);
+            }
+          }
+        } catch (e) {
+          debugPrint('Reverse geocoding failed: $e');
+          // Continue without address
+        }
 
         setState(() {
           _isSending = true;
@@ -710,7 +902,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
           latitude: position.latitude,
           longitude: position.longitude,
           address: address,
-          placeName: null,
+          placeName: placeName,
         );
         setState(() {
           _messages.add(newMessage);
@@ -734,41 +926,76 @@ class _ChatViewState extends ConsumerState<ChatView> {
   }
 
   Future<void> _shareContact() async {
-    // Show contact picker
-    final contacts = await ref.read(contactsRepositoryProvider).listContacts();
+    // Load all contacts with pagination
+    final contactsRepo = ref.read(contactsRepositoryProvider);
+    List<GekyContact> allContacts = [];
+    int page = 1;
+    bool hasMore = true;
+    
+    while (hasMore) {
+      try {
+        final paginated = await contactsRepo.listContactsPaginated(page: page, perPage: 100);
+        final contacts = paginated['data'] as List<GekyContact>;
+        allContacts.addAll(contacts);
+        
+        final meta = paginated['meta'] as Map<String, dynamic>;
+        final currentPage = meta['current_page'] as int? ?? page;
+        final lastPage = meta['last_page'] as int? ?? page;
+        hasMore = currentPage < lastPage;
+        page++;
+      } catch (e) {
+        debugPrint('Error loading contacts page $page: $e');
+        break;
+      }
+    }
     
     if (!mounted) return;
     
     final selected = await showDialog<int>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Share Contact'),
-        content: SizedBox(
-          width: 300,
-          child: contacts.isEmpty
-              ? const Text('No contacts available')
-              : ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: contacts.length,
-                  itemBuilder: (context, index) {
-                    final contact = contacts[index];
-                    return ListTile(
-                      leading: CircleAvatar(
-                        child: Text(contact.name.isNotEmpty ? contact.name[0] : '?'),
+      builder: (context) => Dialog(
+        child: Container(
+          width: 400,
+          height: 500,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              const Text(
+                'Share Contact',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: allContacts.isEmpty
+                    ? const Center(child: Text('No contacts available'))
+                    : ListView.builder(
+                        itemCount: allContacts.length,
+                        itemBuilder: (context, index) {
+                          final contact = allContacts[index];
+                          return ListTile(
+                            leading: CircleAvatar(
+                              child: Text(contact.name.isNotEmpty ? contact.name[0].toUpperCase() : '?'),
+                            ),
+                            title: Text(contact.name),
+                            subtitle: contact.phone != null ? Text(contact.phone!) : null,
+                            onTap: () => Navigator.pop(context, contact.id),
+                          );
+                        },
                       ),
-                      title: Text(contact.name),
-                      subtitle: contact.phone != null ? Text(contact.phone!) : null,
-                      onTap: () => Navigator.pop(context, contact.id),
-                    );
-                  },
-                ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                ],
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
 
@@ -1078,6 +1305,38 @@ class _ChatViewState extends ConsumerState<ChatView> {
     }
   }
 
+  Widget _buildAvatar({required String? avatarUrl, required String name, required double radius}) {
+    if (avatarUrl == null || avatarUrl.isEmpty) {
+      return CircleAvatar(
+        radius: radius,
+        child: Text(name[0], style: TextStyle(fontSize: radius * 0.8)),
+      );
+    }
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: Colors.grey[300],
+      child: ClipOval(
+        child: Image(
+          image: CachedNetworkImageProvider(avatarUrl),
+          fit: BoxFit.cover,
+          width: radius * 2,
+          height: radius * 2,
+          errorBuilder: (context, error, stackTrace) {
+            return Center(
+              child: Text(
+                name[0],
+                style: TextStyle(
+                  fontSize: radius * 0.8,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -1098,14 +1357,10 @@ class _ChatViewState extends ConsumerState<ChatView> {
           ),
           child: Row(
             children: [
-              CircleAvatar(
+              _buildAvatar(
+                avatarUrl: widget.contactAvatar,
+                name: widget.contactName,
                 radius: 20,
-                backgroundImage: widget.contactAvatar != null
-                    ? CachedNetworkImageProvider(widget.contactAvatar!)
-                    : null,
-                child: widget.contactAvatar == null
-                    ? Text(widget.contactName[0], style: const TextStyle(fontSize: 16))
-                    : null,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1176,8 +1431,9 @@ class _ChatViewState extends ConsumerState<ChatView> {
                   if (widget.otherUser != null) {
                     Navigator.push(
                       context,
-                      SlideRightRoute(
+                      ConstrainedSlideRightRoute(
                         page: ContactInfoScreen(user: widget.otherUser!),
+                        leftOffset: 400.0, // Sidebar width
                       ),
                     );
                   }
@@ -1308,17 +1564,9 @@ class _ChatViewState extends ConsumerState<ChatView> {
                         : ListView.builder(
                             controller: _scrollController,
                             padding: const EdgeInsets.all(16),
-                            itemCount: _messages.length,
+                            itemCount: _buildMessageList().length,
                             itemBuilder: (context, index) {
-                              final message = _messages[index];
-                              return MessageBubble(
-                                message: message,
-                                currentUserId: _currentUserId ?? 0,
-                                onDelete: () => _deleteMessage(message),
-                                onReply: () => _setReply(message),
-                                onReact: (emoji) => _reactToMessage(message, emoji),
-                                onEdit: (newBody) => _editMessage(message, newBody),
-                              );
+                              return _buildMessageList()[index];
                             },
                           ),
               ),
@@ -1570,44 +1818,23 @@ class _ChatViewState extends ConsumerState<ChatView> {
                     ),
                   ),
                 )
-              else if (_messageController.text.trim().isNotEmpty || _attachments.isNotEmpty)
-                IconButton(
-                  icon: const Icon(Icons.send),
-                  color: const Color(0xFF008069),
-                  onPressed: _sendMessage,
-                  tooltip: 'Send Message',
-                )
               else
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.red,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.fiber_manual_record, color: Colors.white, size: 16),
-                          const SizedBox(width: 8),
-                          Text(
-                            _formatDuration(_recordingDuration),
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    CircleAvatar(
-                      backgroundColor: Colors.red,
-                      child: IconButton(
-                        icon: const Icon(Icons.stop, color: Colors.white),
-                        onPressed: _stopRecording,
-                      ),
-                    ),
-                  ],
+                CircleAvatar(
+                  backgroundColor: const Color(0xFF008069),
+                  child: IconButton(
+                    icon: _isSending
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : const Icon(Icons.send, color: Colors.white),
+                    onPressed: _isSending ? null : _sendMessage,
+                    tooltip: 'Send Message',
+                  ),
                 ),
             ],
               ),

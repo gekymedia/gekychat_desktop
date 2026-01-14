@@ -32,6 +32,7 @@ import '../world/world_feed_screen.dart';
 import '../world/world_feed_repository.dart';
 import '../mail/mail_screen.dart';
 import '../qr/qr_scanner_screen.dart';
+import '../../core/services/deep_link_service.dart';
 import '../ai/ai_chat_screen.dart';
 import '../live/live_broadcast_screen.dart';
 import '../labels/labels_repository.dart';
@@ -41,6 +42,9 @@ import '../../core/feature_flags.dart';
 import '../multi_account/account_switcher.dart';
 import '../../widgets/side_nav.dart';
 import '../../theme/app_theme.dart';
+import '../../core/providers/connectivity_provider.dart';
+import '../../core/services/taskbar_badge_service.dart';
+import '../../features/auth/auth_provider.dart';
 
 class DesktopChatScreen extends ConsumerStatefulWidget {
   const DesktopChatScreen({super.key});
@@ -74,6 +78,23 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     _loadGroups();
     _loadLabels();
   }
+  
+  void _selectConversationById(int conversationId) async {
+    try {
+      final chatRepo = ref.read(chatRepositoryProvider);
+      final conversation = await chatRepo.getConversation(conversationId);
+      setState(() {
+        _selectedConversation = conversation;
+        _selectedConversationId = conversationId;
+        _selectedGroup = null;
+        _selectedGroupId = null;
+      });
+      // Switch to chats section
+      ref.read(currentSectionProvider.notifier).setSection('/chats');
+    } catch (e) {
+      debugPrint('Failed to select conversation: $e');
+    }
+  }
 
   @override
   void dispose() {
@@ -97,6 +118,8 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     setState(() {
       _conversationsFuture = chatRepo.getConversations();
     });
+    // Update badge after loading conversations
+    _updateTaskbarBadge();
   }
 
   void _loadArchivedConversations() {
@@ -111,6 +134,24 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     setState(() {
       _groupsFuture = chatRepo.getGroups();
     });
+    // Update badge after loading groups
+    _updateTaskbarBadge();
+  }
+  
+  void _updateTaskbarBadge() {
+    if (!mounted) return;
+    Future.microtask(() async {
+      if (!mounted) return;
+      try {
+        final badgeService = ref.read(taskbarBadgeServiceProvider);
+        await badgeService.updateBadge();
+      } catch (e) {
+        // Silently ignore errors when widget is disposed
+        if (mounted) {
+          debugPrint('Failed to update taskbar badge: $e');
+        }
+      }
+    });
   }
 
   void _loadLabels() async {
@@ -124,7 +165,12 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
       }
     } catch (e) {
       debugPrint('Failed to load labels: $e');
-      // Don't show error to user - just log it
+      // Don't show error to user - just log it and set empty list
+      if (mounted) {
+        setState(() {
+          _labels = [];
+        });
+      }
     }
   }
 
@@ -636,11 +682,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
               ),
             );
             if (result != null && context.mounted) {
-              // Handle scanned QR code result
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Scanned: $result')),
-              );
-              // TODO: Process the QR code (e.g., add contact, join group, etc.)
+              await _processQRCode(context, result as String);
             }
           },
         ),
@@ -648,10 +690,172 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     );
   }
 
+  Future<void> _processQRCode(BuildContext context, String code) async {
+    try {
+      // Handle gekychat:// protocol links
+      if (code.startsWith('gekychat://')) {
+        final deepLinkService = DeepLinkService();
+        final parsed = deepLinkService.parseLink(code);
+        if (parsed != null && context.mounted) {
+          final route = parsed['route'];
+          if (route != null) {
+            context.go(route);
+            // Handle conversation/group/channel IDs if present
+            if (parsed.containsKey('conversationId')) {
+              final conversationId = int.tryParse(parsed['conversationId']!);
+              if (conversationId != null) {
+                ref.read(selectedConversationProvider.notifier).selectConversation(conversationId);
+              }
+            } else if (parsed.containsKey('groupId')) {
+              // Group/channel will be selected automatically when navigating to /chats
+              // The group chat view will handle it
+            }
+            return;
+          }
+        }
+      }
+
+      // Handle group invite links (https://chat.gekychat.com/groups/join/{inviteCode})
+      // or (https://web.gekychat.com/groups/join/{inviteCode})
+      if (code.contains('/groups/join/') || code.contains('/invite/')) {
+        String? inviteCode;
+        try {
+          final uri = Uri.parse(code);
+          final pathSegments = uri.pathSegments;
+          final joinIndex = pathSegments.indexOf('join');
+          final inviteIndex = pathSegments.indexOf('invite');
+          
+          if (joinIndex != -1 && joinIndex + 1 < pathSegments.length) {
+            inviteCode = pathSegments[joinIndex + 1];
+          } else if (inviteIndex != -1 && inviteIndex + 1 < pathSegments.length) {
+            inviteCode = pathSegments[inviteIndex + 1];
+          }
+        } catch (e) {
+          debugPrint('Error parsing invite link: $e');
+        }
+
+        if (inviteCode != null && inviteCode.isNotEmpty) {
+          // Join group via invite code
+          final apiService = ref.read(apiServiceProvider);
+          try {
+            final response = await apiService.post('/groups/join/$inviteCode');
+            if (response.data['success'] == true && context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(response.data['message'] ?? 'Successfully joined group'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+              // Refresh groups list
+              _loadGroups();
+              // Navigate to chats
+              context.go('/chats');
+            } else if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(response.data['message'] ?? 'Failed to join group'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
+          } catch (e) {
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Failed to join group: $e'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
+          }
+          return;
+        }
+      }
+
+      // Handle direct invite codes (just the code itself)
+      if (code.length >= 8 && code.length <= 20 && code.contains(RegExp(r'^[a-zA-Z0-9]+$'))) {
+        // Likely an invite code - try to join
+        final apiService = ref.read(apiServiceProvider);
+        try {
+          final response = await apiService.post('/groups/join/$code');
+          if (response.data['success'] == true && context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(response.data['message'] ?? 'Successfully joined group'),
+                backgroundColor: Colors.green,
+              ),
+            );
+            _loadGroups();
+            context.go('/chats');
+          } else if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(response.data['message'] ?? 'Invalid invite code'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        } catch (e) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Failed to join group: $e'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+        return;
+      }
+
+      // Unknown QR code format
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Unknown QR code format: $code'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error processing QR code: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final userProfileAsync = ref.watch(currentUserProvider);
+    final isOnline = ref.watch(connectivityProvider);
+    
+    // Listen to programmatic conversation selection
+    ref.listen<int?>(selectedConversationProvider, (previous, next) {
+      if (next != null && next != _selectedConversationId) {
+        _selectConversationById(next);
+      }
+    });
+    
+    // Listen to account changes and refresh data
+    ref.listen(currentUserProvider, (previous, next) {
+      final previousId = previous?.value?.id;
+      final nextId = next.value?.id;
+      if (previousId != null && nextId != null && previousId != nextId) {
+        debugPrint('🔄 Account changed detected: User ID $previousId -> $nextId');
+        debugPrint('🔄 Refreshing conversations, groups, and labels for new account...');
+        _loadConversations();
+        _loadArchivedConversations();
+        _loadGroups();
+        _loadLabels();
+        debugPrint('✅ Data refresh completed for new account');
+      }
+    });
 
     // Use provider for main sections, fallback to route for external routes
     final currentSection = ref.watch(currentSectionProvider);
@@ -662,24 +866,53 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
-      body: Row(
+      body: Column(
         children: [
-          // Side Nav (like web version) - Use RepaintBoundary to prevent unnecessary repaints
-          RepaintBoundary(
-            child: SideNav(currentRoute: effectiveRoute),
-          ),
-          
-          // Sidebar - Use RepaintBoundary and AutomaticKeepAliveClientMixin
-          RepaintBoundary(
-            child: Container(
-              width: 400,
-              color: isDark ? const Color(0xFF111B21) : Colors.white,
-              child: _buildSidebarContent(context, effectiveRoute, isDark),
+          // Offline indicator banner
+          if (!isOnline)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: Colors.orange.withOpacity(0.9),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.wifi_off, color: Colors.white, size: 18),
+                  const SizedBox(width: 8),
+                  Text(
+                    'You are offline. Showing saved conversations.',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          // Main Content Area - This is what should reload, not the sidebar
+          // Main content
           Expanded(
-            child: _buildMainContent(context, effectiveRoute, isDark),
+            child: Row(
+              children: [
+                // Side Nav (like web version) - Use RepaintBoundary to prevent unnecessary repaints
+                RepaintBoundary(
+                  child: SideNav(currentRoute: effectiveRoute),
+                ),
+                
+                // Sidebar - Use RepaintBoundary and AutomaticKeepAliveClientMixin
+                RepaintBoundary(
+                  child: Container(
+                    width: 400,
+                    color: isDark ? const Color(0xFF111B21) : Colors.white,
+                    child: _buildSidebarContent(context, effectiveRoute, isDark),
+                  ),
+                ),
+                // Main Content Area - This is what should reload, not the sidebar
+                Expanded(
+                  child: _buildMainContent(context, effectiveRoute, isDark),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -734,6 +967,13 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
           child: FutureBuilder<List<GroupSummary>>(
             future: chatRepo.getGroups(),
             builder: (context, snapshot) {
+              // Handle errors gracefully
+              if (snapshot.hasError) {
+                debugPrint('Error loading groups: ${snapshot.error}');
+                // Return empty list on error
+                snapshot = AsyncSnapshot.withData(ConnectionState.done, <GroupSummary>[]);
+              }
+              
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
               }
@@ -812,15 +1052,34 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
           child: Row(
             children: [
               userProfileAsync.when(
-                data: (userProfile) => CircleAvatar(
-                  radius: 24,
-                  backgroundImage: userProfile.avatarUrl != null
-                      ? CachedNetworkImageProvider(userProfile.avatarUrl!)
-                      : null,
-                  child: userProfile.avatarUrl == null
-                      ? Text(userProfile.name[0].toUpperCase(), style: const TextStyle(fontSize: 20))
-                      : null,
-                ),
+                data: (userProfile) {
+                  if (userProfile.avatarUrl == null || userProfile.avatarUrl!.isEmpty) {
+                    return CircleAvatar(
+                      radius: 24,
+                      child: Text(userProfile.name[0].toUpperCase(), style: const TextStyle(fontSize: 20)),
+                    );
+                  }
+                  return CircleAvatar(
+                    radius: 24,
+                    backgroundColor: Colors.grey[300],
+                    child: ClipOval(
+                      child: Image(
+                        image: CachedNetworkImageProvider(userProfile.avatarUrl!),
+                        fit: BoxFit.cover,
+                        width: 48,
+                        height: 48,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Center(
+                            child: Text(
+                              userProfile.name[0].toUpperCase(),
+                              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  );
+                },
                 loading: () => const CircleAvatar(radius: 24, child: CircularProgressIndicator()),
                 error: (_, __) => const CircleAvatar(radius: 24, child: Icon(Icons.person)),
               ),
@@ -1066,9 +1325,23 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
           child: FutureBuilder<List<ConversationSummary>>(
             future: _selectedFilter == 'archived' ? _archivedConversationsFuture : _conversationsFuture,
             builder: (context, conversationsSnapshot) {
+              // Handle errors gracefully
+              if (conversationsSnapshot.hasError) {
+                debugPrint('Error loading conversations: ${conversationsSnapshot.error}');
+                // Return empty list on error
+                conversationsSnapshot = AsyncSnapshot.withData(ConnectionState.done, <ConversationSummary>[]);
+              }
+              
               return FutureBuilder<List<GroupSummary>>(
                 future: _groupsFuture,
                 builder: (context, groupsSnapshot) {
+                  // Handle errors gracefully
+                  if (groupsSnapshot.hasError) {
+                    debugPrint('Error loading groups: ${groupsSnapshot.error}');
+                    // Return empty list on error
+                    groupsSnapshot = AsyncSnapshot.withData(ConnectionState.done, <GroupSummary>[]);
+                  }
+                  
                   if (conversationsSnapshot.connectionState == ConnectionState.waiting ||
                       groupsSnapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
@@ -1421,6 +1694,11 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     }
     if (currentRoute == '/live-broadcast' || currentRoute.startsWith('/live')) {
       return const LiveBroadcastScreen();
+    }
+    
+    // Handle settings route
+    if (currentRoute == '/settings') {
+      return const SettingsScreen();
     }
     
     // Default: show conversations/group chats

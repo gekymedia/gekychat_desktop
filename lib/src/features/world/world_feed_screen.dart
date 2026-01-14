@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:share_plus/share_plus.dart';
@@ -10,6 +11,9 @@ import 'create_post_screen.dart';
 import 'widgets/comments_dialog.dart';
 import 'widgets/fullscreen_video_player.dart';
 import 'widgets/fullscreen_media_viewer.dart';
+import '../../features/contacts/contact_info_screen.dart';
+import '../../features/chats/models.dart';
+import '../../widgets/constrained_slide_route.dart';
 
 /// PHASE 2: World Feed Screen - Instagram-like grid layout for desktop
 class WorldFeedScreen extends ConsumerStatefulWidget {
@@ -260,29 +264,21 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
             child: Row(
               children: [
                 GestureDetector(
-                  onTap: () {
-                    // Navigate to profile
-                  },
-                  child: CircleAvatar(
+                  onTap: () => _navigateToProfile(creator),
+                  child: _buildAvatar(
+                    avatarUrl: creator != null && creator['avatar_url'] != null
+                        ? (creator['avatar_url']?.toString().startsWith('http') == true
+                            ? creator['avatar_url'] as String
+                            : '$baseUrl/storage/${creator['avatar_url']}')
+                        : null,
+                    name: creator?['name'] ?? 'Unknown',
                     radius: 16,
-                    backgroundImage: creator != null && creator['avatar_url'] != null
-                        ? NetworkImage(
-                            creator['avatar_url']?.toString().startsWith('http') == true
-                                ? creator['avatar_url'] as String
-                                : '$baseUrl/storage/${creator['avatar_url']}',
-                          )
-                        : null,
-                    child: creator == null || creator['avatar_url'] == null
-                        ? const Icon(Icons.person, size: 16)
-                        : null,
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: GestureDetector(
-                    onTap: () {
-                      // Navigate to profile
-                    },
+                    onTap: () => _navigateToProfile(creator),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
@@ -307,12 +303,54 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
                     ),
                   ),
                 ),
-                IconButton(
+                PopupMenuButton<String>(
                   icon: const Icon(Icons.more_vert, size: 20),
-                  color: isDark ? Colors.white70 : Colors.black87,
-                  onPressed: () {},
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
+                  color: isDark ? const Color(0xFF202C33) : Colors.white,
+                  onSelected: (value) => _handleMenuAction(value, post, index),
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      value: 'share',
+                      child: Row(
+                        children: [
+                          Icon(Icons.share, size: 20, color: isDark ? Colors.white70 : Colors.black87),
+                          const SizedBox(width: 12),
+                          const Text('Share'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'copy_link',
+                      child: Row(
+                        children: [
+                          Icon(Icons.link, size: 20, color: isDark ? Colors.white70 : Colors.black87),
+                          const SizedBox(width: 12),
+                          const Text('Copy Link'),
+                        ],
+                      ),
+                    ),
+                    if (creator != null && creator['id'] != null)
+                      PopupMenuItem(
+                        value: 'view_profile',
+                        child: Row(
+                          children: [
+                            Icon(Icons.person, size: 20, color: isDark ? Colors.white70 : Colors.black87),
+                            const SizedBox(width: 12),
+                            const Text('View Profile'),
+                          ],
+                        ),
+                      ),
+                    const PopupMenuDivider(),
+                    PopupMenuItem(
+                      value: 'report',
+                      child: Row(
+                        children: [
+                          Icon(Icons.flag_outlined, size: 20, color: Colors.red[300]),
+                          const SizedBox(width: 12),
+                          Text('Report', style: TextStyle(color: Colors.red[300])),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -575,6 +613,107 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
         ],
       ),
     );
+  }
+
+  Widget _buildAvatar({required String? avatarUrl, required String name, required double radius}) {
+    if (avatarUrl == null || avatarUrl.isEmpty) {
+      return CircleAvatar(
+        radius: radius,
+        child: Text(name[0].toUpperCase(), style: TextStyle(fontSize: radius * 0.8)),
+      );
+    }
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: Colors.grey[300],
+      child: ClipOval(
+        child: Image(
+          image: CachedNetworkImageProvider(avatarUrl),
+          fit: BoxFit.cover,
+          width: radius * 2,
+          height: radius * 2,
+          errorBuilder: (context, error, stackTrace) {
+            return Center(
+              child: Text(
+                name[0].toUpperCase(),
+                style: TextStyle(
+                  fontSize: radius * 0.8,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  void _navigateToProfile(Map<String, dynamic>? creator) {
+    if (creator == null || creator['id'] == null) return;
+    
+    try {
+      final user = User(
+        id: creator['id'] as int,
+        name: creator['name']?.toString() ?? 'Unknown',
+        phone: creator['phone']?.toString(),
+        avatarUrl: creator['avatar_url']?.toString(),
+        isOnline: creator['online'] as bool?,
+        lastSeenAt: creator['last_seen_at'] != null
+            ? DateTime.tryParse(creator['last_seen_at'].toString())
+            : null,
+      );
+      
+      Navigator.push(
+        context,
+        ConstrainedSlideRightRoute(
+          page: ContactInfoScreen(user: user),
+          leftOffset: 400.0, // Sidebar width
+        ),
+      );
+    } catch (e) {
+      debugPrint('Error navigating to profile: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to open profile: $e')),
+        );
+      }
+    }
+  }
+
+  void _handleMenuAction(String action, Map<String, dynamic> post, int index) async {
+    switch (action) {
+      case 'share':
+        await _sharePost(post, index);
+        break;
+      case 'copy_link':
+        try {
+          final repo = ref.read(worldFeedRepositoryProvider);
+          final shareUrl = await repo.getShareUrl(post['id']);
+          await Clipboard.setData(ClipboardData(text: shareUrl));
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Link copied to clipboard')),
+            );
+          }
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Failed to copy link: $e')),
+            );
+          }
+        }
+        break;
+      case 'view_profile':
+        final creator = post['creator'] as Map<String, dynamic>?;
+        _navigateToProfile(creator);
+        break;
+      case 'report':
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Report feature coming soon')),
+          );
+        }
+        break;
+    }
   }
 
   String _getTimeAgo(DateTime dateTime) {

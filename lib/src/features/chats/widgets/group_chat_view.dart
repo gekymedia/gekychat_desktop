@@ -11,6 +11,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart' show Geolocator, LocationPermission, LocationAccuracy, Position;
 import 'package:path_provider/path_provider.dart';
+import 'package:dio/dio.dart';
 import '../chat_repo.dart';
 import '../models.dart';
 import 'message_bubble.dart';
@@ -18,7 +19,7 @@ import 'emoji_picker_widget.dart';
 import 'chat_view.dart' show DesktopAudioPreviewWidget;
 import '../../contacts/contacts_repository.dart';
 import 'group_info_screen.dart'; // Provides groupInfoProvider
-import '../../../widgets/slide_route.dart';
+import '../../../widgets/constrained_slide_route.dart';
 import '../../media/media_gallery_screen.dart';
 import 'search_in_chat_screen.dart';
 import '../../calls/call_screen.dart';
@@ -53,6 +54,8 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
   bool _isSending = false;
   bool _showEmojiPicker = false;
   int? _currentUserId;
+  int? _replyingToId;
+  Message? _replyingToMessage;
   
   // Audio recording
   final AudioRecorder _audioRecorder = AudioRecorder();
@@ -137,18 +140,30 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
         groupId: widget.groupId,
         body: message.isEmpty ? null : message,
         attachments: _attachments.isNotEmpty ? _attachments : null,
+        replyToId: _replyingToId,
       );
       
       setState(() {
         _messages.add(newMessage);
         _messageController.clear();
         _attachments.clear();
+        _replyingToId = null;
+        _replyingToMessage = null;
       });
       _scrollToBottom();
     } catch (e) {
+      debugPrint('Error sending message: $e');
       if (mounted) {
+        final errorMessage = e.toString().replaceAll('Exception: ', '');
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to send message: $e')),
+          SnackBar(
+            content: Text('Failed to send message: $errorMessage'),
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'Dismiss',
+              onPressed: () {},
+            ),
+          ),
         );
       }
     } finally {
@@ -288,9 +303,8 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
         );
 
         if (shouldSend == true) {
-          setState(() {
-            _attachments.add(File(path));
-          });
+          // Send voice message immediately instead of adding to attachments
+          await _sendVoiceMessage(path);
         } else {
           // Delete the recording file
           try {
@@ -312,6 +326,42 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
           SnackBar(content: Text('Failed to stop recording: $e')),
         );
       }
+    }
+  }
+
+  Future<void> _sendVoiceMessage(String audioPath) async {
+    setState(() {
+      _isSending = true;
+    });
+
+    try {
+      final chatRepo = ref.read(chatRepositoryProvider);
+      // Send voice message with no compression
+      final newMessage = await chatRepo.sendMessageToGroup(
+        groupId: widget.groupId,
+        body: null,
+        replyToId: _replyingToId,
+        attachments: [File(audioPath)],
+        skipCompression: true, // Voice messages shouldn't be compressed
+      );
+      
+      setState(() {
+        _messages.add(newMessage);
+        _replyingToId = null;
+        _replyingToMessage = null;
+      });
+      _scrollToBottom();
+    } catch (e) {
+      debugPrint('Error sending voice message: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send voice message: $e')),
+        );
+      }
+    } finally {
+      setState(() {
+        _isSending = false;
+      });
     }
   }
 
@@ -420,9 +470,39 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
       if (mounted) {
         Navigator.pop(context); // Close loading dialog
 
-        // Note: Reverse geocoding (getting address from coordinates) requires the geocoding package
-        // For now, we'll just use coordinates. To enable address lookup, add geocoding package.
+        // Reverse geocoding using OpenStreetMap Nominatim API (free, no key required)
         String? address;
+        String? placeName;
+        
+        try {
+          final response = await Dio().get(
+            'https://nominatim.openstreetmap.org/reverse',
+            queryParameters: {
+              'format': 'json',
+              'lat': position.latitude,
+              'lon': position.longitude,
+              'zoom': 18,
+              'addressdetails': 1,
+            },
+            options: Options(
+              headers: {
+                'User-Agent': 'GekyChat-Desktop/1.0', // Required by Nominatim
+              },
+            ),
+          );
+          
+          if (response.statusCode == 200 && response.data != null) {
+            final data = response.data;
+            if (data['display_name'] != null) {
+              address = data['display_name'] as String;
+              placeName = data['name'] as String? ?? 
+                         (address.contains(',') ? address.split(',')[0] : address);
+            }
+          }
+        } catch (e) {
+          debugPrint('Reverse geocoding failed: $e');
+          // Continue without address
+        }
 
         setState(() {
           _isSending = true;
@@ -434,7 +514,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
           latitude: position.latitude,
           longitude: position.longitude,
           address: address,
-          placeName: null,
+          placeName: placeName,
         );
         setState(() {
           _messages.add(newMessage);
@@ -458,40 +538,76 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
   }
 
   Future<void> _shareContact() async {
-    final contacts = await ref.read(contactsRepositoryProvider).listContacts();
+    // Load all contacts with pagination
+    final contactsRepo = ref.read(contactsRepositoryProvider);
+    List<GekyContact> allContacts = [];
+    int page = 1;
+    bool hasMore = true;
+    
+    while (hasMore) {
+      try {
+        final paginated = await contactsRepo.listContactsPaginated(page: page, perPage: 100);
+        final contacts = paginated['data'] as List<GekyContact>;
+        allContacts.addAll(contacts);
+        
+        final meta = paginated['meta'] as Map<String, dynamic>;
+        final currentPage = meta['current_page'] as int? ?? page;
+        final lastPage = meta['last_page'] as int? ?? page;
+        hasMore = currentPage < lastPage;
+        page++;
+      } catch (e) {
+        debugPrint('Error loading contacts page $page: $e');
+        break;
+      }
+    }
     
     if (!mounted) return;
     
     final selected = await showDialog<int>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Share Contact'),
-        content: SizedBox(
-          width: 300,
-          child: contacts.isEmpty
-              ? const Text('No contacts available')
-              : ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: contacts.length,
-                  itemBuilder: (context, index) {
-                    final contact = contacts[index];
-                    return ListTile(
-                      leading: CircleAvatar(
-                        child: Text(contact.name.isNotEmpty ? contact.name[0] : '?'),
+      builder: (context) => Dialog(
+        child: Container(
+          width: 400,
+          height: 500,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              const Text(
+                'Share Contact',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: allContacts.isEmpty
+                    ? const Center(child: Text('No contacts available'))
+                    : ListView.builder(
+                        itemCount: allContacts.length,
+                        itemBuilder: (context, index) {
+                          final contact = allContacts[index];
+                          return ListTile(
+                            leading: CircleAvatar(
+                              child: Text(contact.name.isNotEmpty ? contact.name[0].toUpperCase() : '?'),
+                            ),
+                            title: Text(contact.name),
+                            subtitle: contact.phone != null ? Text(contact.phone!) : null,
+                            onTap: () => Navigator.pop(context, contact.id),
+                          );
+                        },
                       ),
-                      title: Text(contact.name),
-                      subtitle: contact.phone != null ? Text(contact.phone!) : null,
-                      onTap: () => Navigator.pop(context, contact.id),
-                    );
-                  },
-                ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                ],
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
 
@@ -675,6 +791,32 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
     }
   }
 
+  Widget _buildGroupAvatar() {
+    if (widget.groupAvatarUrl == null || widget.groupAvatarUrl!.isEmpty) {
+      return const CircleAvatar(
+        radius: 20,
+        child: Icon(Icons.group, size: 20),
+      );
+    }
+    return CircleAvatar(
+      radius: 20,
+      backgroundColor: Colors.grey[300],
+      child: ClipOval(
+        child: Image(
+          image: CachedNetworkImageProvider(widget.groupAvatarUrl!),
+          fit: BoxFit.cover,
+          width: 40,
+          height: 40,
+          errorBuilder: (context, error, stackTrace) {
+            return const Center(
+              child: Icon(Icons.group, size: 20),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -700,15 +842,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
           ),
           child: Row(
             children: [
-              CircleAvatar(
-                radius: 20,
-                backgroundImage: widget.groupAvatarUrl != null
-                    ? CachedNetworkImageProvider(widget.groupAvatarUrl!)
-                    : null,
-                child: widget.groupAvatarUrl == null
-                    ? const Icon(Icons.group, size: 20)
-                    : null,
-              ),
+              _buildGroupAvatar(),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -750,8 +884,9 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                 onPressed: () {
                   Navigator.push(
                     context,
-                    SlideRightRoute(
+                    ConstrainedSlideRightRoute(
                       page: GroupInfoScreen(groupId: widget.groupId),
+                      leftOffset: 400.0, // Sidebar width
                     ),
                   );
                 },
@@ -785,16 +920,39 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                     case 'group_info':
                       Navigator.push(
                         context,
-                        SlideRightRoute(
+                        ConstrainedSlideRightRoute(
                           page: GroupInfoScreen(groupId: widget.groupId),
+                          leftOffset: 400.0, // Sidebar width
                         ),
                       );
                       break;
                     case 'mute':
-                      // TODO: Implement mute
+                      // Mute/unmute group notifications
+                      try {
+                        final chatRepo = ref.read(chatRepositoryProvider);
+                        // Check if group is muted (would need to get group info)
+                        // For now, mute for 24 hours
+                        await chatRepo.muteGroup(widget.groupId, minutes: 1440);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Group muted for 24 hours')),
+                          );
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Failed to mute group: $e')),
+                          );
+                        }
+                      }
                       break;
                     case 'archive':
-                      // TODO: Implement archive
+                      // Archive group - would need archive group API endpoint
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Archive group feature coming soon')),
+                        );
+                      }
                       break;
                   }
                 },

@@ -117,7 +117,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Settings and other screens (full screen, but settings keeps side nav)
       GoRoute(
         path: '/settings',
-        builder: (context, state) => const SettingsWrapper(),
+        builder: (context, state) => const DesktopChatScreen(),
       ),
       GoRoute(
         path: '/profile',

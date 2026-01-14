@@ -132,6 +132,21 @@ class ApiService {
   Future<Response> delete(String path, {dynamic data}) =>
       _dio.delete(_normalize(path), data: data);
 
+  /// Download a file from the server
+  Future<void> downloadFile(
+    String url,
+    String savePath, {
+    Map<String, dynamic>? queryParameters,
+    void Function(int, int)? onReceiveProgress,
+  }) async {
+    await _dio.download(
+      url.startsWith('http') ? url : _normalize(url),
+      savePath,
+      queryParameters: queryParameters,
+      onReceiveProgress: onReceiveProgress,
+    );
+  }
+
   Future<Response> uploadFiles(
     String path,
     List<File> files, {

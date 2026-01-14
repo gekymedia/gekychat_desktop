@@ -52,6 +52,7 @@ dependencies:
   # Window management and system tray
   window_manager: ^0.3.9
   system_tray: ^2.0.3
+  windows_taskbar: ^1.1.2  # Windows-specific taskbar badge support
   
   # Emoji picker
   emoji_picker_flutter: ^2.0.0

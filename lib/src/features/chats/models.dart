@@ -326,8 +326,8 @@ class Reaction {
 
   factory Reaction.fromJson(Map<String, dynamic> json) {
     return Reaction(
-      userId: json['user_id'],
-      emoji: json['emoji'],
+      userId: json['user_id'] ?? 0,
+      emoji: json['emoji']?.toString() ?? '👍', // Default to thumbs up if null
     );
   }
 }

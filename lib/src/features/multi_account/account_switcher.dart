@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../core/providers.dart';
+import '../../core/database/local_storage_service.dart';
+import '../../core/database/message_queue_service.dart';
 import '../../core/device_id.dart';
 import '../../core/feature_flags.dart';
 import '../../core/session.dart';
+import '../../app_router.dart';
 import 'account_repository.dart';
 import '../chats/chat_repo.dart';
 
@@ -72,15 +76,39 @@ class _AccountSwitcherState extends ConsumerState<AccountSwitcher> {
             if (account['is_active'] == true) return;
             
             final repository = ref.read(accountRepositoryProvider);
+            final accountName = account['user']?['name'] ?? 'Unknown';
+            final accountId = account['id'] as int;
+            
+            debugPrint('🔄 Account switch initiated: Switching to account ID $accountId ($accountName)');
+            
             try {
-              await repository.switchAccount(account['id'] as int);
+              await repository.switchAccount(accountId);
+              
+              debugPrint('✅ Account switch successful: Now using account ID $accountId ($accountName)');
+              
+              // Invalidate database provider to use new account's database
+              ref.invalidate(appDatabaseProvider);
+              ref.invalidate(localStorageServiceProvider);
+              ref.invalidate(messageQueueServiceProvider);
+              
               // Reload user profile and refresh
               ref.invalidate(currentUserProvider);
+              
               // Invalidate chat repository to reload conversations
               ref.invalidate(chatRepositoryProvider);
+              
+              debugPrint('🔄 Invalidated providers - ready to refresh data');
+              
               // Navigate back to chats to refresh
-              Navigator.of(context).popUntil((route) => route.isFirst);
+              if (context.mounted) {
+                Navigator.of(context).popUntil((route) => route.isFirst);
+                // Trigger a rebuild by navigating to the same route
+                final router = ref.read(routerProvider);
+                router.go('/chats');
+                debugPrint('🔄 Navigated to /chats - triggering refresh');
+              }
             } catch (e) {
+              debugPrint('❌ Account switch failed: $e');
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(content: Text('Failed to switch account: $e')),

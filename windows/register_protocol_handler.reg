@@ -1,0 +1,15 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Software\Classes\gekychat]
+@="URL:GekyChat Protocol"
+"URL Protocol"=""
+
+[HKEY_CURRENT_USER\Software\Classes\gekychat\DefaultIcon]
+@="\"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\gekychat\shell]
+
+[HKEY_CURRENT_USER\Software\Classes\gekychat\shell\open]
+
+[HKEY_CURRENT_USER\Software\Classes\gekychat\shell\open\command]
+@="\"C:\\Path\\To\\gekychat_desktop.exe\" \"%1\""

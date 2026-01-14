@@ -142,6 +142,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
         if (user != null && user['id'] != null) {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setInt('user_id', user['id']);
+          // Store phone number for account-specific database paths
+          await prefs.setString('user_phone', phone);
           if (accountId != null) {
             await prefs.setInt('current_account_id', accountId);
           }
@@ -209,6 +211,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
     await prefs.remove('user_id');
+    await prefs.remove('user_phone'); // Clear phone number on logout
+    await prefs.remove('current_account_id');
     state = AuthState();
   }
 }

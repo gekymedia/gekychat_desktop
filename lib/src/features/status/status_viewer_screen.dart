@@ -7,6 +7,39 @@ import 'package:intl/intl.dart';
 import 'models.dart';
 import 'status_repository.dart';
 
+/// Helper function to build avatar with error handling
+Widget _buildStatusAvatar({required String? avatarUrl, required String name, required double radius}) {
+  if (avatarUrl == null || avatarUrl.isEmpty) {
+    return CircleAvatar(
+      radius: radius,
+      child: Text(name[0].toUpperCase(), style: TextStyle(fontSize: radius * 0.8)),
+    );
+  }
+  return CircleAvatar(
+    radius: radius,
+    backgroundColor: Colors.grey[300],
+    child: ClipOval(
+      child: Image(
+        image: CachedNetworkImageProvider(avatarUrl),
+        fit: BoxFit.cover,
+        width: radius * 2,
+        height: radius * 2,
+        errorBuilder: (context, error, stackTrace) {
+          return Center(
+            child: Text(
+              name[0].toUpperCase(),
+              style: TextStyle(
+                fontSize: radius * 0.8,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          );
+        },
+      ),
+    ),
+  );
+}
+
 class StatusViewerScreen extends ConsumerStatefulWidget {
   final StatusSummary statusSummary;
   final int startIndex;
@@ -270,13 +303,10 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-                CircleAvatar(
-                  backgroundImage: widget.statusSummary.userAvatar != null
-                      ? CachedNetworkImageProvider(widget.statusSummary.userAvatar!)
-                      : null,
-                  child: widget.statusSummary.userAvatar == null
-                      ? Text(widget.statusSummary.userName[0])
-                      : null,
+                _buildStatusAvatar(
+                  avatarUrl: widget.statusSummary.userAvatar,
+                  name: widget.statusSummary.userName,
+                  radius: 20,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -513,6 +543,7 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
     );
   }
 
+
   // PHASE 1: Download status media
   Future<void> _downloadStatusMedia() async {
     final status = widget.statusSummary.updates[currentIndex];
@@ -623,13 +654,10 @@ class _ViewersListSheet extends StatelessWidget {
                     itemBuilder: (context, index) {
                       final viewer = viewers[index];
                       return ListTile(
-                        leading: CircleAvatar(
-                          backgroundImage: viewer.userAvatar != null
-                              ? CachedNetworkImageProvider(viewer.userAvatar!)
-                              : null,
-                          child: viewer.userAvatar == null
-                              ? Text(viewer.userName[0].toUpperCase())
-                              : null,
+                        leading: _buildStatusAvatar(
+                          avatarUrl: viewer.userAvatar,
+                          name: viewer.userName,
+                          radius: 20,
                         ),
                         title: Text(
                           viewer.userName,
@@ -758,14 +786,10 @@ class _CommentsDialogState extends ConsumerState<_CommentsDialog> {
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              CircleAvatar(
+                              _buildStatusAvatar(
+                                avatarUrl: comment.user['avatar_url'],
+                                name: comment.user['name'] ?? 'Unknown',
                                 radius: 18,
-                                backgroundImage: comment.user['avatar_url'] != null
-                                    ? CachedNetworkImageProvider(comment.user['avatar_url'])
-                                    : null,
-                                child: comment.user['avatar_url'] == null
-                                    ? Text(comment.user['name'][0].toUpperCase())
-                                    : null,
                               ),
                               const SizedBox(width: 12),
                               Expanded(

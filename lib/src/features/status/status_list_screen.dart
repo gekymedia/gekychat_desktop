@@ -244,6 +244,19 @@ class StatusListScreen extends ConsumerWidget {
                                 ? CachedNetworkImage(
                                     imageUrl: status.userAvatar!,
                                     fit: BoxFit.cover,
+                                    errorWidget: (context, url, error) => Container(
+                                      color: Colors.teal,
+                                      child: Center(
+                                        child: Text(
+                                          status.userName[0].toUpperCase(),
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 20,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
                                   )
                                 : Container(
                                     color: Colors.teal,

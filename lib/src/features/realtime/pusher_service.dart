@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:pusher_client/pusher_client.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -8,8 +10,10 @@ import 'package:dio/dio.dart';
 class PusherService {
   PusherClient? _pusher;
   bool _isConnected = false;
+  bool _usePolling = false; // Fallback to polling on Windows
   final Map<String, Channel> _subscribedChannels = {};
   final Map<String, Function(dynamic)> _listeners = {};
+  final Map<String, Timer> _pollingTimers = {}; // Polling timers for Windows fallback
   late final Dio _dio;
 
   late final String _pusherKey;
@@ -21,6 +25,11 @@ class PusherService {
   PusherService() {
     _loadConfiguration();
     _initializeDio();
+    // Detect Windows platform - Pusher doesn't work on Windows
+    _usePolling = Platform.isWindows;
+    if (_usePolling) {
+      debugPrint('⚠️ Windows detected - using polling fallback instead of Pusher');
+    }
   }
 
   void _initializeDio() {
@@ -52,8 +61,15 @@ class PusherService {
   }
 
   Future<void> connect() async {
-    if (_isConnected && _pusher != null) {
-      debugPrint('🔌 Already connected to Pusher');
+    if (_isConnected && (_pusher != null || _usePolling)) {
+      debugPrint('🔌 Already connected');
+      return;
+    }
+
+    // On Windows, skip Pusher and use polling
+    if (_usePolling) {
+      debugPrint('🔄 Using polling fallback (Windows platform)');
+      _isConnected = true;
       return;
     }
 
@@ -98,8 +114,16 @@ class PusherService {
       );
 
       _setupEventHandlers();
-    } catch (e) {
-      debugPrint('❌ Error connecting to Pusher: $e');
+    } catch (e, stackTrace) {
+      // If MissingPluginException on Windows, fall back to polling
+      if (e.toString().contains('MissingPluginException') || Platform.isWindows) {
+        debugPrint('⚠️ Pusher not available, falling back to polling: $e');
+        _usePolling = true;
+        _isConnected = true;
+      } else {
+        debugPrint('❌ Error connecting to Pusher: $e');
+        debugPrint('Stack trace: $stackTrace');
+      }
     }
   }
 
@@ -171,7 +195,7 @@ class PusherService {
   }
 
   void listen(String channel, String event, Function(dynamic) callback) {
-    if (!_isConnected || _pusher == null) {
+    if (!_isConnected) {
       debugPrint('⚠️ Not connected yet');
       return;
     }
@@ -180,40 +204,37 @@ class PusherService {
         ? channel 
         : 'private-$channel';
     
+    // If using polling fallback, set up polling instead of Pusher
+    if (_usePolling) {
+      _setupPolling(channelName, event, callback);
+      return;
+    }
+
+    if (_pusher == null) {
+      debugPrint('⚠️ Pusher not initialized');
+      return;
+    }
+
     final normalizedEvent = event.startsWith('.') ? event : '.$event';
     
     Channel? pusherChannel = _subscribedChannels[channelName];
     if (pusherChannel == null) {
       debugPrint('⚠️ Channel $channelName not subscribed. Subscribing now...');
-      pusherChannel = _pusher!.subscribe(channelName);
-      _subscribedChannels[channelName] = pusherChannel;
+      try {
+        pusherChannel = _pusher!.subscribe(channelName);
+        _subscribedChannels[channelName] = pusherChannel;
+      } catch (e) {
+        debugPrint('❌ Error subscribing to channel: $e');
+        // Fall back to polling if Pusher fails
+        _usePolling = true;
+        _setupPolling(channelName, event, callback);
+        return;
+      }
     }
 
-    pusherChannel.bind(normalizedEvent, (pusherEvent) {
-      debugPrint('👂 Received event $normalizedEvent on $channelName');
-      try {
-        dynamic data = pusherEvent?.data;
-        if (data is String) {
-          try {
-            data = jsonDecode(data);
-          } catch (e) {
-            debugPrint('⚠️ Could not parse event data as JSON: $e');
-          }
-        }
-        callback(data);
-        final channelCallback = _listeners[channelName];
-        if (channelCallback != null) {
-          channelCallback(data);
-        }
-      } catch (e) {
-        debugPrint('❌ Error handling event $normalizedEvent: $e');
-      }
-    });
-    
-    if (normalizedEvent.startsWith('.')) {
-      final eventWithoutDot = normalizedEvent.substring(1);
-      pusherChannel.bind(eventWithoutDot, (pusherEvent) {
-        debugPrint('👂 Received event $eventWithoutDot on $channelName (compat mode)');
+    try {
+      pusherChannel.bind(normalizedEvent, (pusherEvent) {
+        debugPrint('👂 Received event $normalizedEvent on $channelName');
         try {
           dynamic data = pusherEvent?.data;
           if (data is String) {
@@ -224,21 +245,164 @@ class PusherService {
             }
           }
           callback(data);
+          final channelCallback = _listeners[channelName];
+          if (channelCallback != null) {
+            channelCallback(data);
+          }
         } catch (e) {
-          debugPrint('❌ Error handling event $eventWithoutDot: $e');
+          debugPrint('❌ Error handling event $normalizedEvent: $e');
         }
       });
+      
+      if (normalizedEvent.startsWith('.')) {
+        final eventWithoutDot = normalizedEvent.substring(1);
+        pusherChannel.bind(eventWithoutDot, (pusherEvent) {
+          debugPrint('👂 Received event $eventWithoutDot on $channelName (compat mode)');
+          try {
+            dynamic data = pusherEvent?.data;
+            if (data is String) {
+              try {
+                data = jsonDecode(data);
+              } catch (e) {
+                debugPrint('⚠️ Could not parse event data as JSON: $e');
+              }
+            }
+            callback(data);
+          } catch (e) {
+            debugPrint('❌ Error handling event $eventWithoutDot: $e');
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error binding to event: $e');
+      // Fall back to polling
+      _usePolling = true;
+      _setupPolling(channelName, event, callback);
     }
   }
 
-  Future<void> unsubscribe(String channel) async {
-    if (_pusher == null) return;
+  /// Set up polling fallback for Windows or when Pusher fails
+  void _setupPolling(String channelName, String event, Function(dynamic) callback) {
+    // Stop existing polling timer for this channel/event combo
+    final timerKey = '$channelName:$event';
+    _pollingTimers[timerKey]?.cancel();
+    
+    debugPrint('🔄 Setting up polling for $channelName:$event');
+    
+    // Store listener
+    _listeners[channelName] = callback;
+    
+    // Extract conversation/group ID from channel name
+    // Format: conversation.123 or group.123
+    final parts = channelName.replaceFirst('private-', '').split('.');
+    if (parts.length < 2) {
+      debugPrint('⚠️ Could not parse channel name for polling: $channelName');
+      return;
+    }
+    
+    final type = parts[0]; // 'conversation' or 'group'
+    final id = int.tryParse(parts[1]);
+    if (id == null) {
+      debugPrint('⚠️ Could not parse ID from channel: $channelName');
+      return;
+    }
+    
+    // Start polling based on event type
+    if (event == 'MessageSent') {
+      _startMessagePolling(type, id, callback);
+    } else if (event == 'UserTyping') {
+      _startTypingPolling(type, id, callback);
+    }
+  }
 
+  /// Poll for new messages
+  void _startMessagePolling(String type, int id, Function(dynamic) callback) async {
+    final timerKey = '${type}.$id:MessageSent';
+    int? lastMessageId;
+    
+    // Get API base URL
+    final apiBaseUrl = dotenv.env['API_BASE_URL'] ?? 'http://127.0.0.1:8000/api/v1';
+    final baseUrl = apiBaseUrl.replaceAll(RegExp(r'/api/v1/?$'), '');
+    
+    _pollingTimers[timerKey] = Timer.periodic(const Duration(seconds: 3), (timer) async {
+      try {
+        final token = await _getAuthToken();
+        if (token == null) return;
+        
+        final endpoint = type == 'conversation' 
+            ? '$baseUrl/api/v1/conversations/$id/messages'
+            : '$baseUrl/api/v1/groups/$id/messages';
+        
+        final response = await _dio.get(
+          endpoint,
+          queryParameters: lastMessageId != null 
+              ? {'after': lastMessageId.toString(), 'limit': 10}
+              : {'limit': 1},
+          options: Options(
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Accept': 'application/json',
+            },
+          ),
+        );
+        
+        if (response.data != null) {
+          final data = response.data;
+          final messages = data['data'] ?? data;
+          
+          if (messages is List && messages.isNotEmpty) {
+            // Process new messages
+            for (final msgData in messages) {
+              final msgId = msgData['id'];
+              final msgIdInt = msgId is int ? msgId : (msgId is num ? msgId.toInt() : null);
+              if (msgIdInt != null) {
+                final currentLastId = lastMessageId ?? 0;
+                if (msgIdInt > currentLastId) {
+                  lastMessageId = msgIdInt;
+                  callback(msgData);
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('⚠️ Polling error: $e');
+      }
+    });
+  }
+
+  /// Poll for typing indicators
+  void _startTypingPolling(String type, int id, Function(dynamic) callback) {
+    // Typing indicators are less critical, poll less frequently
+    final timerKey = '${type}.$id:UserTyping';
+    _pollingTimers[timerKey] = Timer.periodic(const Duration(seconds: 5), (timer) async {
+      // Typing indicators are typically handled client-side
+      // This is a placeholder - typing polling can be implemented if needed
+    });
+  }
+
+  Future<void> unsubscribe(String channel) async {
     final channelName = channel.startsWith('private-') || channel.startsWith('public-') 
         ? channel 
         : 'private-$channel';
 
-    await _pusher!.unsubscribe(channelName);
+    // Stop polling timers for this channel
+    _pollingTimers.removeWhere((key, timer) {
+      if (key.startsWith(channelName)) {
+        timer.cancel();
+        return true;
+      }
+      return false;
+    });
+
+    if (_pusher != null) {
+      try {
+        await _pusher!.unsubscribe(channelName);
+      } catch (e) {
+        debugPrint('⚠️ Error unsubscribing from Pusher: $e');
+      }
+    }
+    
     _subscribedChannels.remove(channelName);
     _listeners.remove(channelName);
 
@@ -246,15 +410,26 @@ class PusherService {
   }
 
   Future<void> disconnect() async {
-    if (_pusher == null) return;
+    // Cancel all polling timers
+    for (final timer in _pollingTimers.values) {
+      timer.cancel();
+    }
+    _pollingTimers.clear();
 
-    await _pusher!.disconnect();
-    _pusher = null;
+    if (_pusher != null) {
+      try {
+        await _pusher!.disconnect();
+      } catch (e) {
+        debugPrint('⚠️ Error disconnecting from Pusher: $e');
+      }
+      _pusher = null;
+    }
+    
     _isConnected = false;
     _subscribedChannels.clear();
     _listeners.clear();
 
-    debugPrint('🔌 Disconnected from Pusher');
+    debugPrint('🔌 Disconnected');
   }
 
   Future<String?> _getAuthToken() async {

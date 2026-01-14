@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:go_router/go_router.dart';
 import '../../core/providers.dart';
 import '../../theme/app_theme.dart';
 import '../chats/models.dart';
+import '../chats/chat_repo.dart';
 import 'contacts_repository.dart';
 
 class ContactInfoScreen extends ConsumerStatefulWidget {
@@ -204,9 +206,26 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
                     leading: const Icon(Icons.message),
                     title: const Text('Message'),
                     trailing: const Icon(Icons.chevron_right),
-                    onTap: () {
-                      Navigator.pop(context);
-                      // Navigate to chat
+                    onTap: () async {
+                      try {
+                        final chatRepo = ref.read(chatRepositoryProvider);
+                        // Start or get existing conversation
+                        final conversationId = await chatRepo.startConversation(widget.user.id);
+                        
+                        if (mounted) {
+                          Navigator.pop(context); // Close contact info
+                          // Navigate to chats
+                          context.go('/chats');
+                          // Select the conversation programmatically
+                          ref.read(selectedConversationProvider.notifier).selectConversation(conversationId);
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Failed to start conversation: $e')),
+                          );
+                        }
+                      }
                     },
                   ),
                   ListTile(

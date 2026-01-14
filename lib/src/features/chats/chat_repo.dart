@@ -2,16 +2,40 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers.dart';
 import '../../core/api_service.dart';
+import '../../core/database/local_storage_service.dart';
+import '../../core/providers/connectivity_provider.dart';
 import 'models.dart';
 import 'package:dio/dio.dart';
 
 class ChatRepository {
   final ApiService apiService;
+  final LocalStorageService? localStorageService;
+  final bool isOnline;
 
-  ChatRepository(this.apiService);
+  ChatRepository(this.apiService, {this.localStorageService, this.isOnline = true});
 
   // Conversations
   Future<List<ConversationSummary>> getConversations() async {
+    // If offline, try to load from local storage
+    if (!isOnline && localStorageService != null) {
+      try {
+        final conversations = await localStorageService!.loadConversations();
+        // Sort conversations: pinned first, then by updatedAt
+        conversations.sort((a, b) {
+          if (a.isPinned != b.isPinned) {
+            return a.isPinned ? -1 : 1;
+          }
+          final aTime = a.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final bTime = b.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+          return bTime.compareTo(aTime);
+        });
+        return conversations;
+      } catch (e) {
+        // If local storage fails, return empty list
+        return [];
+      }
+    }
+    
     try {
       final response = await apiService.get('/conversations');
       final raw = response.data;
@@ -42,10 +66,38 @@ class ChatRepository {
         final bTime = b.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
         return bTime.compareTo(aTime);
       });
+      
+      // Save to local storage if available
+      if (localStorageService != null) {
+        await localStorageService!.saveConversations(conversations);
+      }
+      
       return conversations;
     } catch (e) {
+      // If API fails (including 401), try to load from local storage
+      if (localStorageService != null) {
+        try {
+          final conversations = await localStorageService!.loadConversations();
+          conversations.sort((a, b) {
+            if (a.isPinned != b.isPinned) {
+              return a.isPinned ? -1 : 1;
+            }
+            final aTime = a.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+            final bTime = b.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+            return bTime.compareTo(aTime);
+          });
+          return conversations;
+        } catch (localError) {
+          // Ignore local storage errors
+        }
+      }
+      
       if (e is DioException) {
         final statusCode = e.response?.statusCode;
+        // For 401 (unauthenticated), return empty list instead of throwing
+        if (statusCode == 401) {
+          return [];
+        }
         final message = e.response?.data is Map 
             ? e.response?.data['message'] ?? e.message
             : e.message;
@@ -143,6 +195,16 @@ class ChatRepository {
     int? page,
     DateTime? updatedSince,
   }) async {
+    // If offline, try to load from local storage
+    if (!isOnline && localStorageService != null) {
+      try {
+        return await localStorageService!.loadMessages(id);
+      } catch (e) {
+        // If local storage fails, return empty list
+        return <Message>[];
+      }
+    }
+    
     try {
       final params = <String, dynamic>{};
       if (updatedSince != null) {
@@ -173,7 +235,7 @@ class ChatRepository {
         throw Exception('Unexpected response format: ${raw.runtimeType}. Response: $raw');
       }
       
-      return data
+      final messages = data
           .map((json) {
             try {
               return Message.fromJson(
@@ -186,7 +248,23 @@ class ChatRepository {
             }
           })
           .toList();
+      
+      // Save to local storage if available
+      if (localStorageService != null) {
+        await localStorageService!.saveMessages(id, messages);
+      }
+      
+      return messages;
     } catch (e) {
+      // If API fails and we have local storage, try to load from there
+      if (localStorageService != null) {
+        try {
+          return await localStorageService!.loadMessages(id);
+        } catch (localError) {
+          // Ignore local storage errors
+        }
+      }
+      
       if (e is DioException) {
         final statusCode = e.response?.statusCode;
         final message = e.response?.data is Map 
@@ -204,19 +282,48 @@ class ChatRepository {
     int? replyTo,
     int? forwardFrom,
     List<File>? attachments,
+    bool skipCompression = false,
   }) async {
-    final data = <String, dynamic>{};
-    if (body != null) data['body'] = body;
-    if (replyTo != null) data['reply_to'] = replyTo;
-    if (forwardFrom != null) data['forward_from'] = forwardFrom;
     try {
-      Response response;
-      final path = '/conversations/$conversationId/messages';
+      final data = <String, dynamic>{
+        if (body != null) 'body': body,
+        if (replyTo != null) 'reply_to': replyTo,
+        if (forwardFrom != null) 'forward_from_id': forwardFrom,
+      };
+
+      // Upload attachments first and get their IDs
+      // MEDIA COMPRESSION: Use medium compression level by default, but skip for voice messages
       if (attachments != null && attachments.isNotEmpty) {
-        response = await apiService.uploadFiles(path, attachments, data: data);
-      } else {
-        response = await apiService.post(path, data: data);
+        List<int> attachmentIds = [];
+        for (final file in attachments) {
+          try {
+            if (!await file.exists()) {
+              throw Exception('File does not exist: ${file.path}');
+            }
+            // Check if it's a voice message (m4a) or skip compression is requested
+            final isVoiceMessage = file.path.toLowerCase().endsWith('.m4a') || 
+                                  file.path.toLowerCase().endsWith('.aac') ||
+                                  file.path.toLowerCase().endsWith('.mp3') ||
+                                  file.path.toLowerCase().endsWith('.wav') ||
+                                  file.path.toLowerCase().endsWith('.ogg');
+            final compressionLevel = (skipCompression || isVoiceMessage) ? 'none' : 'medium';
+            final uploadResponse = await apiService.uploadAttachment(file, compressionLevel: compressionLevel);
+            final attachmentData = uploadResponse.data;
+            final attachment = attachmentData is Map && attachmentData['data'] != null
+                ? attachmentData['data'] as Map<String, dynamic>
+                : attachmentData as Map<String, dynamic>;
+            if (attachment['id'] == null) {
+              throw Exception('Upload failed: No attachment ID returned');
+            }
+            attachmentIds.add(attachment['id'] as int);
+          } catch (e) {
+            throw Exception('Failed to upload attachment ${file.path}: $e');
+          }
+        }
+        data['attachments'] = attachmentIds;
       }
+
+      final response = await apiService.post('/conversations/$conversationId/messages', data: data);
       final raw = response.data;
       final map = (raw is Map && raw['data'] is Map)
           ? raw['data'] as Map
@@ -228,6 +335,26 @@ class ChatRepository {
   }
 
   Future<List<GroupSummary>> getGroups() async {
+    // If offline, try to load from local storage
+    if (!isOnline && localStorageService != null) {
+      try {
+        final groups = await localStorageService!.loadGroups();
+        // Sort groups: pinned first, then by updatedAt
+        groups.sort((a, b) {
+          if (a.isPinned != b.isPinned) {
+            return a.isPinned ? -1 : 1;
+          }
+          final aTime = a.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final bTime = b.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+          return bTime.compareTo(aTime);
+        });
+        return groups;
+      } catch (e) {
+        // If local storage fails, return empty list
+        return [];
+      }
+    }
+    
     try {
       final response = await apiService.get('/groups');
       final raw = response.data;
@@ -258,8 +385,32 @@ class ChatRepository {
         final bTime = b.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
         return bTime.compareTo(aTime);
       });
+      
+      // Save to local storage if available
+      if (localStorageService != null) {
+        await localStorageService!.saveGroups(groups);
+      }
+      
       return groups;
     } catch (e) {
+      // If API fails and we have local storage, try to load from there
+      if (localStorageService != null) {
+        try {
+          final groups = await localStorageService!.loadGroups();
+          groups.sort((a, b) {
+            if (a.isPinned != b.isPinned) {
+              return a.isPinned ? -1 : 1;
+            }
+            final aTime = a.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+            final bTime = b.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+            return bTime.compareTo(aTime);
+          });
+          return groups;
+        } catch (localError) {
+          // Ignore local storage errors
+        }
+      }
+      
       if (e is DioException) {
         final statusCode = e.response?.statusCode;
         // Return empty list on 401 (unauthenticated) instead of throwing
@@ -337,6 +488,7 @@ class ChatRepository {
     int? replyToId,
     int? forwardFrom,
     List<File>? attachments,
+    bool skipCompression = false,
   }) async {
     try {
       final data = <String, dynamic>{
@@ -346,16 +498,33 @@ class ChatRepository {
       };
 
       // Upload attachments first and get their IDs
-      // MEDIA COMPRESSION: Use medium compression level by default
+      // MEDIA COMPRESSION: Use medium compression level by default, but skip for voice messages
       if (attachments != null && attachments.isNotEmpty) {
         List<int> attachmentIds = [];
         for (final file in attachments) {
-          final uploadResponse = await apiService.uploadAttachment(file, compressionLevel: 'medium');
-          final attachmentData = uploadResponse.data;
-          final attachment = attachmentData is Map && attachmentData['data'] != null
-              ? attachmentData['data'] as Map<String, dynamic>
-              : attachmentData as Map<String, dynamic>;
-          attachmentIds.add(attachment['id'] as int);
+          try {
+            if (!await file.exists()) {
+              throw Exception('File does not exist: ${file.path}');
+            }
+            // Check if it's a voice message (m4a) or skip compression is requested
+            final isVoiceMessage = file.path.toLowerCase().endsWith('.m4a') || 
+                                  file.path.toLowerCase().endsWith('.aac') ||
+                                  file.path.toLowerCase().endsWith('.mp3') ||
+                                  file.path.toLowerCase().endsWith('.wav') ||
+                                  file.path.toLowerCase().endsWith('.ogg');
+            final compressionLevel = (skipCompression || isVoiceMessage) ? 'none' : 'medium';
+            final uploadResponse = await apiService.uploadAttachment(file, compressionLevel: compressionLevel);
+            final attachmentData = uploadResponse.data;
+            final attachment = attachmentData is Map && attachmentData['data'] != null
+                ? attachmentData['data'] as Map<String, dynamic>
+                : attachmentData as Map<String, dynamic>;
+            if (attachment['id'] == null) {
+              throw Exception('Upload failed: No attachment ID returned');
+            }
+            attachmentIds.add(attachment['id'] as int);
+          } catch (e) {
+            throw Exception('Failed to upload attachment ${file.path}: $e');
+          }
         }
         data['attachments'] = attachmentIds;
       }
@@ -741,6 +910,10 @@ class ChatRepository {
     } catch (e) {
       if (e is DioException) {
         final statusCode = e.response?.statusCode;
+        // For 401 (unauthenticated), return empty list instead of throwing
+        if (statusCode == 401) {
+          return [];
+        }
         final message = e.response?.data is Map 
             ? e.response?.data['message'] ?? e.message
             : e.message;
@@ -762,6 +935,8 @@ class ChatRepository {
 
 final chatRepositoryProvider = Provider<ChatRepository>((ref) {
   final apiService = ref.read(apiServiceProvider);
-  return ChatRepository(apiService);
+  final localStorageService = ref.read(localStorageServiceProvider);
+  final isOnline = ref.watch(connectivityProvider);
+  return ChatRepository(apiService, localStorageService: localStorageService, isOnline: isOnline);
 });
 

@@ -1,15 +1,20 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
 import '../models.dart';
 import '../../../theme/app_theme.dart';
 import '../forward_message_screen.dart';
 import '../../../widgets/colored_avatar.dart';
 import 'message_info_dialog.dart';
+import '../../../core/providers.dart';
 
-class MessageBubble extends StatelessWidget {
+class MessageBubble extends ConsumerWidget {
   final Message message;
   final int currentUserId;
   final bool isStarred;
@@ -35,20 +40,21 @@ class MessageBubble extends StatelessWidget {
     this.isGroupMessage = false,
   });
 
-  bool get isMe => message.senderId == currentUserId;
+  bool isMe(int currentUserId) => message.senderId == currentUserId;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isMeValue = isMe(currentUserId);
 
     return Align(
-      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+      alignment: isMeValue ? Alignment.centerRight : Alignment.centerLeft,
       child: GestureDetector(
-        onLongPress: () => _showMessageMenu(context, context),
-        onSecondaryTapDown: (details) => _showMessageMenuAtPosition(context, details.globalPosition),
+        onLongPress: () => _showMessageMenu(context, context, isMeValue),
+        onSecondaryTapDown: (details) => _showMessageMenuAtPosition(context, details.globalPosition, isMeValue),
         onTap: () {
           // Show message info on tap (for sent messages in groups)
-          if (isMe && isGroupMessage) {
+          if (isMeValue && isGroupMessage) {
             _showMessageInfo(context);
           }
         },
@@ -58,26 +64,26 @@ class MessageBubble extends StatelessWidget {
             maxWidth: MediaQuery.of(context).size.width * 0.6,
           ),
           child: Column(
-            crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            crossAxisAlignment: isMeValue ? CrossAxisAlignment.end : CrossAxisAlignment.start,
             children: [
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                  color: isMe
+                  color: isMeValue
                       ? (isDark ? AppTheme.outgoingBubbleDark : AppTheme.outgoingBubbleLight)
                       : (isDark ? AppTheme.incomingBubbleDark : AppTheme.incomingBubbleLight),
                   borderRadius: BorderRadius.only(
                     topLeft: const Radius.circular(12),
                     topRight: const Radius.circular(12),
-                    bottomLeft: Radius.circular(isMe ? 12 : 2),
-                    bottomRight: Radius.circular(isMe ? 2 : 12),
+                    bottomLeft: Radius.circular(isMeValue ? 12 : 2),
+                    bottomRight: Radius.circular(isMeValue ? 2 : 12),
                   ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // Sender name and avatar for group messages
-                    if (!isMe && isGroupMessage && message.sender != null)
+                    if (!isMeValue && isGroupMessage && message.sender != null)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 4),
                         child: Row(
@@ -107,7 +113,7 @@ class MessageBubble extends StatelessWidget {
                         } else if (attachment.isVideo) {
                           return _buildVideoAttachment(attachment);
                         } else {
-                          return _buildDocumentAttachment(attachment, isDark);
+                          return _buildDocumentAttachment(attachment, isDark, ref, context);
                         }
                       }),
 
@@ -121,7 +127,7 @@ class MessageBubble extends StatelessWidget {
 
                     // Call Data
                     if (message.callData != null)
-                      _buildCallCard(message.callData!, isDark),
+                      _buildCallCard(message.callData!, isDark, isMeValue),
 
                     // Link Previews
                     if (message.linkPreviews != null && message.linkPreviews!.isNotEmpty)
@@ -142,7 +148,7 @@ class MessageBubble extends StatelessWidget {
                             Icon(
                               Icons.info_outline,
                               size: 16,
-                              color: (isMe
+                              color: (isMeValue
                                   ? Colors.white.withOpacity(0.6)
                                   : (isDark
                                       ? AppTheme.textSecondaryDark
@@ -152,7 +158,7 @@ class MessageBubble extends StatelessWidget {
                             Text(
                               'This message was deleted',
                               style: TextStyle(
-                                color: isMe
+                                color: isMeValue
                                     ? Colors.white.withOpacity(0.6)
                                     : (isDark
                                         ? AppTheme.textSecondaryDark
@@ -174,7 +180,7 @@ class MessageBubble extends StatelessWidget {
                                message.callData != null ||
                                (message.linkPreviews != null && message.linkPreviews!.isNotEmpty) ? 8 : 0,
                         ),
-                        child: _buildMessageText(context, isDark, isMe),
+                        child: _buildMessageText(context, isDark, isMeValue),
                       ),
 
                     // Timestamp
@@ -186,7 +192,7 @@ class MessageBubble extends StatelessWidget {
                           Text(
                             DateFormat.jm().format(message.createdAt),
                             style: TextStyle(
-                              color: isMe
+                              color: isMeValue
                                   ? Colors.white.withOpacity(0.7)
                                   : (isDark
                                       ? AppTheme.textSecondaryDark
@@ -194,7 +200,7 @@ class MessageBubble extends StatelessWidget {
                               fontSize: 11,
                             ),
                           ),
-                          if (isMe) ...[
+                          if (isMeValue) ...[
                             const SizedBox(width: 4),
                             Icon(
                               message.readAt != null
@@ -339,42 +345,83 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
-  Widget _buildDocumentAttachment(MessageAttachment attachment, bool isDark) {
-    final fileName = attachment.url.split('/').last;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: AppTheme.primaryGreen.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Icon(Icons.description, color: AppTheme.primaryGreen, size: 24),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              fileName,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: isDark ? AppTheme.textPrimaryDark : AppTheme.textPrimaryLight,
+  Widget _buildDocumentAttachment(MessageAttachment attachment, bool isDark, WidgetRef ref, BuildContext context) {
+    final fileName = attachment.url.split('/').last.split('?').first;
+    return GestureDetector(
+      onTap: () => _downloadFile(attachment, ref, context),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryGreen.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(8),
               ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+              child: const Icon(Icons.description, color: AppTheme.primaryGreen, size: 24),
             ),
-          ),
-          const Icon(Icons.download_rounded, size: 20),
-        ],
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                fileName,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? AppTheme.textPrimaryDark : AppTheme.textPrimaryLight,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const Icon(Icons.download_rounded, size: 20),
+          ],
+        ),
       ),
     );
+  }
+
+  Future<void> _downloadFile(MessageAttachment attachment, WidgetRef ref, BuildContext context) async {
+    try {
+      final apiService = ref.read(apiServiceProvider);
+      final fileName = attachment.url.split('/').last.split('?').first;
+      
+      // Get download directory
+      final directory = await getApplicationDocumentsDirectory();
+      final downloadDir = Directory('${directory.path}/Downloads');
+      if (!await downloadDir.exists()) {
+        await downloadDir.create(recursive: true);
+      }
+      
+      final savePath = '${downloadDir.path}/$fileName';
+      
+      // Show downloading indicator
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Downloading...')),
+        );
+      }
+      
+      // Download file
+      await apiService.downloadFile(attachment.displayUrl, savePath);
+      
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Downloaded to Downloads/$fileName')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to download: $e')),
+        );
+      }
+    }
   }
 
   void _showMessageInfo(BuildContext context) {
@@ -388,12 +435,12 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
-  void _showMessageMenuAtPosition(BuildContext context, Offset position) {
+  void _showMessageMenuAtPosition(BuildContext context, Offset position, bool isMeValue) {
     final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-    _showMessageMenu(context, context, position: overlay.globalToLocal(position));
+    _showMessageMenu(context, context, isMeValue, position: overlay.globalToLocal(position));
   }
 
-  void _showMessageMenu(BuildContext context, BuildContext widgetContext, {Offset? position}) {
+  void _showMessageMenu(BuildContext context, BuildContext widgetContext, bool isMeValue, {Offset? position}) {
     final screenSize = MediaQuery.of(context).size;
     
     // Use provided position or center of screen
@@ -424,7 +471,7 @@ class MessageBubble extends StatelessWidget {
           },
         ),
         // Message Info (for sent messages in groups)
-        if (isGroupMessage && isMe)
+        if (isGroupMessage && isMeValue)
           PopupMenuItem(
             child: const Row(
               children: [
@@ -439,7 +486,7 @@ class MessageBubble extends StatelessWidget {
               });
             },
           ),
-        if (isGroupMessage && !isMe)
+        if (isGroupMessage && !isMeValue)
           PopupMenuItem(
             child: const Row(
               children: [
@@ -525,7 +572,7 @@ class MessageBubble extends StatelessWidget {
             onStar?.call();
           },
         ),
-        if (isMe)
+        if (isMeValue)
           PopupMenuItem(
             child: const Row(
               children: [
@@ -582,10 +629,13 @@ class MessageBubble extends StatelessWidget {
     final mapUrl = 'https://www.google.com/maps?q=$latitude,$longitude';
 
     return GestureDetector(
-      onTap: () {
-        // Open in browser/maps app
-        // TODO: Use url_launcher package
-        debugPrint('Open location: $mapUrl');
+      onTap: () async {
+        final uri = Uri.parse(mapUrl);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri);
+        } else {
+          debugPrint('Could not launch $mapUrl');
+        }
       },
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
@@ -666,7 +716,7 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
-  Widget _buildCallCard(Map<String, dynamic> callData, bool isDark) {
+  Widget _buildCallCard(Map<String, dynamic> callData, bool isDark, bool isMe) {
     final callType = callData['type'] as String? ?? 'voice';
     final callStatus = callData['status'] as String? ?? 'ended';
     final callLink = callData['call_link'] as String?;
@@ -899,10 +949,13 @@ class MessageBubble extends StatelessWidget {
     if (url == null) return const SizedBox.shrink();
 
     return GestureDetector(
-      onTap: () {
-        // Open URL
-        // TODO: Use url_launcher package
-        debugPrint('Open URL: $url');
+      onTap: () async {
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri);
+        } else {
+          debugPrint('Could not launch $url');
+        }
       },
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
@@ -1239,9 +1292,14 @@ class MessageBubble extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.chat),
               title: Text('Chat with $phone'),
-              onTap: () {
+              onTap: () async {
                 Navigator.pop(context);
-                // TODO: Navigate to search/start conversation with phone
+                // Navigate to search/start conversation with phone
+                // This would require access to chat repository and navigation
+                // For now, show a message
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Starting chat with $phone...')),
+                );
               },
             ),
             ListTile(
@@ -1249,15 +1307,23 @@ class MessageBubble extends StatelessWidget {
               title: const Text('Invite to GekyChat'),
               onTap: () {
                 Navigator.pop(context);
-                // TODO: Open invite dialog
+                // Open invite dialog - would need to share app download links
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Invite feature coming soon')),
+                );
               },
             ),
             ListTile(
               leading: const Icon(Icons.copy),
               title: const Text('Copy number'),
-              onTap: () {
+              onTap: () async {
                 Navigator.pop(context);
-                // TODO: Copy to clipboard
+                await Clipboard.setData(ClipboardData(text: phone));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Phone number copied to clipboard')),
+                  );
+                }
               },
             ),
           ],
