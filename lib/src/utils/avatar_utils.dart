@@ -81,6 +81,12 @@ class AvatarUtils {
   /// Get initials from a name
   static String getInitials(String name) {
     if (name.trim().isEmpty) return '?';
+
+    final firstChar = name.trim()[0];
+    // If first character is not an alphabet, return placeholder indicator
+    if (!RegExp(r'^[a-zA-Z]').hasMatch(firstChar)) {
+      return '👤'; // Use a user icon if the first character is not an alphabet
+    }
     
     final parts = name.trim().split(' ').where((p) => p.isNotEmpty).toList();
     if (parts.length >= 2) {

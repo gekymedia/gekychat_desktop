@@ -240,6 +240,8 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
                       ),
                       decoration: const InputDecoration(
                         border: InputBorder.none,
+                        filled: true,
+                        fillColor: Colors.transparent,
                         hintText: 'Type a status...',
                         hintStyle: TextStyle(color: Colors.white70),
                         contentPadding: EdgeInsets.all(24),

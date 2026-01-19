@@ -11,6 +11,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart' show Geolocator, LocationPermission, LocationAccuracy, Position;
 import 'package:path_provider/path_provider.dart';
 import 'package:dio/dio.dart';
+import 'package:video_player/video_player.dart';
 import '../chat_repo.dart';
 import '../models.dart';
 import 'message_bubble.dart';
@@ -32,6 +33,8 @@ import '../../quick_replies/quick_replies_repository.dart';
 import '../../../theme/app_theme.dart';
 import '../../calls/call_screen.dart';
 import '../../calls/providers.dart';
+import 'text_formatting_toolbar.dart';
+import '../../../utils/text_formatting.dart';
 
 class ChatView extends ConsumerStatefulWidget {
   final int conversationId;
@@ -58,6 +61,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
   final List<File> _attachments = [];
   bool _isLoading = false;
   bool _isSending = false;
+  double _uploadProgress = 0.0;
   bool _isTyping = false;
   bool _showEmojiPicker = false;
   int? _currentUserId;
@@ -80,6 +84,9 @@ class _ChatViewState extends ConsumerState<ChatView> {
   
   // Drag and drop
   bool _isDragging = false;
+  
+  // Text formatting
+  bool _showFormattingToolbar = false;
 
   @override
   void initState() {
@@ -89,6 +96,8 @@ class _ChatViewState extends ConsumerState<ChatView> {
     _setupRealtimeListener();
     _loadQuickReplies();
     _messageController.addListener(_onMessageChanged);
+    // Listen for selection changes
+    _messageController.addListener(_checkTextSelection);
     // Ensure recording state is false on init
     _isRecording = false;
   }
@@ -413,6 +422,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
 
     setState(() {
       _isSending = true;
+      _uploadProgress = 0.0;
     });
 
     final isOnline = ref.read(connectivityProvider);
@@ -437,7 +447,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
           body: message,
           createdAt: DateTime.now(),
           replyToId: _replyingToId,
-          attachments: _attachments.map((file) {
+          attachments: _attachments.map<MessageAttachment>((file) {
             // Create temporary attachment objects
             return MessageAttachment(
               id: 0,
@@ -445,6 +455,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
               mimeType: 'application/octet-stream',
               isImage: false,
               isVideo: false,
+              isAudio: false,
               isDocument: true,
             );
           }).toList(),
@@ -476,16 +487,44 @@ class _ChatViewState extends ConsumerState<ChatView> {
           body: message.isEmpty ? null : message,
           replyTo: _replyingToId,
           attachments: _attachments.isNotEmpty ? _attachments : null,
+          onProgress: (progress) {
+            if (mounted) {
+              setState(() {
+                _uploadProgress = progress;
+              });
+            }
+          },
         );
         
-        setState(() {
-          _messages.add(newMessage);
-          _messageController.clear();
-          _attachments.clear();
-          _replyingToId = null;
-          _replyingToMessage = null;
-        });
-        _scrollToBottom();
+        // Check if this is an AI chat (bot phone number is 0000000000)
+        final isAiChat = widget.otherUser?.phone == '0000000000' || 
+                         widget.otherUser?.phone == '+2330000000000';
+        
+        if (isAiChat) {
+          // For AI chat, just add the new message and show typing indicator instead of reloading
+          setState(() {
+            _messages.add(newMessage);
+            _isTyping = true; // Show typing indicator for AI
+            _messageController.clear();
+            _attachments.clear();
+            _replyingToId = null;
+            _replyingToMessage = null;
+          });
+          _scrollToBottom();
+          // Show typing indicator - actual AI response will come via Pusher/WebSocket
+          // Don't reload all messages, just wait for new message to arrive via real-time updates
+          // The Pusher listener will handle adding the AI response to the messages list
+        } else {
+          // For regular chats, add message and scroll
+          setState(() {
+            _messages.add(newMessage);
+            _messageController.clear();
+            _attachments.clear();
+            _replyingToId = null;
+            _replyingToMessage = null;
+          });
+          _scrollToBottom();
+        }
       }
     } catch (e) {
       debugPrint('Error sending message: $e');
@@ -509,11 +548,124 @@ class _ChatViewState extends ConsumerState<ChatView> {
     }
   }
 
-  Future<void> _pickFiles() async {
+  Future<void> _pickPhotoOrVideo() async {
     final result = await FilePicker.platform.pickFiles(
       allowMultiple: true,
       type: FileType.custom,
-      allowedExtensions: ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'doc', 'docx', 'txt', 'zip', 'rar'],
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'mp4', 'mov', 'avi', 'mkv', 'webm'],
+    );
+
+    if (result != null && result.files.isNotEmpty) {
+      final files = result.files
+          .where((f) => f.path != null)
+          .map((f) => File(f.path!))
+          .toList();
+      
+      // Show preview dialog for images and videos
+      final shouldAdd = await _showMediaPreviewDialog(files);
+      
+      if (shouldAdd == true) {
+        setState(() {
+          _attachments.addAll(files);
+        });
+      }
+    }
+  }
+
+  Future<bool?> _showMediaPreviewDialog(List<File> files) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 800, maxHeight: 600),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Preview Media',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: files.length,
+                  itemBuilder: (context, index) {
+                    final file = files[index];
+                    final path = file.path.toLowerCase();
+                    final isImage = path.endsWith('.jpg') || path.endsWith('.jpeg') || 
+                                   path.endsWith('.png') || path.endsWith('.gif') || 
+                                   path.endsWith('.webp') || path.endsWith('.bmp');
+                    final isVideo = path.endsWith('.mp4') || path.endsWith('.mov') || 
+                                   path.endsWith('.avi') || path.endsWith('.mkv') || 
+                                   path.endsWith('.webm');
+                    
+                    return Container(
+                      width: 300,
+                      margin: const EdgeInsets.only(right: 8),
+                      child: isImage
+                          ? Image.file(
+                              file,
+                              fit: BoxFit.contain,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Container(
+                                  color: Colors.grey[300],
+                                  child: const Center(
+                                    child: Icon(Icons.error, size: 48),
+                                  ),
+                                );
+                              },
+                            )
+                          : isVideo
+                              ? VideoPreviewWidget(file: file)
+                              : Container(
+                                  color: Colors.grey[300],
+                                  child: const Center(
+                                    child: Icon(Icons.insert_drive_file, size: 48),
+                                  ),
+                                ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryGreen,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('Add'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickFiles() async {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      type: FileType.any, // Allow all file types like WhatsApp
     );
 
     if (result != null && result.files.isNotEmpty) {
@@ -668,6 +820,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
   Future<void> _sendVoiceMessage(String audioPath) async {
     setState(() {
       _isSending = true;
+      _uploadProgress = 0.0;
     });
 
     try {
@@ -679,6 +832,13 @@ class _ChatViewState extends ConsumerState<ChatView> {
         replyTo: _replyingToId,
         attachments: [File(audioPath)],
         skipCompression: true, // Voice messages shouldn't be compressed
+        onProgress: (progress) {
+          if (mounted) {
+            setState(() {
+              _uploadProgress = progress;
+            });
+          }
+        },
       );
       
       setState(() {
@@ -715,28 +875,50 @@ class _ChatViewState extends ConsumerState<ChatView> {
   }
 
   Widget _buildRecordingWave() {
+    // Enhanced wave animation that simulates voice level modulation
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 300), // Faster animation for more responsive feel
       onEnd: () {
         if (_isRecording && mounted) {
-          setState(() {});
+          setState(() {}); // Restart animation
         }
       },
       builder: (context, value, child) {
+        // Simulate varying voice levels with different patterns
+        final waveCount = 7;
         return Row(
           mainAxisSize: MainAxisSize.min,
-          children: List.generate(5, (index) {
-            final delay = index * 0.1;
+          children: List.generate(waveCount, (index) {
+            final delay = index * 0.15;
             final animationValue = ((value + delay) % 1.0);
-            final height = 4.0 + (animationValue * 20.0);
-            return Container(
+            
+            // Create varying heights to simulate voice modulation
+            // Middle bars are taller (simulating center emphasis)
+            final centerOffset = (index - waveCount / 2).abs() / (waveCount / 2);
+            final baseHeight = 6.0;
+            final maxHeight = 28.0 * (1.0 - centerOffset * 0.4); // Taller in center
+            
+            // Add randomness based on animation phase
+            final modulation = 0.7 + (0.3 * animationValue);
+            final height = baseHeight + (maxHeight * modulation);
+            
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 100),
+              curve: Curves.easeInOut,
               width: 3,
-              height: height,
-              margin: const EdgeInsets.symmetric(horizontal: 2),
+              height: height.clamp(6.0, 32.0),
+              margin: const EdgeInsets.symmetric(horizontal: 1.5),
               decoration: BoxDecoration(
-                color: Colors.red,
+                color: Colors.red.withOpacity(0.9),
                 borderRadius: BorderRadius.circular(2),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.red.withOpacity(0.3),
+                    blurRadius: 2,
+                    spreadRadius: 0.5,
+                  ),
+                ],
               ),
             );
           }),
@@ -1165,8 +1347,14 @@ class _ChatViewState extends ConsumerState<ChatView> {
     try {
       final chatRepo = ref.read(chatRepositoryProvider);
       await chatRepo.reactToMessage(message.id, emoji);
-      // Reload messages to get updated reactions
-      _loadMessages();
+      // Fetch only the updated message instead of reloading all messages
+      final updatedMessage = await chatRepo.getMessage(message.id);
+      setState(() {
+        final index = _messages.indexWhere((m) => m.id == message.id);
+        if (index != -1) {
+          _messages[index] = updatedMessage;
+        }
+      });
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1303,6 +1491,39 @@ class _ChatViewState extends ConsumerState<ChatView> {
         );
       }
     }
+  }
+
+  void _checkTextSelection() {
+    final selection = _messageController.selection;
+    setState(() {
+      _showFormattingToolbar = selection.isValid && !selection.isCollapsed;
+    });
+  }
+
+  void _applyTextFormatting(String formatType) {
+    final selection = _messageController.selection;
+    if (!selection.isValid || selection.isCollapsed) {
+      return;
+    }
+
+    final text = _messageController.text;
+    final newText = TextFormatting.wrapTextWithFormatting(
+      text,
+      selection.start,
+      selection.end,
+      formatType,
+    );
+
+    // Calculate new cursor position
+    final selectedLength = selection.end - selection.start;
+    final markerLength = 1; // Single character marker
+    final newOffset = selection.start + selectedLength + (markerLength * 2);
+
+    setState(() {
+      _messageController.text = newText;
+      _messageController.selection = TextSelection.collapsed(offset: newOffset);
+      _showFormattingToolbar = false;
+    });
   }
 
   Widget _buildAvatar({required String? avatarUrl, required String name, required double radius}) {
@@ -1533,10 +1754,12 @@ class _ChatViewState extends ConsumerState<ChatView> {
                         )
                       : null,
                 ),
-                child: _isLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : _messages.isEmpty
-                        ? Center(
+                child: RefreshIndicator(
+                  onRefresh: _loadMessages,
+                  child: _isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : _messages.isEmpty
+                          ? Center(
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
@@ -1569,6 +1792,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
                               return _buildMessageList()[index];
                             },
                           ),
+                ),
               ),
             ),
           ),
@@ -1732,6 +1956,9 @@ class _ChatViewState extends ConsumerState<ChatView> {
                 icon: Icon(Icons.attach_file, color: isDark ? Colors.white70 : Colors.grey[600]),
                 onSelected: (value) async {
                   switch (value) {
+                    case 'photo_video':
+                      await _pickPhotoOrVideo();
+                      break;
                     case 'file':
                       await _pickFiles();
                       break;
@@ -1744,6 +1971,13 @@ class _ChatViewState extends ConsumerState<ChatView> {
                   }
                 },
                 itemBuilder: (context) => [
+                  const PopupMenuItem(value: 'photo_video', child: Row(
+                    children: [
+                      Icon(Icons.photo_library),
+                      SizedBox(width: 8),
+                      Text('Photo or Video'),
+                    ],
+                  )),
                   const PopupMenuItem(value: 'file', child: Row(
                     children: [
                       Icon(Icons.insert_drive_file),
@@ -1768,36 +2002,69 @@ class _ChatViewState extends ConsumerState<ChatView> {
                 ],
               ),
               Expanded(
-                child: TextField(
-                  controller: _messageController,
-                  minLines: 1,
-                  maxLines: 4,
-                  style: TextStyle(color: isDark ? Colors.white : Colors.black),
-                  decoration: InputDecoration(
-                    hintText: 'Type a message',
-                    hintStyle: TextStyle(color: isDark ? Colors.white38 : Colors.grey[500]),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(24),
-                      borderSide: BorderSide.none,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Formatting toolbar (shown when text is selected)
+                    if (_showFormattingToolbar)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 4),
+                        child: TextFormattingToolbar(
+                          onFormat: (formatType) {
+                            _applyTextFormatting(formatType);
+                          },
+                          onClose: () {
+                            setState(() {
+                              _showFormattingToolbar = false;
+                              // Clear selection
+                              _messageController.selection = TextSelection.collapsed(
+                                offset: _messageController.selection.baseOffset,
+                              );
+                            });
+                          },
+                        ),
+                      ),
+                    // Text field
+                    SelectionArea(
+                      child: TextField(
+                        controller: _messageController,
+                        minLines: 1,
+                        maxLines: 4,
+                        style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                        decoration: InputDecoration(
+                          hintText: 'Type a message',
+                          hintStyle: TextStyle(color: isDark ? Colors.white38 : Colors.grey[500]),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(24),
+                            borderSide: BorderSide.none,
+                          ),
+                          filled: true,
+                          fillColor: isDark ? const Color(0xFF2A3942) : const Color(0xFFF0F2F5),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        ),
+                        onChanged: (_) {
+                          // Trigger quick reply suggestions when text changes
+                          _onMessageChanged();
+                          // Check selection after text change
+                          _checkTextSelection();
+                        },
+                        onSubmitted: (_) {
+                          setState(() {
+                            _showQuickReplySuggestions = false;
+                          });
+                          _sendMessage();
+                        },
+                        onTap: () {
+                          // Keep suggestions visible on tap if "/" is in text
+                          _onMessageChanged();
+                          // Check selection after tap
+                          Future.delayed(const Duration(milliseconds: 50), () {
+                            _checkTextSelection();
+                          });
+                        },
+                      ),
                     ),
-                    filled: true,
-                    fillColor: isDark ? const Color(0xFF2A3942) : const Color(0xFFF0F2F5),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  ),
-                  onChanged: (_) {
-                    // Trigger quick reply suggestions when text changes
-                    _onMessageChanged();
-                  },
-                  onSubmitted: (_) {
-                    setState(() {
-                      _showQuickReplySuggestions = false;
-                    });
-                    _sendMessage();
-                  },
-                  onTap: () {
-                    // Keep suggestions visible on tap if "/" is in text
-                    _onMessageChanged();
-                  },
+                  ],
                 ),
               ),
               const SizedBox(width: 8),
@@ -1823,13 +2090,33 @@ class _ChatViewState extends ConsumerState<ChatView> {
                   backgroundColor: const Color(0xFF008069),
                   child: IconButton(
                     icon: _isSending
-                        ? const SizedBox(
+                        ? SizedBox(
                             width: 20,
                             height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                            ),
+                            child: _uploadProgress > 0 && _uploadProgress < 1.0
+                                ? Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      CircularProgressIndicator(
+                                        value: _uploadProgress,
+                                        strokeWidth: 2,
+                                        valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                                        backgroundColor: Colors.white30,
+                                      ),
+                                      Text(
+                                        '${(_uploadProgress * 100).toInt()}%',
+                                        style: const TextStyle(
+                                          fontSize: 8,
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : const CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                  ),
                           )
                         : const Icon(Icons.send, color: Colors.white),
                     onPressed: _isSending ? null : _sendMessage,
@@ -1939,6 +2226,84 @@ class _ChatViewState extends ConsumerState<ChatView> {
 }
 
 // Audio preview widget for voice recording playback (Desktop)
+class VideoPreviewWidget extends StatefulWidget {
+  final File file;
+
+  const VideoPreviewWidget({required this.file});
+
+  @override
+  State<VideoPreviewWidget> createState() => _VideoPreviewWidgetState();
+}
+
+class _VideoPreviewWidgetState extends State<VideoPreviewWidget> {
+  VideoPlayerController? _controller;
+  bool _isInitialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeVideo();
+  }
+
+  Future<void> _initializeVideo() async {
+    _controller = VideoPlayerController.file(widget.file);
+    try {
+      await _controller!.initialize();
+      if (mounted) {
+        setState(() {
+          _isInitialized = true;
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to initialize video: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_isInitialized || _controller == null) {
+      return Container(
+        color: Colors.black,
+        child: const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        AspectRatio(
+          aspectRatio: _controller!.value.aspectRatio,
+          child: VideoPlayer(_controller!),
+        ),
+        IconButton(
+          icon: Icon(
+            _controller!.value.isPlaying ? Icons.pause : Icons.play_arrow,
+            color: Colors.white,
+            size: 48,
+          ),
+          onPressed: () {
+            setState(() {
+              if (_controller!.value.isPlaying) {
+                _controller!.pause();
+              } else {
+                _controller!.play();
+              }
+            });
+          },
+        ),
+      ],
+    );
+  }
+}
+
 class DesktopAudioPreviewWidget extends StatefulWidget {
   final String audioPath;
   final Duration duration;

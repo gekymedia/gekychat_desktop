@@ -39,7 +39,7 @@ class SideNav extends ConsumerWidget {
         isActive: currentRoute == '/chats',
       ),
       _NavItem(
-        icon: Icons.circle_notifications,
+        imageAsset: 'assets/icons/status_icon.png',
         label: 'Status',
         route: '/status',
         isActive: currentRoute == '/status',
@@ -114,17 +114,19 @@ class SideNav extends ConsumerWidget {
 }
 
 class _NavItem {
-  final IconData icon;
+  final IconData? icon;
+  final String? imageAsset; // For custom images like status icon
   final String label;
   final String route;
   final bool isActive;
 
   _NavItem({
-    required this.icon,
+    this.icon,
+    this.imageAsset,
     required this.label,
     required this.route,
     required this.isActive,
-  });
+  }) : assert(icon != null || imageAsset != null, 'Either icon or imageAsset must be provided');
 }
 
 class _NavItemWidget extends ConsumerWidget {
@@ -174,13 +176,33 @@ class _NavItemWidget extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                item.icon,
-                color: item.isActive
-                    ? Colors.white
-                    : (isDark ? Colors.white70 : Colors.grey[600]),
-                size: 24,
-              ),
+              item.imageAsset != null
+                  ? Image.asset(
+                      item.imageAsset!,
+                      width: 24,
+                      height: 24,
+                      fit: BoxFit.contain,
+                      color: item.isActive
+                          ? Colors.white
+                          : (isDark ? Colors.white70 : Colors.grey[600]),
+                      errorBuilder: (context, error, stackTrace) {
+                        // Fallback to icon if image fails to load
+                        return Icon(
+                          Icons.circle_notifications,
+                          color: item.isActive
+                              ? Colors.white
+                              : (isDark ? Colors.white70 : Colors.grey[600]),
+                          size: 24,
+                        );
+                      },
+                    )
+                  : Icon(
+                      item.icon!,
+                      color: item.isActive
+                          ? Colors.white
+                          : (isDark ? Colors.white70 : Colors.grey[600]),
+                      size: 24,
+                    ),
               const SizedBox(height: 4),
               Text(
                 item.label,

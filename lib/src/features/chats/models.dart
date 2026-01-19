@@ -266,6 +266,7 @@ class MessageAttachment {
   final String mimeType;
   final bool isImage;
   final bool isVideo;
+  final bool isAudio;
   final bool isDocument;
   // MEDIA COMPRESSION fields
   final String? compressionStatus; // 'pending', 'processing', 'completed', 'failed'
@@ -281,6 +282,7 @@ class MessageAttachment {
     required this.mimeType,
     required this.isImage,
     required this.isVideo,
+    required this.isAudio,
     required this.isDocument,
     this.compressionStatus,
     this.compressedUrl,
@@ -297,6 +299,7 @@ class MessageAttachment {
       mimeType: json['mime_type'],
       isImage: json['is_image'] ?? false,
       isVideo: json['is_video'] ?? false,
+      isAudio: json['is_audio'] ?? false,
       isDocument: json['is_document'] ?? false,
       // MEDIA COMPRESSION fields
       compressionStatus: json['compression_status'] as String?,
@@ -353,6 +356,9 @@ class Message {
   final List<dynamic>? linkPreviews;
   final bool isDeleted; // True if message was deleted for everyone
   final bool deletedForMe; // True if message was deleted for current user
+  final String? status; // queued | sending | sent | delivered | read | failed (for offline messages)
+  final bool isSystem; // System messages (e.g., "User joined the group")
+  final String? systemAction; // Action type: 'joined', 'left', 'promoted', 'demoted', 'removed'
 
   Message({
     required this.id,
@@ -375,6 +381,9 @@ class Message {
     this.linkPreviews,
     this.isDeleted = false,
     this.deletedForMe = false,
+    this.status,
+    this.isSystem = false,
+    this.systemAction,
   });
 
   factory Message.fromJson(Map<String, dynamic> json) {
@@ -420,9 +429,10 @@ class Message {
           .toList();
     }
     
-    // Safely get sender_id - can be direct or from sender object
+    // System messages don't have a sender_id, so we need to handle that case
+    final isSystem = json['is_system'] as bool? ?? false;
     final senderId = json['sender_id'] ?? json['sender']?['id'];
-    if (senderId == null) {
+    if (senderId == null && !isSystem) {
       throw FormatException('Message missing sender_id', json);
     }
     
@@ -436,7 +446,7 @@ class Message {
       id: json['id'] as int,
       conversationId: json['conversation_id'] as int?,
       groupId: json['group_id'] as int?,
-      senderId: senderId as int,
+      senderId: (senderId as int?) ?? 0, // Can be 0 for system messages
       sender: senderInfo,
       body: json['body'] ?? '',
       createdAt: DateTime.parse(json['created_at'] as String),
@@ -463,6 +473,9 @@ class Message {
           : null,
       isDeleted: json['deleted_for_everyone_at'] != null,
       deletedForMe: json['deleted_at'] != null, // This should come from message_statuses
+      status: json['status'] as String?, // queued | sending | sent | delivered | read | failed
+      isSystem: isSystem,
+      systemAction: json['system_action'] as String?,
     );
   }
 }

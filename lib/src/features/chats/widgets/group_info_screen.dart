@@ -1,18 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:flutter/foundation.dart';
 import '../../../core/providers.dart';
 import '../../../theme/app_theme.dart';
 import '../chat_repo.dart';
 import '../models.dart';
-import '../../../core/api_service.dart';
 import '../../media/media_gallery_screen.dart';
 import 'search_in_chat_screen.dart';
 import 'edit_group_screen.dart';
 import 'add_participant_screen.dart';
+import 'share_group_link_screen.dart';
 
 final groupInfoProvider = FutureProvider.family<Map<String, dynamic>, int>((ref, groupId) async {
   final api = ref.read(apiServiceProvider);
@@ -163,10 +163,11 @@ class GroupInfoScreen extends ConsumerWidget {
                           ),
                         ),
                       ),
-                      if (canManage)
+                      // Only show "Add participants" for groups, not channels (channels use link joining)
+                      if (canManage && group['type'] != 'channel')
                         ListTile(
                           leading: const Icon(Icons.person_add),
-                          title: Text(group['type'] == 'channel' ? 'Add participant' : 'Add participant'),
+                          title: const Text('Add participant'),
                           trailing: const Icon(Icons.chevron_right),
                           onTap: () async {
                             final members = (group['members'] as List<dynamic>?)
@@ -285,6 +286,34 @@ class GroupInfoScreen extends ConsumerWidget {
                             });
                           },
                         ),
+                        // Message Lock Toggle (only for groups, not channels, and only for admins/owners)
+                        if (group['type'] != 'channel')
+                          SwitchListTile(
+                            title: const Text('Message Lock'),
+                            subtitle: Text(group['message_lock'] == true
+                                ? 'Only admins can send messages'
+                                : 'All members can send messages'),
+                            value: group['message_lock'] == true,
+                            onChanged: (bool value) async {
+                              try {
+                                final api = ref.read(apiServiceProvider);
+                                await api.put('/groups/$groupId/toggle-message-lock');
+                                ref.invalidate(groupInfoProvider(groupId));
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Message lock ${value ? 'enabled' : 'disabled'}')),
+                                  );
+                                }
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Failed to toggle message lock: $e')),
+                                  );
+                                }
+                              }
+                            },
+                            secondary: Icon(group['message_lock'] == true ? Icons.lock : Icons.lock_open),
+                          ),
                         ListTile(
                           leading: const Icon(Icons.exit_to_app),
                           title: Text(group['type'] == 'channel' ? 'Exit channel' : 'Exit group'),
@@ -389,6 +418,7 @@ class GroupInfoScreen extends ConsumerWidget {
   Future<void> _shareInviteLink(BuildContext context, WidgetRef ref, int groupId, Map<String, dynamic> group) async {
     try {
       final api = ref.read(apiServiceProvider);
+      final isDark = Theme.of(context).brightness == Brightness.dark;
       
       // Get or generate invite link
       String? inviteLink;
@@ -401,8 +431,11 @@ class GroupInfoScreen extends ConsumerWidget {
         debugPrint('Failed to get invite info: $e');
       }
       
-      // If no invite link, generate one (admin only)
-      if (inviteLink == null && (group['is_admin'] == true || group['is_owner'] == true)) {
+      // If no invite link, generate one (admin or owner only)
+      // Check both is_admin and is_owner flags
+      final isAdmin = group['is_admin'] == true;
+      final isOwner = group['is_owner'] == true;
+      if (inviteLink == null && (isAdmin || isOwner)) {
         try {
           final generateResponse = await api.generateGroupInvite(groupId);
           if (generateResponse.data['success'] == true) {
@@ -416,20 +449,80 @@ class GroupInfoScreen extends ConsumerWidget {
       if (inviteLink == null || inviteLink.isEmpty) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Unable to get invite link. Only admins can generate invite links.')),
+            const SnackBar(content: Text('Unable to get invite link. Only admins and owners can generate invite links.')),
           );
         }
         return;
       }
       
-      // Share the invite link
+      // Show dialog with share options
       final groupName = group['name'] as String? ?? 'Group';
       final groupType = group['type'] == 'channel' ? 'channel' : 'group';
       final shareText = 'Join my $groupType "$groupName" on GekyChat: $inviteLink';
       
-      await Share.share(
-        shareText,
-        subject: 'Invitation to $groupName',
+      if (!context.mounted) return;
+      
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
+          title: Text(
+            group['type'] == 'channel' ? 'Share channel link' : 'Share group link',
+            style: TextStyle(color: isDark ? Colors.white : Colors.black),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.chat, color: AppTheme.primaryGreen),
+                title: const Text('Share on GekyChat'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ShareGroupLinkScreen(
+                        shareText: shareText,
+                        inviteLink: inviteLink!,
+                        groupName: groupName,
+                      ),
+                    ),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.copy, color: AppTheme.primaryGreen),
+                title: const Text('Copy link'),
+                onTap: () async {
+                  Navigator.pop(context);
+                  await Clipboard.setData(ClipboardData(text: inviteLink!));
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Link copied to clipboard')),
+                    );
+                  }
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.share, color: AppTheme.primaryGreen),
+                title: const Text('Share via external app'),
+                onTap: () async {
+                  Navigator.pop(context);
+                  await Share.share(
+                    shareText,
+                    subject: 'Invitation to $groupName',
+                  );
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
       );
     } catch (e) {
       if (context.mounted) {

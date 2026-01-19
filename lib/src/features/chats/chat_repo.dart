@@ -283,6 +283,7 @@ class ChatRepository {
     int? forwardFrom,
     List<File>? attachments,
     bool skipCompression = false,
+    void Function(double progress)? onProgress,
   }) async {
     try {
       final data = <String, dynamic>{
@@ -295,19 +296,47 @@ class ChatRepository {
       // MEDIA COMPRESSION: Use medium compression level by default, but skip for voice messages
       if (attachments != null && attachments.isNotEmpty) {
         List<int> attachmentIds = [];
-        for (final file in attachments) {
+        final totalFiles = attachments.length;
+        for (int i = 0; i < attachments.length; i++) {
+          final file = attachments[i];
           try {
             if (!await file.exists()) {
               throw Exception('File does not exist: ${file.path}');
             }
-            // Check if it's a voice message (m4a) or skip compression is requested
-            final isVoiceMessage = file.path.toLowerCase().endsWith('.m4a') || 
-                                  file.path.toLowerCase().endsWith('.aac') ||
-                                  file.path.toLowerCase().endsWith('.mp3') ||
-                                  file.path.toLowerCase().endsWith('.wav') ||
-                                  file.path.toLowerCase().endsWith('.ogg');
-            final compressionLevel = (skipCompression || isVoiceMessage) ? 'none' : 'medium';
-            final uploadResponse = await apiService.uploadAttachment(file, compressionLevel: compressionLevel);
+            // Determine file type and compression
+            final path = file.path.toLowerCase();
+            final isImage = path.endsWith('.jpg') || path.endsWith('.jpeg') || 
+                           path.endsWith('.png') || path.endsWith('.gif') || 
+                           path.endsWith('.webp') || path.endsWith('.bmp');
+            final isVideo = path.endsWith('.mp4') || path.endsWith('.mov') || 
+                           path.endsWith('.avi') || path.endsWith('.mkv') || 
+                           path.endsWith('.webm');
+            final isAudio = path.endsWith('.m4a') || path.endsWith('.aac') ||
+                           path.endsWith('.mp3') || path.endsWith('.wav') ||
+                           path.endsWith('.ogg') || path.endsWith('.flac');
+            // Only compress images and videos, not documents or audio
+            // Documents should be uploaded as-is (no compression) like WhatsApp
+            final compressionLevel = (skipCompression || isAudio || (!isImage && !isVideo)) 
+                ? 'none' 
+                : 'medium';
+            
+            // Calculate progress: each file contributes 1/totalFiles to overall progress
+            // Within each file, progress goes from i/totalFiles to (i+1)/totalFiles
+            final fileStartProgress = i / totalFiles;
+            final fileEndProgress = (i + 1) / totalFiles;
+            
+            final uploadResponse = await apiService.uploadAttachment(
+              file,
+              compressionLevel: compressionLevel,
+              onSendProgress: onProgress != null
+                  ? (sent, total) {
+                      // Map file progress to overall progress
+                      final fileProgress = sent / total;
+                      final overallProgress = fileStartProgress + (fileProgress * (fileEndProgress - fileStartProgress));
+                      onProgress(overallProgress);
+                    }
+                  : null,
+            );
             final attachmentData = uploadResponse.data;
             final attachment = attachmentData is Map && attachmentData['data'] != null
                 ? attachmentData['data'] as Map<String, dynamic>
@@ -316,14 +345,29 @@ class ChatRepository {
               throw Exception('Upload failed: No attachment ID returned');
             }
             attachmentIds.add(attachment['id'] as int);
+            
+            // Update progress to show this file is complete
+            if (onProgress != null) {
+              onProgress(fileEndProgress);
+            }
           } catch (e) {
             throw Exception('Failed to upload attachment ${file.path}: $e');
           }
         }
         data['attachments'] = attachmentIds;
       }
+      
+      // Set progress to 100% when sending message (if no attachments, this is the only step)
+      if (onProgress != null && (attachments == null || attachments.isEmpty)) {
+        onProgress(1.0);
+      }
 
       final response = await apiService.post('/conversations/$conversationId/messages', data: data);
+      
+      // Set progress to 100% after message is sent
+      if (onProgress != null) {
+        onProgress(1.0);
+      }
       final raw = response.data;
       final map = (raw is Map && raw['data'] is Map)
           ? raw['data'] as Map
@@ -489,6 +533,7 @@ class ChatRepository {
     int? forwardFrom,
     List<File>? attachments,
     bool skipCompression = false,
+    void Function(double progress)? onProgress,
   }) async {
     try {
       final data = <String, dynamic>{
@@ -501,19 +546,47 @@ class ChatRepository {
       // MEDIA COMPRESSION: Use medium compression level by default, but skip for voice messages
       if (attachments != null && attachments.isNotEmpty) {
         List<int> attachmentIds = [];
-        for (final file in attachments) {
+        final totalFiles = attachments.length;
+        for (int i = 0; i < attachments.length; i++) {
+          final file = attachments[i];
           try {
             if (!await file.exists()) {
               throw Exception('File does not exist: ${file.path}');
             }
-            // Check if it's a voice message (m4a) or skip compression is requested
-            final isVoiceMessage = file.path.toLowerCase().endsWith('.m4a') || 
-                                  file.path.toLowerCase().endsWith('.aac') ||
-                                  file.path.toLowerCase().endsWith('.mp3') ||
-                                  file.path.toLowerCase().endsWith('.wav') ||
-                                  file.path.toLowerCase().endsWith('.ogg');
-            final compressionLevel = (skipCompression || isVoiceMessage) ? 'none' : 'medium';
-            final uploadResponse = await apiService.uploadAttachment(file, compressionLevel: compressionLevel);
+            // Determine file type and compression
+            final path = file.path.toLowerCase();
+            final isImage = path.endsWith('.jpg') || path.endsWith('.jpeg') || 
+                           path.endsWith('.png') || path.endsWith('.gif') || 
+                           path.endsWith('.webp') || path.endsWith('.bmp');
+            final isVideo = path.endsWith('.mp4') || path.endsWith('.mov') || 
+                           path.endsWith('.avi') || path.endsWith('.mkv') || 
+                           path.endsWith('.webm');
+            final isAudio = path.endsWith('.m4a') || path.endsWith('.aac') ||
+                           path.endsWith('.mp3') || path.endsWith('.wav') ||
+                           path.endsWith('.ogg') || path.endsWith('.flac');
+            // Only compress images and videos, not documents or audio
+            // Documents should be uploaded as-is (no compression) like WhatsApp
+            final compressionLevel = (skipCompression || isAudio || (!isImage && !isVideo)) 
+                ? 'none' 
+                : 'medium';
+            
+            // Calculate progress: each file contributes 1/totalFiles to overall progress
+            // Within each file, progress goes from i/totalFiles to (i+1)/totalFiles
+            final fileStartProgress = i / totalFiles;
+            final fileEndProgress = (i + 1) / totalFiles;
+            
+            final uploadResponse = await apiService.uploadAttachment(
+              file,
+              compressionLevel: compressionLevel,
+              onSendProgress: onProgress != null
+                  ? (sent, total) {
+                      // Map file progress to overall progress
+                      final fileProgress = sent / total;
+                      final overallProgress = fileStartProgress + (fileProgress * (fileEndProgress - fileStartProgress));
+                      onProgress(overallProgress);
+                    }
+                  : null,
+            );
             final attachmentData = uploadResponse.data;
             final attachment = attachmentData is Map && attachmentData['data'] != null
                 ? attachmentData['data'] as Map<String, dynamic>
@@ -522,14 +595,29 @@ class ChatRepository {
               throw Exception('Upload failed: No attachment ID returned');
             }
             attachmentIds.add(attachment['id'] as int);
+            
+            // Update progress to show this file is complete
+            if (onProgress != null) {
+              onProgress(fileEndProgress);
+            }
           } catch (e) {
             throw Exception('Failed to upload attachment ${file.path}: $e');
           }
         }
         data['attachments'] = attachmentIds;
       }
+      
+      // Set progress to 100% when sending message (if no attachments, this is the only step)
+      if (onProgress != null && (attachments == null || attachments.isEmpty)) {
+        onProgress(1.0);
+      }
 
       final response = await apiService.post('/groups/$groupId/messages', data: data);
+      
+      // Set progress to 100% after message is sent
+      if (onProgress != null) {
+        onProgress(1.0);
+      }
       final raw = response.data;
       final map = (raw is Map && raw['data'] is Map)
           ? raw['data'] as Map
@@ -578,6 +666,34 @@ class ChatRepository {
       await apiService.delete('/messages/$messageId/react');
     } catch (e) {
       throw Exception('Failed to remove reaction: $e');
+    }
+  }
+
+  // Get a single message by ID (for updating reactions without reloading all messages)
+  Future<Message> getMessage(int messageId) async {
+    try {
+      final response = await apiService.get('/messages/$messageId');
+      final raw = response.data;
+      final map = (raw is Map && raw['data'] is Map)
+          ? raw['data'] as Map
+          : (raw as Map);
+      return Message.fromJson(Map<String, dynamic>.from(map));
+    } catch (e) {
+      throw Exception('Failed to load message: $e');
+    }
+  }
+
+  // Get a single group message by ID (for updating reactions without reloading all messages)
+  Future<Message> getGroupMessage(int messageId) async {
+    try {
+      final response = await apiService.get('/group-messages/$messageId');
+      final raw = response.data;
+      final map = (raw is Map && raw['data'] is Map)
+          ? raw['data'] as Map
+          : (raw as Map);
+      return Message.fromJson(Map<String, dynamic>.from(map));
+    } catch (e) {
+      throw Exception('Failed to load group message: $e');
     }
   }
 

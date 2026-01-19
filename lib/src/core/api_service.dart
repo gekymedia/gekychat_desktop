@@ -325,7 +325,11 @@ class ApiService {
   // Attachments
   // ---------------------------------------------------------------------------
 
-  Future<Response> uploadAttachment(File file, {String? compressionLevel}) async {
+  Future<Response> uploadAttachment(
+    File file, {
+    String? compressionLevel,
+    void Function(int sent, int total)? onSendProgress,
+  }) async {
     final formData = FormData.fromMap({
       'file': await MultipartFile.fromFile(
         file.path,
@@ -334,7 +338,11 @@ class ApiService {
       // MEDIA COMPRESSION: Include compression level preference
       if (compressionLevel != null) 'compression_level': compressionLevel,
     });
-    return _dio.post(_normalize('/attachments'), data: formData);
+    return _dio.post(
+      _normalize('/attachments'),
+      data: formData,
+      onSendProgress: onSendProgress,
+    );
   }
 
   // MEDIA COMPRESSION: Get attachment details (to check compression status)
@@ -782,4 +790,11 @@ class ApiService {
     required int accountId,
   }) =>
     delete('/auth/accounts/$accountId?device_id=$deviceId&device_type=$deviceType');
+
+  // ---------------------------------------------------------------------------
+  // Group Message Lock
+  // ---------------------------------------------------------------------------
+
+  Future<Response> toggleGroupMessageLock(int groupId) =>
+    put('/groups/$groupId/toggle-message-lock');
 }

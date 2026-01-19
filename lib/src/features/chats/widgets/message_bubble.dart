@@ -7,12 +7,14 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:audioplayers/audioplayers.dart';
 import '../models.dart';
 import '../../../theme/app_theme.dart';
 import '../forward_message_screen.dart';
 import '../../../widgets/colored_avatar.dart';
 import 'message_info_dialog.dart';
 import '../../../core/providers.dart';
+import '../../../utils/text_formatting.dart';
 
 class MessageBubble extends ConsumerWidget {
   final Message message;
@@ -47,6 +49,11 @@ class MessageBubble extends ConsumerWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isMeValue = isMe(currentUserId);
 
+    // System messages are centered
+    if (message.isSystem) {
+      return _buildSystemMessage(context, isDark);
+    }
+
     return Align(
       alignment: isMeValue ? Alignment.centerRight : Alignment.centerLeft,
       child: GestureDetector(
@@ -59,7 +66,12 @@ class MessageBubble extends ConsumerWidget {
           }
         },
         child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          margin: EdgeInsets.only(
+            left: isMeValue ? 8 : 8,
+            right: isMeValue ? 8 : 8,
+            top: 4,
+            bottom: 4,
+          ),
           constraints: BoxConstraints(
             maxWidth: MediaQuery.of(context).size.width * 0.6,
           ),
@@ -112,6 +124,8 @@ class MessageBubble extends ConsumerWidget {
                           return _buildImageAttachment(attachment);
                         } else if (attachment.isVideo) {
                           return _buildVideoAttachment(attachment);
+                        } else if (attachment.isAudio) {
+                          return _buildAudioAttachment(attachment, isDark, ref, context);
                         } else {
                           return _buildDocumentAttachment(attachment, isDark, ref, context);
                         }
@@ -193,7 +207,7 @@ class MessageBubble extends ConsumerWidget {
                             DateFormat.jm().format(message.createdAt),
                             style: TextStyle(
                               color: isMeValue
-                                  ? Colors.white.withOpacity(0.7)
+                                  ? (isDark ? Colors.white70 : Colors.white.withOpacity(0.7))
                                   : (isDark
                                       ? AppTheme.textSecondaryDark
                                       : AppTheme.textSecondaryLight),
@@ -223,7 +237,11 @@ class MessageBubble extends ConsumerWidget {
               // Reactions
               if (message.reactions.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.only(top: 4, left: 12, right: 12),
+                  padding: EdgeInsets.only(
+                    top: 4,
+                    left: isMeValue ? 45 : 12,
+                    right: isMeValue ? 12 : 45,
+                  ),
                   child: Wrap(
                     spacing: 4,
                     children: message.reactions.map((reaction) {
@@ -282,7 +300,7 @@ class MessageBubble extends ConsumerWidget {
                       CircularProgressIndicator(color: Colors.white),
                       SizedBox(height: 8),
                       Text(
-                        'Compressing...',
+                        'Sending...',
                         style: TextStyle(color: Colors.white, fontSize: 12),
                       ),
                     ],
@@ -297,7 +315,7 @@ class MessageBubble extends ConsumerWidget {
 
   Widget _buildVideoAttachment(MessageAttachment attachment) {
     // MEDIA COMPRESSION: Use thumbnail if available, otherwise use video URL
-    final imageUrl = attachment.thumbnailUrl ?? attachment.displayUrl;
+    final thumbnailUrl = attachment.thumbnailUrl;
     final isCompressing = attachment.isCompressing;
     
     return Container(
@@ -310,9 +328,9 @@ class MessageBubble extends ConsumerWidget {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          if (imageUrl.isNotEmpty)
+          if (thumbnailUrl != null && thumbnailUrl.isNotEmpty)
             CachedNetworkImage(
-              imageUrl: imageUrl,
+              imageUrl: thumbnailUrl,
               fit: BoxFit.cover,
               width: double.infinity,
             ),
@@ -326,7 +344,7 @@ class MessageBubble extends ConsumerWidget {
                   const CircularProgressIndicator(color: Colors.white),
                   const SizedBox(height: 8),
                   Text(
-                    'Compressing...',
+                    'Sending...',
                     style: const TextStyle(color: Colors.white, fontSize: 12),
                   ),
                 ],
@@ -383,6 +401,13 @@ class MessageBubble extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildAudioAttachment(MessageAttachment attachment, bool isDark, WidgetRef ref, BuildContext context) {
+    return VoiceMessagePlayer(
+      attachment: attachment,
+      isDark: isDark,
     );
   }
 
@@ -1203,6 +1228,30 @@ class MessageBubble extends ConsumerWidget {
     );
   }
 
+  Widget _buildSystemMessage(BuildContext context, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: (isDark ? Colors.grey[800] : Colors.grey[200])?.withOpacity(0.7),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            message.body,
+            style: TextStyle(
+              color: isDark ? Colors.white70 : Colors.grey[700],
+              fontSize: 13,
+              fontStyle: FontStyle.italic,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildMessageText(BuildContext context, bool isDark, bool isMe) {
     final text = message.body;
     final baseStyle = TextStyle(
@@ -1213,52 +1262,81 @@ class MessageBubble extends ConsumerWidget {
       height: 1.4,
     );
 
+    // Parse formatted text first
+    final formattedSpan = TextFormatting.parseFormattedText(
+      text,
+      baseStyle: baseStyle,
+      defaultColor: isMe
+          ? (isDark ? Colors.white : const Color(0xFF065F46))
+          : (isDark ? AppTheme.textPrimaryDark : AppTheme.textPrimaryLight),
+    );
+
     // Phone number regex: matches Ghana phone numbers
     // Pattern: (?:\+?233|0)?([1-9]\d{8})
     final phoneRegex = RegExp(r'(?:\+?233|0)?([1-9]\d{8})');
     final matches = phoneRegex.allMatches(text);
 
     if (matches.isEmpty) {
-      // No phone numbers found, return plain text
-      return Text(text, style: baseStyle);
+      // No phone numbers found, return formatted text
+      return Text.rich(formattedSpan);
     }
 
-    // Build TextSpan with clickable phone numbers
+    // Build TextSpan with clickable phone numbers while preserving formatting
     final spans = <TextSpan>[];
-    int lastEnd = 0;
-
-    for (final match in matches) {
-      // Add text before the phone number
-      if (match.start > lastEnd) {
-        spans.add(TextSpan(
-          text: text.substring(lastEnd, match.start),
-          style: baseStyle,
-        ));
-      }
-
-      // Add clickable phone number
-      final phoneNumber = match.group(0)!;
-      final normalizedPhone = _normalizePhoneNumber(phoneNumber);
-      
-      spans.add(TextSpan(
-        text: phoneNumber,
-        style: baseStyle.copyWith(
-          color: AppTheme.primaryGreen,
-          decoration: TextDecoration.underline,
-        ),
-        recognizer: TapGestureRecognizer()
-          ..onTap = () => _handlePhoneClick(context, normalizedPhone),
-      ));
-
-      lastEnd = match.end;
+    final formattedChildren = formattedSpan.children;
+    
+    if (formattedChildren == null || formattedChildren.isEmpty) {
+      // No children, just use the text directly
+      return Text.rich(formattedSpan);
     }
-
-    // Add remaining text
-    if (lastEnd < text.length) {
-      spans.add(TextSpan(
-        text: text.substring(lastEnd),
-        style: baseStyle,
-      ));
+    
+    // Process each formatted span and add phone number detection
+    for (final span in formattedChildren) {
+      // Only process TextSpan elements
+      if (span is! TextSpan) {
+        spans.add(TextSpan(text: '', style: baseStyle));
+        continue;
+      }
+      
+      final spanText = span.text ?? '';
+      final phoneMatches = phoneRegex.allMatches(spanText);
+      
+      if (phoneMatches.isEmpty) {
+        spans.add(span);
+      } else {
+        // Split span text by phone numbers
+        int lastEnd = 0;
+        for (final match in phoneMatches) {
+          if (match.start > lastEnd) {
+            spans.add(TextSpan(
+              text: spanText.substring(lastEnd, match.start),
+              style: span.style,
+            ));
+          }
+          
+          final phoneNumber = match.group(0)!;
+          final normalizedPhone = _normalizePhoneNumber(phoneNumber);
+          
+          spans.add(TextSpan(
+            text: phoneNumber,
+            style: (span.style ?? baseStyle).copyWith(
+              color: AppTheme.primaryGreen,
+              decoration: TextDecoration.underline,
+            ),
+            recognizer: TapGestureRecognizer()
+              ..onTap = () => _handlePhoneClick(context, normalizedPhone),
+          ));
+          
+          lastEnd = match.end;
+        }
+        
+        if (lastEnd < spanText.length) {
+          spans.add(TextSpan(
+            text: spanText.substring(lastEnd),
+            style: span.style,
+          ));
+        }
+      }
     }
 
     return RichText(
@@ -1339,3 +1417,265 @@ class MessageBubble extends ConsumerWidget {
   }
 }
 
+/// Voice message player widget (WhatsApp/Telegram style)
+class VoiceMessagePlayer extends ConsumerStatefulWidget {
+  final MessageAttachment attachment;
+  final bool isDark;
+
+  const VoiceMessagePlayer({
+    super.key,
+    required this.attachment,
+    required this.isDark,
+  });
+
+  @override
+  ConsumerState<VoiceMessagePlayer> createState() => _VoiceMessagePlayerState();
+}
+
+class _VoiceMessagePlayerState extends ConsumerState<VoiceMessagePlayer> {
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  bool _isPlaying = false;
+  bool _isLoading = false;
+  Duration _duration = Duration.zero;
+  Duration _position = Duration.zero;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _audioPlayer.onPlayerStateChanged.listen((state) {
+      if (mounted) {
+        setState(() {
+          _isPlaying = state == PlayerState.playing;
+        });
+      }
+    });
+    _audioPlayer.onDurationChanged.listen((duration) {
+      if (mounted) {
+        setState(() {
+          _duration = duration;
+        });
+      }
+    });
+    _audioPlayer.onPositionChanged.listen((position) {
+      if (mounted) {
+        setState(() {
+          _position = position;
+        });
+      }
+    });
+    _audioPlayer.onPlayerComplete.listen((_) {
+      if (mounted) {
+        setState(() {
+          _isPlaying = false;
+          _position = Duration.zero;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _audioPlayer.dispose();
+    super.dispose();
+  }
+
+  Future<void> _togglePlayPause() async {
+    try {
+      if (_isPlaying) {
+        await _audioPlayer.pause();
+      } else {
+        if (_position == Duration.zero || _position == _duration) {
+          // Start from beginning or restart
+          setState(() {
+            _isLoading = true;
+            _error = null;
+          });
+          await _audioPlayer.play(UrlSource(widget.attachment.displayUrl));
+          setState(() {
+            _isLoading = false;
+          });
+        } else {
+          // Resume from current position
+          await _audioPlayer.resume();
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = 'Failed to play audio: $e';
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _seekTo(Duration position) async {
+    await _audioPlayer.seek(position);
+  }
+
+  /// Build waveform visualization (WhatsApp/Telegram style)
+  Widget _buildWaveform(double progress) {
+    // Generate random heights for waveform bars (simulated)
+    // In a real implementation, you'd use actual audio waveform data
+    final barCount = 40;
+    final bars = List.generate(barCount, (index) {
+      // Animate bars that are before the progress position
+      final barPosition = index / barCount;
+      final isActive = barPosition <= progress;
+      final isPlaying = _isPlaying && isActive;
+      
+      // Random height between 4 and 20, with some variation for visual appeal
+      final baseHeight = 4.0 + (index % 5) * 2.0;
+      final height = isPlaying 
+          ? baseHeight + (baseHeight * 0.3 * (1 - (index % 3) / 3.0))
+          : baseHeight;
+      
+      return Container(
+        width: 2,
+        height: height,
+        margin: const EdgeInsets.symmetric(horizontal: 1),
+        decoration: BoxDecoration(
+          color: isActive
+              ? AppTheme.primaryGreen
+              : (widget.isDark
+                  ? Colors.white.withOpacity(0.3)
+                  : Colors.black.withOpacity(0.2)),
+          borderRadius: BorderRadius.circular(1),
+        ),
+      );
+    });
+
+    return Container(
+      height: 24,
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: bars,
+      ),
+    );
+  }
+
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final minutes = twoDigits(duration.inMinutes.remainder(60));
+    final seconds = twoDigits(duration.inSeconds.remainder(60));
+    return '$minutes:$seconds';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = _duration.inMilliseconds > 0
+        ? _position.inMilliseconds / _duration.inMilliseconds
+        : 0.0;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: widget.isDark
+            ? const Color(0xFF2A3942)
+            : AppTheme.primaryGreen.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          // Play/Pause button
+          GestureDetector(
+            onTap: _isLoading ? null : _togglePlayPause,
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppTheme.primaryGreen,
+                shape: BoxShape.circle,
+              ),
+              child: _isLoading
+                  ? const Center(
+                      child: SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      ),
+                    )
+                  : Icon(
+                      _isPlaying ? Icons.pause : Icons.play_arrow,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          // Progress bar and duration
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Waveform visualization (WhatsApp/Telegram style)
+                GestureDetector(
+                  onTapDown: (details) {
+                    if (_duration.inMilliseconds > 0) {
+                      final RenderBox box = context.findRenderObject() as RenderBox;
+                      final localPosition = details.localPosition;
+                      final width = box.size.width;
+                      final tapPosition = localPosition.dx / width;
+                      final seekPosition = Duration(
+                        milliseconds: (_duration.inMilliseconds * tapPosition).round(),
+                      );
+                      _seekTo(seekPosition);
+                    }
+                  },
+                  child: _buildWaveform(progress),
+                ),
+                const SizedBox(height: 4),
+                // Duration
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      _formatDuration(_position),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: widget.isDark
+                            ? AppTheme.textSecondaryDark
+                            : AppTheme.textSecondaryLight,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    Text(
+                      _formatDuration(_duration),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: widget.isDark
+                            ? AppTheme.textSecondaryDark
+                            : AppTheme.textSecondaryLight,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+                // Error message
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      _error!,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Colors.red,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

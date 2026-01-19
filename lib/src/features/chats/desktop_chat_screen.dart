@@ -1615,8 +1615,65 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
   
   Widget _buildFilterChip(String filter, String label, bool isDark) {
     final isSelected = _selectedFilter == filter;
+    
+    // Calculate unread count for unread filter using FutureBuilder
+    if (filter == 'unread') {
+      return FutureBuilder<List<ConversationSummary>>(
+        future: _conversationsFuture,
+        builder: (context, conversationsSnapshot) {
+          return FutureBuilder<List<GroupSummary>>(
+            future: _groupsFuture,
+            builder: (context, groupsSnapshot) {
+              int? unreadCount;
+              if (conversationsSnapshot.hasData && groupsSnapshot.hasData) {
+                final conversations = conversationsSnapshot.data ?? [];
+                final groups = groupsSnapshot.data ?? [];
+                unreadCount = conversations
+                    .where((c) => c.unreadCount > 0 && c.archivedAt == null)
+                    .fold<int>(0, (sum, c) => sum + c.unreadCount) +
+                    groups
+                        .where((g) => g.unreadCount > 0)
+                        .fold<int>(0, (sum, g) => sum + g.unreadCount);
+              }
+              return _buildFilterChipWidget(filter, label, isDark, isSelected, unreadCount);
+            },
+          );
+        },
+      );
+    }
+    
+    return _buildFilterChipWidget(filter, label, isDark, isSelected, null);
+  }
+  
+  Widget _buildFilterChipWidget(String filter, String label, bool isDark, bool isSelected, int? unreadCount) {
+    
     return FilterChip(
-      label: Text(label),
+      label: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label),
+          if (unreadCount != null && unreadCount > 0) ...[
+            const SizedBox(width: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: isSelected 
+                    ? const Color(0xFF008069)
+                    : (isDark ? Colors.white24 : Colors.grey[400]),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                unreadCount > 99 ? '99+' : unreadCount.toString(),
+                style: TextStyle(
+                  color: isSelected ? Colors.white : (isDark ? Colors.white : Colors.black87),
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
       selected: isSelected,
       onSelected: (selected) {
         setState(() {

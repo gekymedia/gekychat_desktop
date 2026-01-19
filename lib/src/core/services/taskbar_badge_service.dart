@@ -82,21 +82,29 @@ class TaskbarBadgeService {
         // Generate badge icon
         final iconPath = await BadgeIconGenerator.generateBadgeIcon(unreadCount);
         
+        // Verify the file exists
+        final iconFile = File(iconPath);
+        if (!await iconFile.exists()) {
+          debugPrint('⚠️ Badge icon file does not exist: $iconPath');
+          return;
+        }
+        
         // Set overlay icon on Windows taskbar
-        // The API expects a ThumbnailToolbarAssetIcon object
+        // WindowsTaskbar.setOverlayIcon expects a ThumbnailToolbarAssetIcon
         WindowsTaskbar.setOverlayIcon(
           ThumbnailToolbarAssetIcon(iconPath),
         );
         
         final badgeText = unreadCount > 99 ? '99+' : unreadCount.toString();
-        debugPrint('📊 Windows taskbar badge updated: $badgeText');
+        debugPrint('📊 Windows taskbar badge updated: $badgeText (icon: $iconPath, exists: ${await iconFile.exists()})');
       } else {
         // Clear badge using resetOverlayIcon
         WindowsTaskbar.resetOverlayIcon();
         debugPrint('📊 Windows taskbar badge cleared');
       }
-    } catch (e) {
-      debugPrint('Error updating Windows taskbar badge: $e');
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error updating Windows taskbar badge: $e');
+      debugPrint('Stack trace: $stackTrace');
     }
   }
 

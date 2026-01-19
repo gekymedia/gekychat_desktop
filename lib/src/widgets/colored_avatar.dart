@@ -32,14 +32,16 @@ class ColoredAvatar extends StatelessWidget {
         minRadius: minRadius,
         maxRadius: maxRadius,
         backgroundColor: backgroundColor,
-        child: Text(
-          initials,
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: radius * 0.6,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+        child: initials == '👤'
+            ? Icon(Icons.person, color: Colors.white, size: radius * 1.2)
+            : Text(
+                initials,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: radius * 0.6,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
       );
     }
     
@@ -67,14 +69,16 @@ class ColoredAvatar extends StatelessWidget {
                 shape: BoxShape.circle,
               ),
               child: Center(
-                child: Text(
-                  initials,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: radius * 0.6,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                child: initials == '👤'
+                    ? Icon(Icons.person, color: Colors.white, size: radius * 1.2)
+                    : Text(
+                        initials,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: radius * 0.6,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
               ),
             );
           },

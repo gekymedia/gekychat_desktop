@@ -178,14 +178,27 @@ class _ConversationTab extends ConsumerWidget {
             final conv = conversations[i];
             final checked = selectedIds.contains(conv.id);
 
-            return CheckboxListTile(
-              value: checked,
-              onChanged: (v) {
-                // Prevent navigation when clicking checkbox
-                onToggle(conv.id, v == true);
+            return InkWell(
+              onTap: () {
+                // Navigate to the chat screen when list tile is tapped
+                Navigator.of(context).pop(); // Close forward screen
+                Navigator.of(context).pushNamed(
+                  '/chat',
+                  arguments: {
+                    'conversationId': conv.id,
+                    'contactName': conv.otherUser.name,
+                    'contactAvatar': conv.otherUser.avatarUrl,
+                  },
+                );
               },
-              title: Text(conv.otherUser.name),
-              subtitle: Text(conv.lastMessage ?? ''),
+              child: CheckboxListTile(
+                value: checked,
+                onChanged: (v) {
+                  onToggle(conv.id, v == true);
+                },
+                title: Text(conv.otherUser.name),
+                subtitle: Text(conv.lastMessage ?? ''),
+              ),
             );
           },
         );
@@ -255,13 +268,24 @@ class _GroupTabState extends ConsumerState<_GroupTab> {
         final group = groups[i];
         final checked = widget.selectedIds.contains(group.id);
 
-        return CheckboxListTile(
-          value: checked,
-          onChanged: (v) {
-            // Prevent navigation when clicking checkbox
-            widget.onToggle(group.id, v == true);
+        return InkWell(
+          onTap: () {
+            // Navigate to the group chat screen when list tile is tapped
+            Navigator.of(context).pop(); // Close forward screen
+            Navigator.of(context).pushNamed(
+              '/group-chat',
+              arguments: {
+                'groupId': group.id,
+                'groupName': group.name,
+              },
+            );
           },
-          title: Text(group.name),
+          child: CheckboxListTile(
+            value: checked,
+            onChanged: (v) => widget.onToggle(group.id, v == true),
+            title: Text(group.name),
+            subtitle: Text('${group.memberCount} members'),
+          ),
         );
       },
     );
