@@ -2,19 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
+import 'package:go_router/go_router.dart';
 import 'starred_repository.dart';
 import 'models.dart';
+import '../../core/providers.dart';
 
 final starredMessagesProvider = FutureProvider<List<StarredMessage>>((ref) async {
   final repo = ref.read(starredRepositoryProvider);
   return await repo.getStarredMessages();
 });
 
-class StarredMessagesScreen extends ConsumerWidget {
+class StarredMessagesScreen extends ConsumerStatefulWidget {
   const StarredMessagesScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<StarredMessagesScreen> createState() => _StarredMessagesScreenState();
+}
+
+class _StarredMessagesScreenState extends ConsumerState<StarredMessagesScreen> {
+  @override
+  Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final starredAsync = ref.watch(starredMessagesProvider);
 
@@ -144,7 +151,7 @@ class StarredMessagesScreen extends ConsumerWidget {
   }
 }
 
-class _StarredMessageItem extends StatelessWidget {
+class _StarredMessageItem extends ConsumerWidget {
   final StarredMessage message;
   final bool isDark;
 
@@ -154,23 +161,23 @@ class _StarredMessageItem extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: ListTile(
         leading: CircleAvatar(
-          backgroundImage: message.senderAvatar != null
-              ? CachedNetworkImageProvider(message.senderAvatar!)
+          backgroundImage: message.sender.avatarUrl != null
+              ? CachedNetworkImageProvider(message.sender.avatarUrl!)
               : null,
-          child: message.senderAvatar == null
+          child: message.sender.avatarUrl == null
               ? Text(
-                  message.senderName?[0].toUpperCase() ?? '?',
+                  message.sender.name[0].toUpperCase(),
                   style: const TextStyle(fontSize: 20),
                 )
               : null,
         ),
         title: Text(
-          message.senderName ?? 'Unknown',
+          message.sender.name,
           style: TextStyle(
             color: isDark ? Colors.white : Colors.black,
             fontWeight: FontWeight.w500,
@@ -187,11 +194,11 @@ class _StarredMessageItem extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
-            if (message.attachmentUrls != null && message.attachmentUrls!.isNotEmpty) ...[
+            if (message.attachments.isNotEmpty) ...[
               const SizedBox(height: 4),
               Wrap(
                 spacing: 4,
-                children: message.attachmentUrls!.take(3).map((url) {
+                children: message.attachments.take(3).map((attachment) {
                   return Icon(
                     Icons.attachment,
                     size: 16,
@@ -210,13 +217,25 @@ class _StarredMessageItem extends StatelessWidget {
           ),
         ),
         onTap: () {
-          // TODO: Navigate to the conversation/group where this message is located
-          // Navigator.push(
-          //   context,
-          //   MaterialPageRoute(
-          //     builder: (context) => ChatView(...),
-          //   ),
-          // );
+          // Navigate to the conversation/group where this message is located
+          if (message.group != null) {
+            // Navigate to group chat
+            ref.read(currentSectionProvider.notifier).setSection('/chats');
+            // The desktop chat screen will handle group selection
+            // For now, navigate to chats and let user select the group manually
+            context.go('/chats');
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Please select group ${message.group!.name} from the list'),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          } else if (message.conversation != null) {
+            // Navigate to 1-to-1 conversation
+            ref.read(currentSectionProvider.notifier).setSection('/chats');
+            ref.read(selectedConversationProvider.notifier).selectConversation(message.conversation!.id);
+            context.go('/chats');
+          }
         },
       ),
     );

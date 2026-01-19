@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
-import 'call_repository.dart';
 import 'models.dart';
 import 'providers.dart';
 import 'call_screen.dart';
 import '../../core/feature_flags.dart';
 import '../../core/session.dart';
+import '../live/live_broadcast_repository.dart';
+import '../live/broadcast_streaming_screen.dart';
 
 final callLogsProvider = FutureProvider<List<CallLog>>((ref) async {
   final repo = ref.read(callRepositoryProvider);
@@ -319,13 +320,100 @@ class _CallLogItem extends ConsumerWidget {
 }
 
 /// PHASE 2: Live Broadcasts Section
-class _LiveBroadcastsSection extends StatelessWidget {
+class _LiveBroadcastsSection extends ConsumerWidget {
   final bool isDark;
 
   const _LiveBroadcastsSection({required this.isDark});
 
+  void _showStartBroadcastDialog(BuildContext context, WidgetRef ref) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final titleController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
+        title: Text(
+          'Start Live Broadcast',
+          style: TextStyle(color: isDark ? Colors.white : Colors.black),
+        ),
+        content: TextField(
+          controller: titleController,
+          decoration: InputDecoration(
+            labelText: 'Broadcast Title',
+            labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.grey[600]),
+            border: const OutlineInputBorder(),
+            enabledBorder: OutlineInputBorder(
+              borderSide: BorderSide(
+                color: isDark ? const Color(0xFF2A3942) : Colors.grey.shade300,
+              ),
+            ),
+          ),
+          style: TextStyle(color: isDark ? Colors.white : Colors.black),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: isDark ? Colors.white70 : Colors.grey[600]),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (titleController.text.trim().isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a title')),
+                );
+                return;
+              }
+
+              Navigator.pop(context);
+              await _startBroadcast(context, ref, titleController.text.trim());
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Go Live'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _startBroadcast(BuildContext context, WidgetRef ref, String title) async {
+    try {
+      final repo = ref.read(liveBroadcastRepositoryProvider);
+      final result = await repo.startBroadcast(title: title);
+      
+      // Navigate to broadcast streaming screen
+      if (context.mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => BroadcastStreamingScreen(
+              broadcastId: result['broadcast_id'] as int? ?? 0,
+              startData: result,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to start broadcast: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -377,7 +465,7 @@ class _LiveBroadcastsSection extends StatelessWidget {
                   const SizedBox(height: 12),
                   ElevatedButton.icon(
                     onPressed: () {
-                      // TODO: Start live broadcast
+                      _showStartBroadcastDialog(context, ref);
                     },
                     icon: const Icon(Icons.live_tv),
                     label: const Text('Go Live'),

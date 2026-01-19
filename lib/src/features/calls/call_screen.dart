@@ -1,8 +1,11 @@
 // lib/src/features/calls/call_screen.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' as webrtc;
+import 'package:audioplayers/audioplayers.dart';
+import 'dart:async';
 import 'call_manager.dart';
 import 'call_session.dart';
 
@@ -31,6 +34,8 @@ class _CallScreenState extends ConsumerState<CallScreen> {
   bool _isVideoEnabled = true;
   webrtc.RTCVideoRenderer? _remoteRenderer;
   webrtc.RTCVideoRenderer? _localRenderer;
+  AudioPlayer? _ringtonePlayer;
+  Timer? _ringtoneTimer;
 
   @override
   void initState() {
@@ -39,6 +44,12 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     widget.callManager.onRemoteStream = _onRemoteStream;
     widget.callManager.onError = _onError;
     _initializeRenderers();
+    _initializeRingtone();
+  }
+  
+  Future<void> _initializeRingtone() async {
+    _ringtonePlayer = AudioPlayer();
+    await _ringtonePlayer?.setReleaseMode(ReleaseMode.loop);
   }
 
   Future<void> _initializeRenderers() async {
@@ -65,16 +76,55 @@ class _CallScreenState extends ConsumerState<CallScreen> {
 
   @override
   void dispose() {
+    _stopRingtone();
+    _ringtonePlayer?.dispose();
     _remoteRenderer?.dispose();
     _localRenderer?.dispose();
     super.dispose();
+  }
+  
+  Future<void> _playRingtone() async {
+    if (_ringtonePlayer == null) return;
+    try {
+      // Play system notification sound as ringtone
+      await _ringtonePlayer?.setReleaseMode(ReleaseMode.loop);
+      
+      // Play system sound repeatedly for ringing
+      // Use a timer to play system sound every second
+      _ringtoneTimer?.cancel();
+      _ringtoneTimer = Timer.periodic(const Duration(milliseconds: 1500), (timer) {
+        SystemSound.play(SystemSoundType.alert);
+      });
+      
+      // Also play immediately
+      SystemSound.play(SystemSoundType.alert);
+    } catch (e) {
+      debugPrint('Error playing ringtone: $e');
+    }
+  }
+  
+  Future<void> _stopRingtone() async {
+    _ringtoneTimer?.cancel();
+    await _ringtonePlayer?.stop();
   }
 
   void _onCallStateChanged(CallState state) {
     if (mounted) {
       setState(() {});
+      
+      // Handle ringtone based on call state
+      if (state == CallState.ringing && widget.isIncoming) {
+        _playRingtone();
+      } else if (state == CallState.calling && !widget.isIncoming) {
+        // Play dial tone for outgoing calls (optional)
+        // _playRingtone();
+      } else {
+        _stopRingtone();
+      }
+      
       // Navigate back when call ends
       if (state == CallState.ended) {
+        _stopRingtone();
         Navigator.of(context).pop();
       }
     }

@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:share_plus/share_plus.dart';
 import '../models.dart';
 import '../../../theme/app_theme.dart';
 import '../forward_message_screen.dart';
@@ -15,6 +16,10 @@ import '../../../widgets/colored_avatar.dart';
 import 'message_info_dialog.dart';
 import '../../../core/providers.dart';
 import '../../../utils/text_formatting.dart';
+import '../../calls/call_manager.dart';
+import '../../calls/call_screen.dart';
+import '../../calls/call_session.dart';
+import '../../calls/providers.dart';
 
 class MessageBubble extends ConsumerWidget {
   final Message message;
@@ -290,7 +295,9 @@ class MessageBubble extends ConsumerWidget {
               ),
             ),
             // MEDIA COMPRESSION: Show compression indicator overlay
-            if (attachment.isCompressing)
+            // Only show "Sending..." if message status is actually "sending" or "queued"
+            // Don't show it just because compression is pending (compression can happen in background)
+            if (attachment.isCompressing && (message.status == 'sending' || message.status == 'queued'))
               Container(
                 color: Colors.black.withOpacity(0.5),
                 child: const Center(
@@ -335,7 +342,9 @@ class MessageBubble extends ConsumerWidget {
               width: double.infinity,
             ),
           // MEDIA COMPRESSION: Show compression indicator
-          if (isCompressing)
+          // Only show "Sending..." if message status is actually "sending" or "queued"
+          // Don't show it just because compression is pending (compression can happen in background)
+          if (isCompressing && (message.status == 'sending' || message.status == 'queued'))
             Container(
               color: Colors.black.withOpacity(0.5),
               child: Column(
@@ -741,6 +750,74 @@ class MessageBubble extends ConsumerWidget {
     );
   }
 
+  Future<void> _joinCallFromLink(BuildContext context, WidgetRef ref, String callLink, Map<String, dynamic> callData) async {
+    try {
+      // Extract callId from callLink (format: /calls/join/{callId})
+      final uri = Uri.parse(callLink.startsWith('http') ? callLink : 'https://chat.gekychat.com$callLink');
+      final segments = uri.pathSegments;
+      final callIdIndex = segments.indexOf('join');
+      
+      if (callIdIndex == -1 || callIdIndex >= segments.length - 1) {
+        throw Exception('Invalid call link format');
+      }
+      
+      final callId = segments[callIdIndex + 1];
+      
+      // Get providers
+      final callRepo = ref.read(callRepositoryProvider);
+      final callManager = ref.read(callManagerProvider);
+      
+      // Join the call
+      final response = await callRepo.joinCall(callId);
+      
+      if (response['status'] == 'success' && response['session_id'] != null) {
+        final sessionId = response['session_id'] as int;
+        final callType = callData['type'] as String? ?? 'voice';
+        
+        // Create call session
+        final call = CallSession(
+          id: sessionId,
+          callerId: callData['caller_id'] as int? ?? 0,
+          type: callType,
+          status: 'ongoing',
+        );
+        
+        // Set up call manager
+        callManager.currentCall = call;
+        callManager.callType = callType;
+        callManager.isCaller = false;
+        callManager.callState = CallState.connecting;
+        
+        // Navigate to call screen
+        if (context.mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => CallScreen(
+                call: call,
+                userName: isGroupMessage ? 'Group Call' : 'Call',
+                userAvatar: null,
+                isIncoming: false,
+                callManager: callManager,
+              ),
+            ),
+          );
+        }
+      } else {
+        throw Exception(response['message'] ?? 'Failed to join call');
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to join call: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   Widget _buildCallCard(Map<String, dynamic> callData, bool isDark, bool isMe) {
     final callType = callData['type'] as String? ?? 'voice';
     final callStatus = callData['status'] as String? ?? 'ended';
@@ -788,13 +865,13 @@ class MessageBubble extends ConsumerWidget {
       statusColor = Colors.green;
     }
 
-    return GestureDetector(
-      onTap: callLink != null && isActive
-          ? () async {
-              // Join call - navigate to call screen
-              // This would need to be handled by the parent widget
-            }
-          : null,
+    return Consumer(
+      builder: (context, ref, child) => GestureDetector(
+        onTap: callLink != null && isActive
+            ? () => _joinCallFromLink(context, ref, callLink, callData)
+            : null,
+        child: child,
+      ),
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(12),
@@ -1385,9 +1462,9 @@ class MessageBubble extends ConsumerWidget {
               title: const Text('Invite to GekyChat'),
               onTap: () {
                 Navigator.pop(context);
-                // Open invite dialog - would need to share app download links
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Invite feature coming soon')),
+                Share.share(
+                  'Join me on GekyChat! Download the app and start chatting. Visit https://chat.gekychat.com for more info.',
+                  subject: 'Invitation to GekyChat',
                 );
               },
             ),

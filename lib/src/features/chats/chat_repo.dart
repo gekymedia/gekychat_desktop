@@ -707,6 +707,15 @@ class ChatRepository {
     }
   }
 
+  /// Mark all unread messages in a conversation as read
+  Future<void> markConversationAsRead(int conversationId) async {
+    try {
+      await apiService.markConversationRead(conversationId);
+    } catch (e) {
+      throw Exception('Failed to mark conversation as read: $e');
+    }
+  }
+
   Future<void> sendTypingIndicator(int conversationId, bool isTyping) async {
     try {
       if (isTyping) {

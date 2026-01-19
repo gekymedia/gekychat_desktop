@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -33,6 +34,7 @@ import '../../quick_replies/quick_replies_repository.dart';
 import '../../../theme/app_theme.dart';
 import '../../calls/call_screen.dart';
 import '../../calls/providers.dart';
+import '../../calls/incoming_call_handler.dart';
 import 'text_formatting_toolbar.dart';
 import '../../../utils/text_formatting.dart';
 
@@ -304,6 +306,74 @@ class _ChatViewState extends ConsumerState<ChatView> {
         }
       }
     });
+    
+    // Listen for message status updates (sending -> sent -> delivered -> read)
+    pusherService.listen(channelName, 'MessageStatusUpdated', (data) {
+      if (mounted && data != null) {
+        try {
+          final statusData = data is Map<String, dynamic> ? data : Map<String, dynamic>.from(data as Map);
+          final messageId = statusData['message_id'] as int?;
+          final status = statusData['status'] as String?;
+          
+          if (messageId != null && status != null) {
+            setState(() {
+              final messageIndex = _messages.indexWhere((m) => m.id == messageId);
+              if (messageIndex != -1) {
+                // Update message status by creating a new Message with updated status
+                final oldMessage = _messages[messageIndex];
+                _messages[messageIndex] = Message(
+                  id: oldMessage.id,
+                  conversationId: oldMessage.conversationId,
+                  groupId: oldMessage.groupId,
+                  senderId: oldMessage.senderId,
+                  sender: oldMessage.sender,
+                  body: oldMessage.body,
+                  createdAt: oldMessage.createdAt,
+                  replyToId: oldMessage.replyToId,
+                  forwardedFromId: oldMessage.forwardedFromId,
+                  forwardChain: oldMessage.forwardChain,
+                  attachments: oldMessage.attachments,
+                  reactions: oldMessage.reactions,
+                  callData: oldMessage.callData,
+                  linkPreviews: oldMessage.linkPreviews,
+                  isDeleted: oldMessage.isDeleted,
+                  deletedForMe: oldMessage.deletedForMe,
+                  status: status, // Update status
+                  isSystem: oldMessage.isSystem,
+                  systemAction: oldMessage.systemAction,
+                  readAt: oldMessage.readAt,
+                  deliveredAt: oldMessage.deliveredAt,
+                  locationData: oldMessage.locationData,
+                  contactData: oldMessage.contactData,
+                );
+              }
+            });
+          }
+        } catch (e) {
+          debugPrint('Error handling message status update: $e');
+        }
+      }
+    });
+    
+    // Listen for incoming calls on this conversation
+    pusherService.listen(channelName, 'CallSignal', (data) {
+      if (mounted && data != null) {
+        try {
+          final signalData = data is String ? jsonDecode(data) : data;
+          final payload = signalData['payload'] is String
+              ? jsonDecode(signalData['payload'] as String)
+              : signalData['payload'] as Map<String, dynamic>;
+          
+          // Handle incoming call invite
+          if (payload['action'] == 'invite') {
+            final incomingCallHandler = ref.read(incomingCallHandlerProvider);
+            incomingCallHandler.handleIncomingCallFromConversation(data, widget.conversationId);
+          }
+        } catch (e) {
+          debugPrint('Error handling call signal in conversation: $e');
+        }
+      }
+    });
   }
   
   Future<void> _loadCurrentUserId() async {
@@ -340,6 +410,15 @@ class _ChatViewState extends ConsumerState<ChatView> {
         _isLoading = false;
       });
       _scrollToBottom();
+      
+      // Mark conversation as read after loading messages
+      try {
+        await chatRepo.markConversationAsRead(widget.conversationId);
+      } catch (e) {
+        debugPrint('Failed to mark conversation as read: $e');
+        // Don't show error to user - this is a background operation
+      }
+      
       // Update badge after loading messages (may have changed unread count)
       _updateTaskbarBadge();
     } catch (e) {
@@ -524,6 +603,14 @@ class _ChatViewState extends ConsumerState<ChatView> {
             _replyingToMessage = null;
           });
           _scrollToBottom();
+          
+          // Reload messages after a short delay to get updated status from server
+          // This ensures that if the message status wasn't set correctly initially, it will be updated
+          Future.delayed(const Duration(seconds: 2), () {
+            if (mounted) {
+              _loadMessages();
+            }
+          });
         }
       }
     } catch (e) {

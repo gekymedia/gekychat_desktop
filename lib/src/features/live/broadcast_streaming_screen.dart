@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:livekit_client/livekit_client.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
+import 'package:permission_handler/permission_handler.dart';
 import 'live_broadcast_repository.dart';
 
 /// PHASE 2: Broadcast Streaming Screen for Desktop
@@ -47,6 +48,18 @@ class _BroadcastStreamingScreenState extends ConsumerState<BroadcastStreamingScr
         _errorMessage = null;
       });
 
+      // Request camera and microphone permissions first
+      final cameraStatus = await Permission.camera.request();
+      final micStatus = await Permission.microphone.request();
+      
+      if (!cameraStatus.isGranted) {
+        throw Exception('Camera permission is required to start broadcasting');
+      }
+      
+      if (!micStatus.isGranted) {
+        throw Exception('Microphone permission is required to start broadcasting');
+      }
+
       final roomName = widget.startData['room_name'] as String? ?? '';
       final token = widget.startData['token'] as String? ?? '';
       final websocketUrl = widget.startData['websocket_url'] as String? ?? '';
@@ -64,7 +77,7 @@ class _BroadcastStreamingScreenState extends ConsumerState<BroadcastStreamingScr
         token,
       );
 
-      // Enable camera and microphone
+      // Enable camera and microphone after connection
       await room.localParticipant?.setCameraEnabled(_cameraEnabled);
       await room.localParticipant?.setMicrophoneEnabled(_microphoneEnabled);
 

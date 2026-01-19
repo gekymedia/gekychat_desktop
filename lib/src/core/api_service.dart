@@ -452,6 +452,14 @@ class ApiService {
   Future<Response> markConversationUnread(int conversationId) =>
       post('/conversations/$conversationId/mark-unread');
 
+  Future<Response> markConversationRead(int conversationId, {List<int>? messageIds}) {
+    final data = <String, dynamic>{};
+    if (messageIds != null && messageIds.isNotEmpty) {
+      data['message_ids'] = messageIds;
+    }
+    return post('/conversations/$conversationId/read', data: data.isNotEmpty ? data : null);
+  }
+
   Future<Response> archiveConversation(int conversationId) =>
       post('/conversations/$conversationId/archive');
 
@@ -500,6 +508,11 @@ class ApiService {
   // ---------------------------------------------------------------------------
 
   Future<Response> getLinkedDevices() => get('/linked-devices');
+  Future<Response> linkDevice({required String token, String? deviceName}) =>
+    post('/linked-devices/link', data: {
+      'token': token,
+      if (deviceName != null) 'device_name': deviceName,
+    });
   Future<Response> deleteLinkedDevice(dynamic id) => delete('/linked-devices/$id');
   Future<Response> deleteOtherLinkedDevices() => delete('/linked-devices/others');
 
@@ -728,7 +741,8 @@ class ApiService {
     });
     return post('/world-feed/posts', data: formData);
   }
-  Future<Response> likeWorldFeedPost(int postId) => post('/world-feed/posts/$postId/like');
+  Future<Response> likeWorldFeedPost(int postId) => post('/world-feed/posts/$postId/like'); // Toggle endpoint - handles both like and unlike
+  Future<Response> unlikeWorldFeedPost(int postId) => post('/world-feed/posts/$postId/like'); // Use toggle endpoint for unlike too
   Future<Response> getWorldFeedPostComments(int postId, {int? page}) =>
     get('/world-feed/posts/$postId/comments', queryParameters: page != null ? {'page': page} : null);
   Future<Response> addWorldFeedComment(int postId, {required String body, int? parentCommentId}) =>
@@ -736,8 +750,14 @@ class ApiService {
       'comment': body, // Backend expects 'comment' field
       if (parentCommentId != null) 'parent_id': parentCommentId, // Backend expects 'parent_id'
     });
+  Future<Response> likeWorldFeedComment(int commentId) =>
+    post('/world-feed/comments/$commentId/like'); // Toggle endpoint for comment likes
+  Future<Response> unlikeWorldFeedComment(int commentId) =>
+    post('/world-feed/comments/$commentId/like'); // Use toggle endpoint for unlike too
   Future<Response> followWorldFeedCreator(int creatorId) =>
-    post('/world-feed/creators/$creatorId/follow');
+    post('/world-feed/creators/$creatorId/follow'); // Toggle endpoint - handles both follow and unfollow
+  Future<Response> unfollowWorldFeedCreator(int creatorId) =>
+    post('/world-feed/creators/$creatorId/follow'); // Use toggle endpoint for unfollow too
   Future<Response> getWorldFeedPostShareUrl(int postId) =>
     get('/world-feed/posts/$postId/share-url');
 

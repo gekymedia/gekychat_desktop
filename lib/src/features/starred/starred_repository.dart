@@ -14,59 +14,49 @@ class StarredRepository {
   StarredRepository(this._api);
 
   /// Get all starred messages
-  /// Note: This endpoint may need to be created in the backend
   Future<List<StarredMessage>> getStarredMessages() async {
     try {
-      // TODO: Replace with actual API endpoint when available
-      // For now, return empty list as placeholder
-      // final response = await _api.get('/starred-messages');
-      // final data = response.data;
-      // final messagesData = data['data'] is List ? data['data'] as List : [];
-      // return messagesData.map((json) => StarredMessage.fromJson(json)).toList();
-      
-      return [];
+      final response = await _api.get('/starred-messages');
+      final data = response.data;
+      final messagesData = data['data'] is List ? data['data'] as List : [];
+      return messagesData.map((json) => StarredMessage.fromJson(json)).toList();
     } catch (e) {
       throw Exception('Failed to load starred messages: $e');
     }
   }
 
   /// Star a message
-  /// Note: This endpoint may need to be created in the backend
   Future<void> starMessage(int messageId, {int? conversationId, int? groupId}) async {
     try {
-      // TODO: Replace with actual API endpoint when available
-      // if (groupId != null) {
-      //   await _api.post('/groups/$groupId/messages/$messageId/star');
-      // } else {
-      //   await _api.post('/conversations/$conversationId/messages/$messageId/star');
-      // }
+      if (groupId != null) {
+        await _api.post('/groups/$groupId/messages/$messageId/star');
+      } else {
+        await _api.post('/messages/$messageId/star');
+      }
     } catch (e) {
       throw Exception('Failed to star message: $e');
     }
   }
 
   /// Unstar a message
-  /// Note: This endpoint may need to be created in the backend
   Future<void> unstarMessage(int messageId, {int? conversationId, int? groupId}) async {
     try {
-      // TODO: Replace with actual API endpoint when available
-      // if (groupId != null) {
-      //   await _api.delete('/groups/$groupId/messages/$messageId/star');
-      // } else {
-      //   await _api.delete('/conversations/$conversationId/messages/$messageId/star');
-      // }
+      if (groupId != null) {
+        await _api.delete('/groups/$groupId/messages/$messageId/star');
+      } else {
+        await _api.delete('/messages/$messageId/star');
+      }
     } catch (e) {
       throw Exception('Failed to unstar message: $e');
     }
   }
 
   /// Check if a message is starred
-  /// Note: This will need backend support or local storage
+  /// This checks by fetching all starred messages and checking if the message ID exists
   Future<bool> isMessageStarred(int messageId) async {
     try {
-      // TODO: Implement when backend API is available
-      // For now, use local storage as a workaround
-      return false;
+      final starredMessages = await getStarredMessages();
+      return starredMessages.any((msg) => msg.messageId == messageId || msg.groupMessageId == messageId);
     } catch (e) {
       return false;
     }

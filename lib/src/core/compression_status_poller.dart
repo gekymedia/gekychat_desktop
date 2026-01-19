@@ -39,18 +39,19 @@ class CompressionStatusPoller {
       }
 
       try {
-        // TODO: Backend should provide endpoint to check attachment status
-        // For now, we'll need to check message attachments after they're loaded
-        // This is a placeholder for future implementation
-        // final response = await _apiService.getAttachment(attachmentId);
-        // final status = response.data['compression_status'];
+        final response = await _apiService.getAttachment(attachmentId);
+        final data = response.data['data'] ?? response.data;
+        final status = data['compression_status'] as String?;
         
-        // If we had the endpoint:
-        // if (status == 'completed' || status == 'failed') {
-        //   timer.cancel();
-        //   _activePolls.remove(attachmentId);
-        //   onComplete?.call();
-        // }
+        // Call status update callback
+        onStatusUpdate(data);
+        
+        // If compression is complete or failed, stop polling
+        if (status == 'completed' || status == 'failed') {
+          timer.cancel();
+          _activePolls.remove(attachmentId);
+          onComplete?.call();
+        }
       } catch (e) {
         // Poll failed, stop polling
         timer.cancel();

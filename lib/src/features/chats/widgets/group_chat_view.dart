@@ -1169,10 +1169,11 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                       }
                       break;
                     case 'archive':
-                      // Archive group - would need archive group API endpoint
+                      // Groups don't have archive endpoints - only conversations do
+                      // Remove this option or show info message
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Archive group feature coming soon')),
+                          const SnackBar(content: Text('Group archiving is not available. You can leave the group instead.')),
                         );
                       }
                       break;

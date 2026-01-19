@@ -71,3 +71,25 @@ class SelectedConversationNotifier extends StateNotifier<int?> {
 }
 
 final selectedConversationProvider = StateNotifierProvider<SelectedConversationNotifier, int?>((ref) => SelectedConversationNotifier());
+
+// Provider for sounds preference
+final soundsEnabledProvider = StateNotifierProvider<SoundsNotifier, bool>((ref) {
+  return SoundsNotifier();
+});
+
+class SoundsNotifier extends StateNotifier<bool> {
+  SoundsNotifier() : super(true) {
+    _loadPreference();
+  }
+
+  Future<void> _loadPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    state = prefs.getBool('sounds_enabled') ?? true;
+  }
+
+  Future<void> setEnabled(bool enabled) async {
+    state = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('sounds_enabled', enabled);
+  }
+}

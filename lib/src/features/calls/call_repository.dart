@@ -73,5 +73,15 @@ class CallRepository {
       throw Exception('Failed to load call logs: $e');
     }
   }
+
+  /// PHASE 1: Get TURN/ICE server configuration
+  Future<Map<String, dynamic>> getCallConfig() async {
+    try {
+      final response = await _api.get('/calls/config');
+      return response.data;
+    } catch (e) {
+      throw Exception('Failed to get call config: $e');
+    }
+  }
 }
 

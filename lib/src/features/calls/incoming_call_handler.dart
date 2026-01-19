@@ -42,6 +42,10 @@ class IncomingCallHandler {
   }
 
   void _handleIncomingCall(dynamic data) {
+    handleIncomingCallFromConversation(data, null);
+  }
+  
+  void handleIncomingCallFromConversation(dynamic data, int? conversationId) {
     try {
       final signalData = data is String ? jsonDecode(data) : data;
       final payload = signalData['payload'] is String
@@ -52,11 +56,20 @@ class IncomingCallHandler {
         final sessionId = payload['session_id'] as int;
         final callType = payload['type'] as String? ?? 'voice';
         final caller = payload['caller'] as Map<String, dynamic>?;
+        final calleeId = payload['callee_id'] as int?;
+        
+        // Check if this call is for the current user
+        if (calleeId != null && calleeId != _currentUserId) {
+          // This call is not for us, ignore it
+          return;
+        }
 
         // Create call session
         final call = CallSession(
           id: sessionId,
           callerId: caller?['id'] as int? ?? 0,
+          calleeId: calleeId ?? _currentUserId,
+          conversationId: conversationId ?? payload['conversation_id'] as int?,
           type: callType,
           status: 'pending',
         );

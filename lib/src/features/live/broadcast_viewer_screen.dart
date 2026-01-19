@@ -44,8 +44,21 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
     _room?.disconnect();
     super.dispose();
   }
+  
+  /// Subscribe to all video tracks from a remote participant
+  /// Note: LiveKit auto-subscribes tracks by default, but we ensure we're listening for them
+  void _subscribeToParticipantTracks(RemoteParticipant participant) {
+    // Tracks are auto-subscribed in LiveKit by default
+    // This method ensures we update the UI when tracks are available
+    if (mounted) {
+      setState(() {
+        // Force UI update to check for available tracks
+      });
+    }
+  }
 
   Future<void> _connectToRoom() async {
+    String websocketUrl = '';
     try {
       setState(() {
         _isConnecting = true;
@@ -54,14 +67,21 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
 
       final roomName = widget.joinData['room_name'] as String? ?? '';
       final token = widget.joinData['token'] as String? ?? '';
-      final websocketUrl = widget.joinData['websocket_url'] as String? ?? '';
+      websocketUrl = widget.joinData['websocket_url'] as String? ?? '';
+      
+      // Debug: Log the join data
+      debugPrint('🔍 LiveKit Join Data: room_name=$roomName, token=${token.isNotEmpty ? "present" : "missing"}, websocket_url=$websocketUrl');
 
       if (token.isEmpty || roomName.isEmpty) {
-        throw Exception('Missing token or room name');
+        throw Exception('Missing token or room name. Token: ${token.isEmpty ? "missing" : "present"}, Room: ${roomName.isEmpty ? "missing" : roomName}');
       }
 
       if (websocketUrl.isEmpty) {
-        throw Exception('LiveKit server URL is not configured. Please check server settings.');
+        throw Exception('LiveKit server URL is not configured. Please check server settings.\n\n'
+            'The backend did not provide a websocket_url. Please ensure:\n'
+            '• LIVEKIT_URL is set in server .env file\n'
+            '• LiveKitService is properly configured\n'
+            '• The /live/{id}/join endpoint returns websocket_url');
       }
 
       // Validate websocket URL format
@@ -109,11 +129,44 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
         })
         ..on<ParticipantConnectedEvent>((event) {
           if (mounted) {
+            final participant = event.participant;
+            // Only handle remote participants (broadcasters)
+            if (participant is! LocalParticipant) {
+              setState(() {
+                _broadcaster = participant as RemoteParticipant;
+              });
+              // Check for existing tracks and update UI
+              _subscribeToParticipantTracks(participant as RemoteParticipant);
+              debugPrint('📹 Broadcaster connected: ${participant.identity}, tracks: ${(participant as RemoteParticipant).trackPublications.length}');
+            }
+          }
+        })
+        ..on<TrackPublishedEvent>((event) {
+          // When a track is published, update UI
+          if (mounted) {
+            final participant = event.participant;
+            // Only handle remote participants (broadcasters)
+            if (participant is! LocalParticipant) {
+              debugPrint('📹 Track published: ${event.publication.kind}, subscribed: ${event.publication.subscribed}');
+              setState(() {
+                // Force UI update when track is published
+              });
+            }
+          }
+        })
+        ..on<TrackSubscribedEvent>((event) {
+          // Track subscribed successfully - update UI
+          if (mounted) {
             setState(() {
-              _broadcaster = event.participant as RemoteParticipant?;
+              // Force UI update when track is subscribed
             });
           }
         });
+      
+      // Subscribe to tracks of existing participants
+      for (final participant in room.remoteParticipants.values) {
+        _subscribeToParticipantTracks(participant);
+      }
 
       setState(() {
         _room = room;
@@ -122,13 +175,26 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
     } catch (e) {
       if (mounted) {
         String errorMsg = 'Failed to connect: $e';
+        String errorString = e.toString();
+        
         // Provide more helpful error messages
-        if (e.toString().contains('Page Not Found') || e.toString().contains('404')) {
-          errorMsg = 'LiveKit server not found. Please check server configuration.\n\nError: $e';
-        } else if (e.toString().contains('timeout')) {
-          errorMsg = 'Connection timeout. LiveKit server may be unreachable.\n\nError: $e';
-        } else if (e.toString().contains('ConnectException')) {
-          errorMsg = 'Cannot connect to LiveKit server. Please verify the server is running and the URL is correct.\n\nError: $e';
+        if (errorString.contains('Page Not Found') || errorString.contains('404') || errorString.contains('<!doctype html>')) {
+          errorMsg = 'LiveKit server not found. Please check server configuration.\n\n'
+              'The LiveKit server may not be running or the URL is incorrect.\n'
+              'Please verify:\n'
+              '• LIVEKIT_URL is configured in server .env file\n'
+              '• LiveKit server is running and accessible\n'
+              '• The WebSocket URL format is correct (ws:// or wss://)\n\n'
+              'Attempted URL: ${websocketUrl.isEmpty ? "Not provided" : websocketUrl}\n\n'
+              'Error: ${errorString.length > 300 ? errorString.substring(0, 300) + "..." : errorString}';
+        } else if (errorString.contains('timeout') || errorString.contains('Timeout')) {
+          errorMsg = 'Connection timeout. LiveKit server may be unreachable.\n\n'
+              'The server at ${websocketUrl.isEmpty ? "unknown URL" : websocketUrl} did not respond.\n\n'
+              'Error: $e';
+        } else if (errorString.contains('ConnectException') || errorString.contains('Connection')) {
+          errorMsg = 'Cannot connect to LiveKit server. Please verify the server is running and the URL is correct.\n\n'
+              'Attempted to connect to: ${websocketUrl.isEmpty ? "Not provided" : websocketUrl}\n\n'
+              'Error: $e';
         }
         setState(() {
           _errorMessage = errorMsg;
@@ -190,29 +256,34 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
                   )
                 else if (_errorMessage != null)
                   Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.error_outline,
-                          size: 64,
-                          color: Colors.red.shade300,
+                    child: SingleChildScrollView(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24.0),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.error_outline,
+                              size: 64,
+                              color: Colors.red.shade300,
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              _errorMessage!,
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.7),
+                                fontSize: 16,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 24),
+                            ElevatedButton(
+                              onPressed: _connectToRoom,
+                              child: const Text('Retry'),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 16),
-                        Text(
-                          _errorMessage!,
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.7),
-                            fontSize: 16,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 24),
-                        ElevatedButton(
-                          onPressed: _connectToRoom,
-                          child: const Text('Retry'),
-                        ),
-                      ],
+                      ),
                     ),
                   )
                 else if (_broadcaster != null)

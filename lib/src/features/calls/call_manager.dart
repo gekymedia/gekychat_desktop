@@ -52,23 +52,73 @@ class CallManager {
   Function(String)? onError; // New error callback
   
   // WebRTC configuration with TURN support
-  // PHASE 0: Foundation configuration - TURN servers will be added in Phase 1
-  // TODO (PHASE 1): Fetch TURN server config from backend API endpoint
-  // TODO (PHASE 1): Add TURN servers to iceServers list when enabled
-  // TODO (PHASE 1): Handle TURN server authentication (username/credential)
-  Map<String, dynamic> get _rtcConfiguration {
+  // PHASE 1: TURN/ICE server configuration (cached)
+  Map<String, dynamic>? _cachedRtcConfig;
+
+  // WebRTC configuration with TURN support
+  // PHASE 1: Fetches TURN server config from backend API
+  Future<Map<String, dynamic>> getRtcConfiguration() async {
+    // Return cached config if available
+    if (_cachedRtcConfig != null) {
+      return _cachedRtcConfig!;
+    }
+
     final config = {
       'iceServers': [
         {'urls': 'stun:stun.l.google.com:19302'},
         {'urls': 'stun:stun1.l.google.com:19302'},
       ],
     };
-    
-    // PHASE 0: TURN server configuration placeholder (same as mobile)
-    // TODO (PHASE 1): Get TURN config from environment or API
-    // See gekychat_mobile/lib/src/features/calls/call_manager.dart for implementation template
-    
+
+    try {
+      // PHASE 1: Fetch TURN config from backend
+      final callConfig = await _callRepo.getCallConfig();
+      
+      if (callConfig['status'] == 'success') {
+        final turnConfig = callConfig['config'];
+        
+        // Add TURN servers if available
+        if (turnConfig['turn'] != null && turnConfig['turn'] is List) {
+          final turnServers = turnConfig['turn'] as List;
+          final iceServers = config['iceServers'] as List;
+          for (final server in turnServers) {
+            if (server is Map && server['urls'] != null) {
+              // Handle both String and List<String> for urls
+              final urls = server['urls'];
+              iceServers.add({
+                'urls': urls is String ? urls : (urls is List ? urls.join(',') : urls.toString()),
+                if (server['username'] != null) 'username': server['username'] as String,
+                if (server['credential'] != null) 'credential': server['credential'] as String,
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Silently fall back to STUN only if config fetch fails
+      debugPrint('Failed to fetch TURN config: $e');
+    }
+
+    // Cache the config for future use
+    _cachedRtcConfig = config;
     return config;
+  }
+
+  // Synchronous getter for backward compatibility (uses cached config or defaults)
+  // Note: Prefer using getRtcConfiguration() for async TURN config fetching
+  @Deprecated('Use getRtcConfiguration() instead for TURN server support')
+  Map<String, dynamic> get _rtcConfiguration {
+    if (_cachedRtcConfig != null) {
+      return _cachedRtcConfig!;
+    }
+    
+    // Return default STUN-only config
+    return {
+      'iceServers': [
+        {'urls': 'stun:stun.l.google.com:19302'},
+        {'urls': 'stun:stun1.l.google.com:19302'},
+      ],
+    };
   }
 
   CallManager(this._callRepo, this._pusherService) {
@@ -266,7 +316,9 @@ class CallManager {
 
   /// Create WebRTC peer connection
   Future<void> _createPeerConnection() async {
-    _peerConnection = await webrtc.createPeerConnection(_rtcConfiguration);
+    // PHASE 1: Fetch TURN config before creating peer connection
+    final rtcConfig = await getRtcConfiguration();
+    _peerConnection = await webrtc.createPeerConnection(rtcConfig);
 
     // Add local stream tracks
     if (_localStream != null) {

@@ -13,7 +13,6 @@ import '../two_factor/two_factor_screen.dart';
 import '../linked_devices/linked_devices_screen.dart';
 import '../privacy/privacy_settings_screen.dart';
 import '../storage/storage_usage_screen.dart';
-import '../media/media_gallery_screen.dart';
 import '../media_auto_download/media_auto_download_screen.dart';
 import '../notifications/notification_settings_screen.dart';
 import '../../core/theme/theme_provider.dart' as custom_theme;
@@ -198,9 +197,9 @@ class SettingsScreen extends ConsumerWidget {
                     title: 'Sounds',
                     subtitle: 'Message and call sounds',
                     trailing: Switch(
-                      value: true, // TODO: Load from preferences
+                      value: ref.watch(soundsEnabledProvider),
                       onChanged: (value) {
-                        // TODO: Save to preferences
+                        ref.read(soundsEnabledProvider.notifier).setEnabled(value);
                       },
                     ),
                   ),
@@ -305,12 +304,37 @@ class SettingsScreen extends ConsumerWidget {
             TextButton(
               onPressed: selectedOption == null
                   ? null
-                  : () {
-                      // TODO: Implement privacy setting update
+                  : () async {
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Privacy setting updated: $selectedOption')),
-                      );
+                      try {
+                        final apiService = ref.read(apiServiceProvider);
+                        // Map UI option to API key
+                        String apiKey = 'last_seen';
+                        if (selectedOption == 'My Contacts') {
+                          apiKey = 'last_seen';
+                        } else if (selectedOption == 'Nobody') {
+                          apiKey = 'last_seen';
+                        } else if (selectedOption == 'Everyone') {
+                          apiKey = 'last_seen';
+                        }
+                        
+                        await apiService.updatePrivacySettings({apiKey: selectedOption});
+                        
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Privacy setting updated'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Failed to update privacy: $e')),
+                          );
+                        }
+                      }
                     },
               child: const Text('Save'),
             ),
@@ -353,12 +377,37 @@ class SettingsScreen extends ConsumerWidget {
             TextButton(
               onPressed: selectedOption == null
                   ? null
-                  : () {
-                      // TODO: Implement status privacy update via API
+                  : () async {
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Status privacy updated: $selectedOption')),
-                      );
+                      try {
+                        final apiService = ref.read(apiServiceProvider);
+                        // Map UI option to API value
+                        String apiValue = 'contacts';
+                        if (selectedOption == 'My Contacts') {
+                          apiValue = 'contacts';
+                        } else if (selectedOption == 'My Contacts Except...') {
+                          apiValue = 'contacts_except';
+                        } else if (selectedOption == 'Only Share With...') {
+                          apiValue = 'only_share_with';
+                        }
+                        
+                        await apiService.put('/statuses/privacy', data: {'status_privacy': apiValue});
+                        
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Status privacy updated'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Failed to update status privacy: $e')),
+                          );
+                        }
+                      }
                     },
               child: const Text('Save'),
             ),

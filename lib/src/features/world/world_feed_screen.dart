@@ -13,6 +13,7 @@ import 'widgets/fullscreen_video_player.dart';
 import 'widgets/fullscreen_media_viewer.dart';
 import '../../features/contacts/contact_info_screen.dart';
 import '../../features/chats/models.dart';
+import '../../features/search/search_screen.dart';
 import '../../widgets/constrained_slide_route.dart';
 
 /// PHASE 2: World Feed Screen - Instagram-like grid layout for desktop
@@ -647,6 +648,126 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
     );
   }
 
+  Future<void> _showReportDialog(Map<String, dynamic> post) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final creator = post['creator'] as Map<String, dynamic>?;
+    final creatorName = creator?['name'] ?? 'this user';
+    final creatorId = creator?['id'] as int?;
+    
+    if (creatorId == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to report: user information not available')),
+        );
+      }
+      return;
+    }
+    
+    final reasonController = TextEditingController();
+    final detailsController = TextEditingController();
+    String? selectedReason;
+    bool blockAfterReport = false;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
+          title: Text(
+            'Report User',
+            style: TextStyle(color: isDark ? Colors.white : Colors.black),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Why are you reporting $creatorName?',
+                  style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                ),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  value: selectedReason,
+                  decoration: InputDecoration(
+                    labelText: 'Reason',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'spam', child: Text('Spam')),
+                    DropdownMenuItem(value: 'harassment', child: Text('Harassment')),
+                    DropdownMenuItem(value: 'inappropriate', child: Text('Inappropriate content')),
+                    DropdownMenuItem(value: 'fake', child: Text('Fake account')),
+                    DropdownMenuItem(value: 'other', child: Text('Other')),
+                  ],
+                  onChanged: (value) => setState(() => selectedReason = value),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: detailsController,
+                  decoration: InputDecoration(
+                    labelText: 'Additional details (optional)',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  maxLines: 3,
+                  maxLength: 500,
+                ),
+                const SizedBox(height: 16),
+                CheckboxListTile(
+                  title: const Text('Block this user after reporting'),
+                  value: blockAfterReport,
+                  onChanged: (value) => setState(() => blockAfterReport = value ?? false),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: selectedReason != null
+                  ? () => Navigator.pop(context, true)
+                  : null,
+              child: const Text('Report'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (result == true && selectedReason != null) {
+      try {
+        final apiService = ref.read(apiServiceProvider);
+        await apiService.reportUser(
+          creatorId,
+          selectedReason!,
+          details: detailsController.text.trim().isEmpty
+              ? null
+              : detailsController.text.trim(),
+          block: blockAfterReport,
+        );
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('User reported successfully')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to report user: $e')),
+          );
+        }
+      }
+    }
+  }
+
   void _navigateToProfile(Map<String, dynamic>? creator) {
     if (creator == null || creator['id'] == null) return;
     
@@ -707,11 +828,7 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
         _navigateToProfile(creator);
         break;
       case 'report':
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Report feature coming soon')),
-          );
-        }
+        _showReportDialog(post);
         break;
     }
   }
@@ -879,7 +996,12 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
                 const SizedBox(width: 12),
                 OutlinedButton.icon(
                   onPressed: () {
-                    // TODO: Navigate to find creators
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const SearchScreen(),
+                      ),
+                    );
                   },
                   icon: const Icon(Icons.people),
                   label: const Text('Find Creators'),

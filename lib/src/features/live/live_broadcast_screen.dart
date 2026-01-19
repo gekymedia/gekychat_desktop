@@ -279,24 +279,41 @@ class LiveBroadcastScreen extends ConsumerWidget {
       final repo = ref.read(liveBroadcastRepositoryProvider);
       final result = await repo.joinBroadcast(broadcastId);
       
+      // Check if user is the broadcaster (owner)
+      final isBroadcaster = result['is_broadcaster'] as bool? ?? false;
+      
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Joining broadcast...'),
+        SnackBar(
+          content: Text(isBroadcaster ? 'Joining as broadcaster...' : 'Joining broadcast...'),
           backgroundColor: Colors.green,
         ),
       );
       
-      // Navigate to broadcast viewer screen
+      // Navigate to appropriate screen based on role
       if (context.mounted) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => BroadcastViewerScreen(
-              broadcastId: broadcastId,
-              joinData: result,
+        if (isBroadcaster) {
+          // Owner - navigate to streaming screen to enable camera
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => BroadcastStreamingScreen(
+                broadcastId: broadcastId,
+                startData: result,
+              ),
             ),
-          ),
-        );
+          );
+        } else {
+          // Viewer - navigate to viewer screen
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => BroadcastViewerScreen(
+                broadcastId: broadcastId,
+                joinData: result,
+              ),
+            ),
+          );
+        }
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(

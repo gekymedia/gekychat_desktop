@@ -1,11 +1,14 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:video_player/video_player.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
 import 'models.dart';
 import 'status_repository.dart';
+import '../../core/providers.dart';
 
 /// Helper function to build avatar with error handling
 Widget _buildStatusAvatar({required String? avatarUrl, required String name, required double radius}) {
@@ -558,18 +561,58 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
     try {
       final repo = ref.read(statusRepositoryProvider);
       final downloadUrl = repo.getStatusDownloadUrl(status.id);
+      final apiService = ref.read(apiServiceProvider);
       
-      // For desktop, we'll need to implement actual file download
-      // For now, show a message that download started
+      // Determine file extension from media URL or status type
+      String fileExtension = 'jpg';
+      if (status.type == StatusType.video) {
+        fileExtension = 'mp4';
+      } else if (status.type == StatusType.image) {
+        final url = status.mediaUrl ?? '';
+        if (url.contains('.')) {
+          fileExtension = url.split('.').last.split('?').first;
+        }
+      }
+      
+      final fileName = 'status_${status.id}.$fileExtension';
+      
+      // Get download directory
+      final directory = await getApplicationDocumentsDirectory();
+      final downloadDir = Directory('${directory.path}/Downloads');
+      if (!await downloadDir.exists()) {
+        await downloadDir.create(recursive: true);
+      }
+      
+      final savePath = '${downloadDir.path}/$fileName';
+      
+      // Show downloading indicator
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Download started')),
+          const SnackBar(content: Text('Downloading...')),
         );
       }
       
-      // TODO: Implement actual file download for desktop
-      // This would require using url_launcher or a file picker package
-      debugPrint('Download URL: $downloadUrl');
+      // Download file using apiService
+      await apiService.downloadFile(
+        downloadUrl,
+        savePath,
+        onReceiveProgress: (received, total) {
+          if (total != -1) {
+            final progress = (received / total * 100).toStringAsFixed(0);
+            debugPrint('Download progress: $progress%');
+          }
+        },
+      );
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Downloaded to Downloads/$fileName'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
