@@ -48,16 +48,18 @@ class TaskbarBadgeService {
   }
 
   /// Update the taskbar badge with unread message count
+  /// For testing: Always show badge even when app is open
   Future<void> updateBadge() async {
     try {
       final unreadCount = await _calculateTotalUnreadCount();
       
-      // Only update if count changed
+      // Update badge when count changes
       if (unreadCount != _lastUnreadCount) {
         _lastUnreadCount = unreadCount;
         
         // Debug platform detection
         debugPrint('🔍 Platform check - isWindows: ${Platform.isWindows}, isMacOS: ${Platform.isMacOS}, isLinux: ${Platform.isLinux}');
+        debugPrint('📊 Updating badge with unread count: $unreadCount (last: $_lastUnreadCount)');
         
         if (Platform.isWindows) {
           // Use Windows-specific taskbar badge
@@ -68,6 +70,8 @@ class TaskbarBadgeService {
         } else {
           debugPrint('⚠️ Taskbar badge not supported on this platform (unread: $unreadCount)');
         }
+      } else {
+        debugPrint('📊 Badge count unchanged: $unreadCount');
       }
     } catch (e, stackTrace) {
       debugPrint('Error updating taskbar badge: $e');
@@ -78,30 +82,31 @@ class TaskbarBadgeService {
   /// Update badge on Windows using windows_taskbar package
   Future<void> _updateWindowsBadge(int unreadCount) async {
     try {
-      if (unreadCount > 0) {
-        // Generate badge icon
-        final iconPath = await BadgeIconGenerator.generateBadgeIcon(unreadCount);
-        
-        // Verify the file exists
-        final iconFile = File(iconPath);
-        if (!await iconFile.exists()) {
-          debugPrint('⚠️ Badge icon file does not exist: $iconPath');
-          return;
-        }
-        
-        // Set overlay icon on Windows taskbar
-        // WindowsTaskbar.setOverlayIcon expects a ThumbnailToolbarAssetIcon
-        WindowsTaskbar.setOverlayIcon(
-          ThumbnailToolbarAssetIcon(iconPath),
-        );
-        
-        final badgeText = unreadCount > 99 ? '99+' : unreadCount.toString();
-        debugPrint('📊 Windows taskbar badge updated: $badgeText (icon: $iconPath, exists: ${await iconFile.exists()})');
-      } else {
-        // Clear badge using resetOverlayIcon
+      if (unreadCount == 0) {
+        // Clear badge when no unread messages
         WindowsTaskbar.resetOverlayIcon();
         debugPrint('📊 Windows taskbar badge cleared');
+        return;
       }
+      
+      // Generate badge icon for unread count
+      final iconPath = await BadgeIconGenerator.generateBadgeIcon(unreadCount);
+      
+      // Verify the file exists
+      final iconFile = File(iconPath);
+      if (!await iconFile.exists()) {
+        debugPrint('⚠️ Badge icon file does not exist: $iconPath');
+        return;
+      }
+      
+      // Set overlay icon on Windows taskbar
+      // WindowsTaskbar.setOverlayIcon expects a ThumbnailToolbarAssetIcon
+      WindowsTaskbar.setOverlayIcon(
+        ThumbnailToolbarAssetIcon(iconPath),
+      );
+      
+      final badgeText = unreadCount > 99 ? '99+' : unreadCount.toString();
+      debugPrint('📊 Windows taskbar badge updated: $badgeText (icon: $iconPath, exists: ${await iconFile.exists()})');
     } catch (e, stackTrace) {
       debugPrint('❌ Error updating Windows taskbar badge: $e');
       debugPrint('Stack trace: $stackTrace');

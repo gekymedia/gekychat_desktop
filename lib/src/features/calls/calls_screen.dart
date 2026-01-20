@@ -325,68 +325,18 @@ class _LiveBroadcastsSection extends ConsumerWidget {
 
   const _LiveBroadcastsSection({required this.isDark});
 
-  void _showStartBroadcastDialog(BuildContext context, WidgetRef ref) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final titleController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
-        title: Text(
-          'Start Live Broadcast',
-          style: TextStyle(color: isDark ? Colors.white : Colors.black),
-        ),
-        content: TextField(
-          controller: titleController,
-          decoration: InputDecoration(
-            labelText: 'Broadcast Title',
-            labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.grey[600]),
-            border: const OutlineInputBorder(),
-            enabledBorder: OutlineInputBorder(
-              borderSide: BorderSide(
-                color: isDark ? const Color(0xFF2A3942) : Colors.grey.shade300,
-              ),
-            ),
-          ),
-          style: TextStyle(color: isDark ? Colors.white : Colors.black),
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Cancel',
-              style: TextStyle(color: isDark ? Colors.white70 : Colors.grey[600]),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (titleController.text.trim().isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please enter a title')),
-                );
-                return;
-              }
-
-              Navigator.pop(context);
-              await _startBroadcast(context, ref, titleController.text.trim());
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Go Live'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _startBroadcast(BuildContext context, WidgetRef ref, String title) async {
+  Future<void> _startBroadcast(BuildContext context, WidgetRef ref) async {
     try {
+      // Get current user to generate default title
+      final userProfileAsync = ref.read(currentUserProvider);
+      final userProfile = userProfileAsync.requireValue;
+      
+      // Generate default title: "{username} is live" or "user_{id} is live"
+      final username = userProfile.username ?? "user_${userProfile.id}";
+      final defaultTitle = "$username is live";
+      
       final repo = ref.read(liveBroadcastRepositoryProvider);
-      final result = await repo.startBroadcast(title: title);
+      final result = await repo.startBroadcast(title: defaultTitle);
       
       // Navigate to broadcast streaming screen
       if (context.mounted) {
@@ -465,7 +415,7 @@ class _LiveBroadcastsSection extends ConsumerWidget {
                   const SizedBox(height: 12),
                   ElevatedButton.icon(
                     onPressed: () {
-                      _showStartBroadcastDialog(context, ref);
+                      _startBroadcast(context, ref);
                     },
                     icon: const Icon(Icons.live_tv),
                     label: const Text('Go Live'),

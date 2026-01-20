@@ -5,7 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/providers.dart';
 import '../../theme/app_theme.dart';
 import '../chats/models.dart';
-import '../chats/chat_repo.dart';
+import '../chats/chat_providers.dart';
 import 'contacts_repository.dart';
 
 class ContactInfoScreen extends ConsumerStatefulWidget {
@@ -21,11 +21,34 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
   bool _isContact = false;
   bool _isChecking = true;
   bool _isSaving = false;
+  int? _currentConversationId;
 
   @override
   void initState() {
     super.initState();
     _checkIfContact();
+    
+    // Get the current conversation ID for the user shown in this contact info
+    // We'll listen to selection changes and close if a different conversation is selected
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeConversationId();
+    });
+  }
+  
+  Future<void> _initializeConversationId() async {
+    try {
+      final chatRepo = ref.read(chatRepositoryProvider);
+      // Try to get existing conversation with this user
+      final conversationId = await chatRepo.startConversation(widget.user.id);
+      if (mounted) {
+        setState(() {
+          _currentConversationId = conversationId;
+        });
+      }
+    } catch (e) {
+      // User might not have a conversation yet, that's okay
+      debugPrint('No existing conversation with ${widget.user.id}: $e');
+    }
   }
 
   Future<void> _checkIfContact() async {
@@ -96,6 +119,14 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    // Listen for conversation selection changes and auto-close if different conversation is selected
+    ref.listen<int?>(selectedConversationProvider, (previous, next) {
+      if (next != null && next != _currentConversationId && mounted) {
+        // A different conversation was selected, close this contact info screen
+        Navigator.pop(context);
+      }
+    });
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),

@@ -9,10 +9,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../../services/download_path_service.dart';
 import '../models.dart';
 import '../../../theme/app_theme.dart';
 import '../forward_message_screen.dart';
 import '../../../widgets/colored_avatar.dart';
+import '../../../widgets/constrained_slide_route.dart';
 import 'message_info_dialog.dart';
 import '../../../core/providers.dart';
 import '../../../utils/text_formatting.dart';
@@ -123,14 +126,16 @@ class MessageBubble extends ConsumerWidget {
                         ),
                       ),
                     // Attachments
+                    // IMPORTANT: Check isAudio FIRST (before isVideo) because audio files
+                    // can have .mp4 extension but are still audio (server sets isAudio flag based on MIME type)
                     if (message.attachments.isNotEmpty)
                       ...message.attachments.map((attachment) {
-                        if (attachment.isImage) {
+                        if (attachment.isAudio) {
+                          return _buildAudioAttachment(attachment, isDark, ref, context);
+                        } else if (attachment.isImage) {
                           return _buildImageAttachment(attachment);
                         } else if (attachment.isVideo) {
                           return _buildVideoAttachment(attachment);
-                        } else if (attachment.isAudio) {
-                          return _buildAudioAttachment(attachment, isDark, ref, context);
                         } else {
                           return _buildDocumentAttachment(attachment, isDark, ref, context);
                         }
@@ -374,43 +379,74 @@ class MessageBubble extends ConsumerWidget {
 
   Widget _buildDocumentAttachment(MessageAttachment attachment, bool isDark, WidgetRef ref, BuildContext context) {
     final fileName = attachment.url.split('/').last.split('?').first;
-    return GestureDetector(
-      onTap: () => _downloadFile(attachment, ref, context),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.05),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: AppTheme.primaryGreen.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(Icons.description, color: AppTheme.primaryGreen, size: 24),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                fileName,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  color: isDark ? AppTheme.textPrimaryDark : AppTheme.textPrimaryLight,
+    return FutureBuilder<String?>(
+      future: _getDownloadPath(attachment.url),
+      builder: (context, snapshot) {
+        final isDownloaded = snapshot.hasData && snapshot.data != null;
+        final localPath = snapshot.data;
+        
+        return FutureBuilder<bool>(
+          future: localPath != null ? File(localPath).exists() : Future.value(false),
+          builder: (context, fileExistsSnapshot) {
+            final fileExists = fileExistsSnapshot.data ?? false;
+            final showOpenIcon = isDownloaded && fileExists;
+            
+            return GestureDetector(
+              onTap: () => _downloadFile(attachment, ref, context),
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryGreen.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(Icons.description, color: AppTheme.primaryGreen, size: 24),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        fileName,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          color: isDark ? AppTheme.textPrimaryDark : AppTheme.textPrimaryLight,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Icon(
+                      showOpenIcon ? Icons.open_in_new_rounded : Icons.download_rounded,
+                      size: 20,
+                      color: showOpenIcon ? AppTheme.primaryGreen : null,
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const Icon(Icons.download_rounded, size: 20),
-          ],
-        ),
-      ),
+            );
+          },
+        );
+      },
     );
+  }
+
+  Future<String?> _getDownloadPath(String attachmentUrl) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final downloadPathService = DownloadPathService(prefs);
+      return await downloadPathService.getDownloadPath(attachmentUrl);
+    } catch (e) {
+      debugPrint('Error getting download path: $e');
+      return null;
+    }
   }
 
   Widget _buildAudioAttachment(MessageAttachment attachment, bool isDark, WidgetRef ref, BuildContext context) {
@@ -423,11 +459,70 @@ class MessageBubble extends ConsumerWidget {
   Future<void> _downloadFile(MessageAttachment attachment, WidgetRef ref, BuildContext context) async {
     try {
       final apiService = ref.read(apiServiceProvider);
-      final fileName = attachment.url.split('/').last.split('?').first;
+      final prefs = await SharedPreferences.getInstance();
+      final downloadPathService = DownloadPathService(prefs);
       
-      // Get download directory
+      // Check if file was already downloaded
+      final existingPath = await downloadPathService.getDownloadPath(attachment.url);
+      if (existingPath != null) {
+        final file = File(existingPath);
+        if (await file.exists()) {
+          debugPrint('📂 [DOWNLOAD] File already exists at: $existingPath');
+          debugPrint('📂 [DOWNLOAD] Opening file with default app...');
+          
+          // Open file with default application
+          await _openFileWithDefaultApp(existingPath, context);
+          return;
+        } else {
+          // File was deleted, remove from storage
+          debugPrint('📂 [DOWNLOAD] Stored path exists but file was deleted, removing from storage');
+          await downloadPathService.removeDownloadPath(attachment.url);
+        }
+      }
+      
+      // File doesn't exist locally, download it
+      var fileName = attachment.url.split('/').last.split('?').first;
+      
+      // Fix filename extension based on attachment type
+      // If the server stored an audio file with wrong extension (e.g., .mp4 instead of .m4a)
+      // we should correct it based on the attachment's type information
+      if (attachment.isAudio) {
+        final extension = fileName.contains('.') ? fileName.split('.').last.toLowerCase() : '';
+        // Check if extension is wrong (not an audio extension)
+        final audioExtensions = ['m4a', 'aac', 'mp3', 'wav', 'ogg', 'flac', 'mpeg', 'mpga'];
+        if (extension.isEmpty || !audioExtensions.contains(extension)) {
+          // Determine correct extension from mimeType or default to m4a
+          String correctExt = 'm4a'; // default for audio
+          final mimeTypeLower = attachment.mimeType.toLowerCase();
+          if (mimeTypeLower.contains('mp3') || mimeTypeLower.contains('mpeg')) {
+            correctExt = 'mp3';
+          } else if (mimeTypeLower.contains('wav')) {
+            correctExt = 'wav';
+          } else if (mimeTypeLower.contains('ogg') || mimeTypeLower.contains('oga')) {
+            correctExt = 'ogg';
+          } else if (mimeTypeLower.contains('flac')) {
+            correctExt = 'flac';
+          } else if (mimeTypeLower.contains('aac')) {
+            correctExt = 'aac';
+          } else if (mimeTypeLower.contains('m4a') || mimeTypeLower.contains('x-m4a') || mimeTypeLower.contains('mp4a')) {
+            correctExt = 'm4a';
+          }
+          
+          // Replace the extension
+          String nameWithoutExt;
+          if (fileName.contains('.')) {
+            nameWithoutExt = fileName.substring(0, fileName.lastIndexOf('.'));
+          } else {
+            nameWithoutExt = fileName;
+          }
+          fileName = '$nameWithoutExt.$correctExt';
+          debugPrint('📂 [DOWNLOAD] Fixed audio filename extension from URL: ${attachment.url.split('/').last.split('?').first} to: $fileName (mimeType: ${attachment.mimeType})');
+        }
+      }
+      
+      // Get download directory - create GekyChat subfolder like Telegram
       final directory = await getApplicationDocumentsDirectory();
-      final downloadDir = Directory('${directory.path}/Downloads');
+      final downloadDir = Directory('${directory.path}/Downloads/GekyChat');
       if (!await downloadDir.exists()) {
         await downloadDir.create(recursive: true);
       }
@@ -441,18 +536,90 @@ class MessageBubble extends ConsumerWidget {
         );
       }
       
+      debugPrint('📂 [DOWNLOAD] Downloading file to: $savePath');
+      
       // Download file
       await apiService.downloadFile(attachment.displayUrl, savePath);
       
+      // Save the download path for future use
+      await downloadPathService.saveDownloadPath(attachment.url, savePath);
+      
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Downloaded to Downloads/$fileName')),
+          SnackBar(
+            content: Text('Downloaded to Downloads/GekyChat/$fileName'),
+            action: SnackBarAction(
+              label: 'Open',
+              onPressed: () => _openFileWithDefaultApp(savePath, context),
+            ),
+          ),
         );
       }
     } catch (e) {
+      debugPrint('📂 [DOWNLOAD] Error: $e');
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to download: $e')),
+        );
+      }
+    }
+  }
+
+  /// Open a file with the default system application
+  Future<void> _openFileWithDefaultApp(String filePath, BuildContext context) async {
+    try {
+      debugPrint('📂 [OPEN FILE] Opening file: $filePath');
+      
+      // Convert to absolute path and normalize
+      final file = File(filePath);
+      final absolutePath = file.absolute.path;
+      
+      // Verify file exists
+      if (!await file.exists()) {
+        throw Exception('File does not exist: $absolutePath');
+      }
+      
+      if (Platform.isWindows) {
+        // Windows: Use explorer.exe to open file with default application
+        // This is more reliable than 'start' command for files with special characters
+        await Process.start(
+          'explorer.exe',
+          [absolutePath],
+          mode: ProcessStartMode.detached,
+        );
+      } else if (Platform.isMacOS) {
+        // macOS: use 'open' command
+        await Process.start(
+          'open',
+          [absolutePath],
+          mode: ProcessStartMode.detached,
+        );
+      } else if (Platform.isLinux) {
+        // Linux: use 'xdg-open' command
+        await Process.start(
+          'xdg-open',
+          [absolutePath],
+          mode: ProcessStartMode.detached,
+        );
+      } else {
+        throw UnsupportedError('Platform not supported for opening files');
+      }
+      
+      debugPrint('📂 [OPEN FILE] Successfully opened file: $absolutePath');
+      
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Opening file...'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('📂 [OPEN FILE] Error opening file: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to open file. Please try opening it manually.')),
         );
       }
     }
@@ -586,8 +753,9 @@ class MessageBubble extends ConsumerWidget {
             Future.delayed(Duration.zero, () {
               Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (context) => ForwardMessageScreen(message: message),
+                ConstrainedSlideRightRoute(
+                  page: ForwardMessageScreen(message: message),
+                  leftOffset: 400.0, // Sidebar width
                 ),
               );
             });
@@ -1509,22 +1677,40 @@ class VoiceMessagePlayer extends ConsumerStatefulWidget {
   ConsumerState<VoiceMessagePlayer> createState() => _VoiceMessagePlayerState();
 }
 
-class _VoiceMessagePlayerState extends ConsumerState<VoiceMessagePlayer> {
+class _VoiceMessagePlayerState extends ConsumerState<VoiceMessagePlayer> with SingleTickerProviderStateMixin {
   final AudioPlayer _audioPlayer = AudioPlayer();
   bool _isPlaying = false;
   bool _isLoading = false;
   Duration _duration = Duration.zero;
   Duration _position = Duration.zero;
   String? _error;
+  late AnimationController _animationController;
+  late List<double> _waveformHeights;
 
   @override
   void initState() {
     super.initState();
+    // Initialize waveform heights with random values (simulated waveform)
+    _waveformHeights = List.generate(50, (index) {
+      // Create a more realistic waveform pattern
+      return 3.0 + (index % 7) * 1.5 + (index % 3) * 0.8;
+    });
+    
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+    
     _audioPlayer.onPlayerStateChanged.listen((state) {
       if (mounted) {
         setState(() {
           _isPlaying = state == PlayerState.playing;
         });
+        if (_isPlaying) {
+          _animationController.repeat();
+        } else {
+          _animationController.stop();
+        }
       }
     });
     _audioPlayer.onDurationChanged.listen((duration) {
@@ -1547,6 +1733,7 @@ class _VoiceMessagePlayerState extends ConsumerState<VoiceMessagePlayer> {
           _isPlaying = false;
           _position = Duration.zero;
         });
+        _animationController.stop();
       }
     });
   }
@@ -1554,6 +1741,7 @@ class _VoiceMessagePlayerState extends ConsumerState<VoiceMessagePlayer> {
   @override
   void dispose() {
     _audioPlayer.dispose();
+    _animationController.dispose();
     super.dispose();
   }
 
@@ -1591,45 +1779,59 @@ class _VoiceMessagePlayerState extends ConsumerState<VoiceMessagePlayer> {
     await _audioPlayer.seek(position);
   }
 
-  /// Build waveform visualization (WhatsApp/Telegram style)
+  /// Build waveform visualization (WhatsApp style)
   Widget _buildWaveform(double progress) {
-    // Generate random heights for waveform bars (simulated)
-    // In a real implementation, you'd use actual audio waveform data
-    final barCount = 40;
-    final bars = List.generate(barCount, (index) {
-      // Animate bars that are before the progress position
-      final barPosition = index / barCount;
-      final isActive = barPosition <= progress;
-      final isPlaying = _isPlaying && isActive;
-      
-      // Random height between 4 and 20, with some variation for visual appeal
-      final baseHeight = 4.0 + (index % 5) * 2.0;
-      final height = isPlaying 
-          ? baseHeight + (baseHeight * 0.3 * (1 - (index % 3) / 3.0))
-          : baseHeight;
-      
-      return Container(
-        width: 2,
-        height: height,
-        margin: const EdgeInsets.symmetric(horizontal: 1),
-        decoration: BoxDecoration(
-          color: isActive
-              ? AppTheme.primaryGreen
-              : (widget.isDark
-                  ? Colors.white.withOpacity(0.3)
-                  : Colors.black.withOpacity(0.2)),
-          borderRadius: BorderRadius.circular(1),
+    final barCount = _waveformHeights.length;
+    final activeColor = widget.isDark ? AppTheme.primaryGreen : AppTheme.primaryGreen;
+    final inactiveColor = widget.isDark
+        ? Colors.white.withValues(alpha: 0.25)
+        : Colors.black.withValues(alpha: 0.15);
+    
+    return GestureDetector(
+      onTapDown: (details) {
+        if (_duration.inMilliseconds > 0) {
+          final RenderBox box = context.findRenderObject() as RenderBox;
+          final localPosition = details.localPosition;
+          final width = box.size.width;
+          final tapPosition = localPosition.dx / width;
+          final seekPosition = Duration(
+            milliseconds: (_duration.inMilliseconds * tapPosition).round(),
+          );
+          _seekTo(seekPosition);
+        }
+      },
+      child: Container(
+        height: 32,
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: List.generate(barCount, (index) {
+            final barPosition = index / barCount;
+            final isActive = barPosition <= progress;
+            final baseHeight = _waveformHeights[index];
+            
+            // Animate bars when playing and they're active
+            double animatedHeight = baseHeight;
+            if (_isPlaying && isActive) {
+              // Add subtle animation to active bars
+              final animationValue = _animationController.value;
+              final variation = (index % 3) / 3.0;
+              animatedHeight = baseHeight * (1.0 + 0.2 * animationValue * (1 - variation));
+            }
+            
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 100),
+              width: 2.5,
+              height: animatedHeight.clamp(3.0, 20.0),
+              margin: const EdgeInsets.symmetric(horizontal: 0.5),
+              decoration: BoxDecoration(
+                color: isActive ? activeColor : inactiveColor,
+                borderRadius: BorderRadius.circular(1.25),
+              ),
+            );
+          }),
         ),
-      );
-    });
-
-    return Container(
-      height: 24,
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: bars,
       ),
     );
   }
@@ -1647,32 +1849,36 @@ class _VoiceMessagePlayerState extends ConsumerState<VoiceMessagePlayer> {
         ? _position.inMilliseconds / _duration.inMilliseconds
         : 0.0;
 
+    // WhatsApp-style audio player: compact, clean design
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: widget.isDark
-            ? const Color(0xFF2A3942)
-            : AppTheme.primaryGreen.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      constraints: const BoxConstraints(minWidth: 200, maxWidth: 300),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Play/Pause button
+          // Play/Pause button (WhatsApp style - circular green button)
           GestureDetector(
             onTap: _isLoading ? null : _togglePlayPause,
             child: Container(
-              width: 40,
-              height: 40,
+              width: 36,
+              height: 36,
               decoration: BoxDecoration(
                 color: AppTheme.primaryGreen,
                 shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.primaryGreen.withValues(alpha: 0.3),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
               child: _isLoading
                   ? const Center(
                       child: SizedBox(
-                        width: 20,
-                        height: 20,
+                        width: 18,
+                        height: 18,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
                           valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
@@ -1680,58 +1886,44 @@ class _VoiceMessagePlayerState extends ConsumerState<VoiceMessagePlayer> {
                       ),
                     )
                   : Icon(
-                      _isPlaying ? Icons.pause : Icons.play_arrow,
+                      _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
                       color: Colors.white,
-                      size: 24,
+                      size: 22,
                     ),
             ),
           ),
-          const SizedBox(width: 12),
-          // Progress bar and duration
+          const SizedBox(width: 10),
+          // Waveform and duration
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Waveform visualization (WhatsApp/Telegram style)
-                GestureDetector(
-                  onTapDown: (details) {
-                    if (_duration.inMilliseconds > 0) {
-                      final RenderBox box = context.findRenderObject() as RenderBox;
-                      final localPosition = details.localPosition;
-                      final width = box.size.width;
-                      final tapPosition = localPosition.dx / width;
-                      final seekPosition = Duration(
-                        milliseconds: (_duration.inMilliseconds * tapPosition).round(),
-                      );
-                      _seekTo(seekPosition);
-                    }
-                  },
-                  child: _buildWaveform(progress),
-                ),
-                const SizedBox(height: 4),
-                // Duration
+                // Waveform visualization (WhatsApp style)
+                _buildWaveform(progress),
+                const SizedBox(height: 2),
+                // Duration (WhatsApp style - right aligned)
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     Text(
                       _formatDuration(_position),
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 11,
                         color: widget.isDark
-                            ? AppTheme.textSecondaryDark
-                            : AppTheme.textSecondaryLight,
+                            ? Colors.white.withValues(alpha: 0.7)
+                            : Colors.black.withValues(alpha: 0.6),
                         fontWeight: FontWeight.w500,
                       ),
                     ),
                     Text(
-                      _formatDuration(_duration),
+                      ' / ${_formatDuration(_duration)}',
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 11,
                         color: widget.isDark
-                            ? AppTheme.textSecondaryDark
-                            : AppTheme.textSecondaryLight,
-                        fontWeight: FontWeight.w500,
+                            ? Colors.white.withValues(alpha: 0.5)
+                            : Colors.black.withValues(alpha: 0.4),
+                        fontWeight: FontWeight.w400,
                       ),
                     ),
                   ],
@@ -1739,12 +1931,12 @@ class _VoiceMessagePlayerState extends ConsumerState<VoiceMessagePlayer> {
                 // Error message
                 if (_error != null)
                   Padding(
-                    padding: const EdgeInsets.only(top: 4),
+                    padding: const EdgeInsets.only(top: 2),
                     child: Text(
                       _error!,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: Colors.red,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.red.withValues(alpha: 0.8),
                       ),
                     ),
                   ),

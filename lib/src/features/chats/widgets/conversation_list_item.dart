@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models.dart';
+import '../providers/typing_status_provider.dart';
 import '../../../theme/app_theme.dart';
 import '../../../utils/avatar_utils.dart';
 
-class ConversationListItem extends StatelessWidget {
+class ConversationListItem extends ConsumerWidget {
   final ConversationSummary conversation;
   final bool isSelected;
   final VoidCallback onTap;
@@ -18,9 +20,24 @@ class ConversationListItem extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final hasUnread = conversation.unreadCount > 0;
+    
+    // Watch typing and recording status
+    final typingStatus = ref.watch(typingStatusProvider);
+    final recordingStatus = ref.watch(recordingStatusProvider);
+    final typingNotifier = ref.read(typingStatusProvider.notifier);
+    final recordingNotifier = ref.read(recordingStatusProvider.notifier);
+    
+    // Subscribe to typing and recording events for this conversation
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      typingNotifier.subscribeToConversation(conversation.id);
+      recordingNotifier.subscribeToConversation(conversation.id);
+    });
+    
+    final isTyping = typingStatus[conversation.id] ?? false;
+    final isRecording = recordingStatus[conversation.id] ?? false;
 
     return Material(
       color: isSelected
@@ -170,19 +187,53 @@ class ConversationListItem extends StatelessWidget {
                     Row(
                       children: [
                         Expanded(
-                          child: Text(
-                            conversation.lastMessage ?? 'No messages yet',
-                            style: TextStyle(
-                              color: isDark
-                                  ? AppTheme.textSecondaryDark
-                                  : AppTheme.textSecondaryLight,
-                              fontSize: 14,
-                              fontWeight:
-                                  hasUnread ? FontWeight.w500 : FontWeight.w400,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                          child: isRecording
+                              ? Row(
+                                  children: [
+                                    Icon(
+                                      Icons.mic,
+                                      size: 14,
+                                      color: AppTheme.primaryGreen,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'recording audio...',
+                                      style: TextStyle(
+                                        color: AppTheme.primaryGreen,
+                                        fontSize: 14,
+                                        fontStyle: FontStyle.italic,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                )
+                              : isTyping
+                                  ? Text(
+                                      'typing...',
+                                      style: TextStyle(
+                                        color: AppTheme.primaryGreen,
+                                        fontSize: 14,
+                                        fontStyle: FontStyle.italic,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    )
+                                  : Text(
+                                      conversation.lastMessage ?? 'No messages yet',
+                                      style: TextStyle(
+                                        color: isDark
+                                            ? AppTheme.textSecondaryDark
+                                            : AppTheme.textSecondaryLight,
+                                        fontSize: 14,
+                                        fontWeight:
+                                            hasUnread ? FontWeight.w500 : FontWeight.w400,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                         ),
                         if (hasUnread) ...[
                           const SizedBox(width: 8),

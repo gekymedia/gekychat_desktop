@@ -384,13 +384,34 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
 
   Future<void> _stopRecording() async {
     try {
-      final path = await _audioRecorder.stop();
+      var path = await _audioRecorder.stop();
       
       setState(() {
         _isRecording = false;
       });
 
       if (path != null && mounted) {
+        // Ensure the file has .m4a extension (audio format)
+        // The record package might return .mp4, so we need to rename it
+        var audioPath = path;
+        final file = File(audioPath);
+        if (await file.exists()) {
+          final pathLower = audioPath.toLowerCase();
+          // If the file has .mp4 extension, rename it to .m4a
+          if (pathLower.endsWith('.mp4')) {
+            final newPath = audioPath.replaceAll(RegExp(r'\.mp4$', caseSensitive: false), '.m4a');
+            final newFile = await file.rename(newPath);
+            audioPath = newFile.path;
+            debugPrint('Renamed audio file from .mp4 to .m4a: $audioPath');
+          } else if (!pathLower.endsWith('.m4a') && !pathLower.endsWith('.aac') && 
+                     !pathLower.endsWith('.mp3') && !pathLower.endsWith('.wav')) {
+            // If it doesn't have a recognized audio extension, add .m4a
+            final newPath = '$audioPath.m4a';
+            final newFile = await file.rename(newPath);
+            audioPath = newFile.path;
+            debugPrint('Added .m4a extension to audio file: $audioPath');
+          }
+        }
         // Show dialog to confirm sending or canceling with audio preview
         final shouldSend = await showDialog<bool>(
           context: context,
@@ -403,7 +424,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                 const SizedBox(height: 16),
                 // Audio preview player
                 DesktopAudioPreviewWidget(
-                  audioPath: path,
+                  audioPath: audioPath,
                   duration: _recordingDuration,
                   audioPlayer: _audioPlayer,
                 ),
@@ -434,11 +455,11 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
 
         if (shouldSend == true) {
           // Send voice message immediately instead of adding to attachments
-          await _sendVoiceMessage(path);
+          await _sendVoiceMessage(audioPath);
         } else {
           // Delete the recording file
           try {
-            final file = File(path);
+            final file = File(audioPath);
             if (await file.exists()) {
               await file.delete();
             }
@@ -1120,22 +1141,24 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                     case 'search':
                       Navigator.push(
                         context,
-                        MaterialPageRoute(
-                          builder: (context) => SearchInChatScreen(
+                        ConstrainedSlideRightRoute(
+                          page: SearchInChatScreen(
                             groupId: widget.groupId,
                             title: widget.groupName,
                           ),
+                          leftOffset: 400.0, // Sidebar width
                         ),
                       );
                       break;
                     case 'media':
                       Navigator.push(
                         context,
-                        MaterialPageRoute(
-                          builder: (context) => MediaGalleryScreen(
+                        ConstrainedSlideRightRoute(
+                          page: MediaGalleryScreen(
                             groupId: widget.groupId,
                             title: widget.groupName,
                           ),
+                          leftOffset: 400.0, // Sidebar width
                         ),
                       );
                       break;

@@ -14,6 +14,7 @@ import '../status/create_status_screen.dart';
 import 'create_group_screen.dart';
 import 'models.dart';
 import 'chat_repo.dart';
+import 'chat_providers.dart';
 import 'widgets/conversation_list_item.dart';
 import 'widgets/group_list_item.dart';
 import 'widgets/chat_view.dart';
@@ -60,10 +61,6 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
   GroupSummary? _selectedGroup;
   int? _selectedConversationId;
   int? _selectedGroupId;
-
-  late Future<List<ConversationSummary>> _conversationsFuture;
-  late Future<List<ConversationSummary>> _archivedConversationsFuture;
-  late Future<List<GroupSummary>> _groupsFuture;
   
   final TextEditingController _searchController = TextEditingController();
   String _selectedFilter = 'all';
@@ -75,9 +72,10 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _loadConversations();
-    _loadArchivedConversations();
-    _loadGroups();
+    // Prefetch data by watching providers (they cache automatically)
+    ref.read(optimizedConversationsProvider.future);
+    ref.read(optimizedGroupsProvider.future);
+    ref.read(optimizedArchivedConversationsProvider.future);
     _loadLabels();
   }
   
@@ -109,34 +107,27 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      // Refresh data when app comes to foreground
-      _loadConversations();
-      _loadGroups();
+      // Invalidate providers to refresh data when app comes to foreground
+      // This will fetch fresh data while showing cached data immediately
+      ref.invalidate(optimizedConversationsProvider);
+      ref.invalidate(optimizedGroupsProvider);
+      ref.invalidate(optimizedArchivedConversationsProvider);
+      _updateTaskbarBadge();
     }
   }
 
-  void _loadConversations() {
-    final chatRepo = ref.read(chatRepositoryProvider);
-    setState(() {
-      _conversationsFuture = chatRepo.getConversations();
-    });
-    // Update badge after loading conversations
+  void _refreshConversations() {
+    // Invalidate to refresh - shows cached data immediately, then updates
+    ref.invalidate(optimizedConversationsProvider);
     _updateTaskbarBadge();
   }
 
-  void _loadArchivedConversations() {
-    final chatRepo = ref.read(chatRepositoryProvider);
-    setState(() {
-      _archivedConversationsFuture = chatRepo.getArchivedConversations();
-    });
+  void _refreshArchivedConversations() {
+    ref.invalidate(optimizedArchivedConversationsProvider);
   }
 
-  void _loadGroups() {
-    final chatRepo = ref.read(chatRepositoryProvider);
-    setState(() {
-      _groupsFuture = chatRepo.getGroups();
-    });
-    // Update badge after loading groups
+  void _refreshGroups() {
+    ref.invalidate(optimizedGroupsProvider);
     _updateTaskbarBadge();
   }
   
@@ -154,6 +145,135 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
         }
       }
     });
+  }
+  
+  Widget _buildConversationList(List<ConversationSummary> conversations, List<GroupSummary> groups) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    // Filter conversations and groups based on selected filter and search query
+    List<ConversationSummary> filteredConversations = [];
+    List<GroupSummary> filteredGroups = [];
+    
+    // Apply search filter
+    List<ConversationSummary> searchFilteredConversations = conversations;
+    List<GroupSummary> searchFilteredGroups = groups;
+    
+    if (_searchQuery.isNotEmpty) {
+      final query = _searchQuery.toLowerCase();
+      searchFilteredConversations = conversations.where((c) {
+        final name = c.otherUser.name.toLowerCase();
+        final phone = c.otherUser.phone?.toLowerCase() ?? '';
+        final lastMessage = (c.lastMessage ?? '').toLowerCase();
+        return name.contains(query) || phone.contains(query) || lastMessage.contains(query);
+      }).toList();
+      
+      searchFilteredGroups = groups.where((g) {
+        final name = g.name.toLowerCase();
+        final lastMessage = (g.lastMessage ?? '').toLowerCase();
+        return name.contains(query) || lastMessage.contains(query);
+      }).toList();
+    }
+    
+    // Apply selected filter
+    if (_selectedFilter == 'all') {
+      filteredConversations = searchFilteredConversations.where((c) => c.archivedAt == null).toList();
+      filteredGroups = searchFilteredGroups.where((g) => g.type != 'channel').toList();
+    } else if (_selectedFilter == 'unread') {
+      filteredConversations = searchFilteredConversations
+          .where((c) => c.unreadCount > 0 && c.archivedAt == null)
+          .toList();
+      filteredGroups = searchFilteredGroups
+          .where((g) => g.unreadCount > 0 && g.type != 'channel')
+          .toList();
+    } else if (_selectedFilter == 'groups') {
+      filteredConversations = [];
+      filteredGroups = searchFilteredGroups.where((g) => g.type != 'channel').toList();
+    } else if (_selectedFilter == 'channels') {
+      filteredConversations = [];
+      filteredGroups = searchFilteredGroups.where((g) => g.type == 'channel').toList();
+    } else if (_selectedFilter == 'archived') {
+      filteredConversations = searchFilteredConversations.where((c) => c.archivedAt != null).toList();
+      filteredGroups = [];
+    } else if (_selectedFilter.startsWith('label-')) {
+      final labelIdStr = _selectedFilter.replaceFirst('label-', '');
+      final labelId = int.tryParse(labelIdStr);
+      if (labelId != null) {
+        filteredConversations = searchFilteredConversations
+            .where((c) => c.archivedAt == null && c.labelIds.contains(labelId))
+            .toList();
+        filteredGroups = [];
+      }
+    }
+    
+    // Combine and sort by updatedAt
+    final allItems = <dynamic>[...filteredConversations, ...filteredGroups];
+    allItems.sort((a, b) {
+      final aTime = a is ConversationSummary
+          ? a.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0)
+          : (a is GroupSummary ? a.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0) : DateTime.fromMillisecondsSinceEpoch(0));
+      final bTime = b is ConversationSummary
+          ? b.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0)
+          : (b is GroupSummary ? b.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0) : DateTime.fromMillisecondsSinceEpoch(0));
+      return bTime.compareTo(aTime);
+    });
+    
+    if (allItems.isEmpty) {
+      return Center(
+        child: Text(
+          _searchQuery.isNotEmpty ? 'No results found' : 'No conversations yet',
+          style: TextStyle(
+            color: isDark ? Colors.white70 : Colors.grey[600],
+          ),
+        ),
+      );
+    }
+    
+    return ListView.builder(
+      itemCount: allItems.length,
+      itemBuilder: (context, index) {
+        final item = allItems[index];
+        if (item is ConversationSummary) {
+          final isSelected = _selectedConversationId == item.id;
+          return GestureDetector(
+            onLongPress: () => _showConversationMenu(context, item),
+            child: ConversationListItem(
+              conversation: item,
+              isSelected: isSelected,
+              onTap: () {
+                setState(() {
+                  _selectedConversation = item;
+                  _selectedConversationId = item.id;
+                  _selectedGroup = null;
+                  _selectedGroupId = null;
+                });
+                // Update selected conversation provider
+                ref.read(selectedConversationProvider.notifier).selectConversation(item.id);
+                // Update provider so other widgets (like ContactInfoScreen) can react
+                ref.read(selectedConversationProvider.notifier).selectConversation(item.id);
+              },
+            ),
+          );
+        } else if (item is GroupSummary) {
+          final isSelected = _selectedGroupId == item.id;
+          return GestureDetector(
+            onLongPress: () => _showGroupMenu(context, item),
+            child: GroupListItem(
+              group: item,
+              isSelected: isSelected,
+              onTap: () {
+                setState(() {
+                  _selectedGroup = item;
+                  _selectedGroupId = item.id;
+                  _selectedConversation = null;
+                  _selectedConversationId = null;
+                });
+              },
+            ),
+          );
+        }
+        return const SizedBox.shrink();
+      },
+    );
   }
 
   void _loadLabels() async {
@@ -204,7 +324,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
               } else {
                 await chatRepo.pinConversation(conversation.id);
               }
-              _loadConversations();
+              _refreshConversations();
             } catch (e) {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -229,7 +349,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
               } else {
                 await chatRepo.archiveConversation(conversation.id);
               }
-              _loadConversations();
+              _refreshConversations();
             } catch (e) {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -250,7 +370,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
           onTap: () async {
             try {
               await chatRepo.markConversationUnread(conversation.id);
-              _loadConversations();
+              _refreshConversations();
             } catch (e) {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -358,7 +478,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('Added to ${selectedLabel.name}')),
             );
-            _loadConversations();
+            _refreshConversations();
           }
         } catch (e) {
           if (mounted) {
@@ -587,7 +707,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
               } else {
                 await chatRepo.pinGroup(group.id);
               }
-              _loadGroups();
+              _refreshGroups();
             } catch (e) {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -612,7 +732,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
               } else {
                 await chatRepo.muteGroup(group.id, minutes: 1440); // 24 hours
               }
-              _loadGroups();
+              _refreshGroups();
             } catch (e) {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -771,7 +891,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                 ),
               );
               // Refresh groups list
-              _loadGroups();
+              _refreshGroups();
               // Navigate to chats
               context.go('/chats');
             } else if (context.mounted) {
@@ -809,7 +929,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                 backgroundColor: Colors.green,
               ),
             );
-            _loadGroups();
+            _refreshGroups();
             context.go('/chats');
           } else if (context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -874,8 +994,8 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
         debugPrint('🔄 Account changed detected: User ID $previousId -> $nextId');
         debugPrint('🔄 Refreshing conversations, groups, and labels for new account...');
         _loadConversations();
-        _loadArchivedConversations();
-        _loadGroups();
+        _refreshArchivedConversations();
+        _refreshGroups();
         _loadLabels();
         debugPrint('✅ Data refresh completed for new account');
       }
@@ -885,8 +1005,12 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     final currentSection = ref.watch(currentSectionProvider);
     final currentRoute = GoRouterState.of(context).uri.path;
     
-    // Use currentSection for main sections, currentRoute for external routes
-    final effectiveRoute = currentSection;
+    // Use currentSection for main sections, currentRoute for external routes like /settings
+    // Main sections use provider state, but settings and other external routes use actual router state
+    final mainSections = ['/chats', '/status', '/channels', '/world', '/mail', '/ai', '/live-broadcast', '/calls'];
+    final effectiveRoute = mainSections.contains(currentRoute) ? currentSection : currentRoute;
+    
+    debugPrint('🔧 [ROUTE] currentRoute: $currentRoute, currentSection: $currentSection, effectiveRoute: $effectiveRoute');
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
@@ -1346,226 +1470,50 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
           ),
         ),
         // Conversations/Groups List (Unified list - no tabs)
+        // Telegram-style: Show cached data immediately, refresh in background
         Expanded(
-          child: FutureBuilder<List<ConversationSummary>>(
-            future: _selectedFilter == 'archived' ? _archivedConversationsFuture : _conversationsFuture,
-            builder: (context, conversationsSnapshot) {
-              // Handle errors gracefully
-              if (conversationsSnapshot.hasError) {
-                debugPrint('Error loading conversations: ${conversationsSnapshot.error}');
-                // Return empty list on error
-                conversationsSnapshot = AsyncSnapshot.withData(ConnectionState.done, <ConversationSummary>[]);
-              }
+          child: Consumer(
+            builder: (context, ref, child) {
+              // Use providers instead of FutureBuilder - shows cached data immediately
+              final conversationsAsync = _selectedFilter == 'archived'
+                  ? ref.watch(optimizedArchivedConversationsProvider)
+                  : ref.watch(optimizedConversationsProvider);
               
-              return FutureBuilder<List<GroupSummary>>(
-                future: _groupsFuture,
-                builder: (context, groupsSnapshot) {
-                  // Handle errors gracefully
-                  if (groupsSnapshot.hasError) {
-                    debugPrint('Error loading groups: ${groupsSnapshot.error}');
-                    // Return empty list on error
-                    groupsSnapshot = AsyncSnapshot.withData(ConnectionState.done, <GroupSummary>[]);
-                  }
-                  
-                  if (conversationsSnapshot.connectionState == ConnectionState.waiting ||
-                      groupsSnapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  
-                  // Get base data
-                  List<ConversationSummary> allConversations = conversationsSnapshot.data ?? [];
-                  List<GroupSummary> allGroups = groupsSnapshot.data ?? [];
-                  
-                  // Apply filters
-                  List<ConversationSummary> filteredConversations = [];
-                  List<GroupSummary> filteredGroups = [];
-                  
-                  // Apply search query filter first
-                  List<ConversationSummary> searchFilteredConversations = allConversations;
-                  List<GroupSummary> searchFilteredGroups = allGroups;
-                  
-                  if (_searchQuery.isNotEmpty) {
-                    final query = _searchQuery.toLowerCase();
-                    searchFilteredConversations = allConversations.where((c) {
-                      final name = c.otherUser.name.toLowerCase();
-                      final phone = c.otherUser.phone?.toLowerCase() ?? '';
-                      final lastMessage = (c.lastMessage ?? '').toLowerCase();
-                      return name.contains(query) || phone.contains(query) || lastMessage.contains(query);
-                    }).toList();
-                    searchFilteredGroups = allGroups.where((g) {
-                      final name = g.name.toLowerCase();
-                      final lastMessage = (g.lastMessage ?? '').toLowerCase();
-                      return name.contains(query) || lastMessage.contains(query);
-                    }).toList();
-                  }
-                  
-                  if (_selectedFilter == 'all') {
-                    // Show all conversations (excluding archived) and all groups (excluding channels)
-                    filteredConversations = searchFilteredConversations.where((c) => c.archivedAt == null).toList();
-                    filteredGroups = searchFilteredGroups.where((g) => g.type != 'channel').toList();
-                  } else if (_selectedFilter == 'unread') {
-                    // Show unread conversations and groups
-                    filteredConversations = searchFilteredConversations
-                        .where((c) => c.unreadCount > 0 && c.archivedAt == null)
-                        .toList();
-                    filteredGroups = searchFilteredGroups
-                        .where((g) => g.unreadCount > 0 && g.type != 'channel')
-                        .toList();
-                  } else if (_selectedFilter == 'groups') {
-                    // Show only groups (not channels, not conversations)
-                    filteredConversations = [];
-                    filteredGroups = searchFilteredGroups.where((g) => g.type != 'channel').toList();
-                  } else if (_selectedFilter == 'channels') {
-                    // Show only channels (not regular groups, not conversations)
-                    filteredConversations = [];
-                    filteredGroups = searchFilteredGroups.where((g) => g.type == 'channel').toList();
-                  } else if (_selectedFilter == 'archived') {
-                    // Show only archived conversations (already filtered by future)
-                    filteredConversations = searchFilteredConversations; // Already filtered by _archivedConversationsFuture
-                    filteredGroups = []; // Don't show groups in archived
-                  } else if (_selectedFilter == 'mail') {
-                    // Mail filter - placeholder for now
-                    filteredConversations = [];
-                    filteredGroups = [];
-                  } else if (_selectedFilter == 'broadcast') {
-                    // Broadcast filter - show broadcast lists screen
-                    return const BroadcastListsScreen();
-                  } else if (_selectedFilter.startsWith('label-')) {
-                    // Filter by label
-                    final labelIdStr = _selectedFilter.replaceFirst('label-', '');
-                    final labelId = int.tryParse(labelIdStr);
-                    if (labelId != null) {
-                      filteredConversations = searchFilteredConversations
-                          .where((c) => c.archivedAt == null && c.labelIds.contains(labelId))
-                          .toList();
-                      filteredGroups = []; // Labels don't apply to groups
-                    } else {
-                      filteredConversations = [];
-                      filteredGroups = [];
-                    }
-                  }
-                  
-                  final conversations = filteredConversations;
-                  final groups = filteredGroups;
-                  final allItems = <Widget>[];
-                  
-                  // Add conversations
-                  for (final conversation in conversations) {
-                    final isSelected = _selectedConversationId == conversation.id;
-                    allItems.add(
-                      GestureDetector(
-                        onLongPress: () => _showConversationMenu(context, conversation),
-                        onSecondaryTapDown: (details) {
-                          _showConversationMenuAtPosition(context, conversation, details.globalPosition);
-                        },
-                        child: ConversationListItem(
-                          conversation: conversation,
-                          isSelected: isSelected,
-                          onTap: () {
-                            // Switch to chats tab if not already there
-                            final currentSection = ref.read(currentSectionProvider);
-                            if (currentSection != '/chats') {
-                              ref.read(currentSectionProvider.notifier).setSection('/chats');
-                            }
-                            setState(() {
-                              _selectedConversation = conversation;
-                              _selectedConversationId = conversation.id;
-                              _selectedGroup = null;
-                              _selectedGroupId = null;
-                            });
-                          },
-                        ),
-                      ),
-                    );
-                  }
-                  
-                  // Add groups/channels based on filter
-                  for (final group in groups) {
-                    final isSelected = _selectedGroupId == group.id;
-                    allItems.add(
-                      GestureDetector(
-                        onLongPress: () => _showGroupMenu(context, group),
-                        onSecondaryTapDown: (details) {
-                          _showGroupMenuAtPosition(context, group, details.globalPosition);
-                        },
-                        child: GroupListItem(
-                          group: group,
-                          isSelected: isSelected,
-                          onTap: () {
-                            setState(() {
-                              _selectedGroup = group;
-                              _selectedGroupId = group.id;
-                              _selectedConversation = null;
-                              _selectedConversationId = null;
-                            });
-                          },
-                        ),
-                      ),
-                    );
-                  }
-                  
-                  if (allItems.isEmpty) {
-                    String emptyMessage;
-                    IconData emptyIcon;
-                    
-                    switch (_selectedFilter) {
-                      case 'archived':
-                        emptyMessage = 'No archived conversations';
-                        emptyIcon = Icons.archive_outlined;
-                        break;
-                      case 'groups':
-                        emptyMessage = 'No groups yet';
-                        emptyIcon = Icons.group_outlined;
-                        break;
-                      case 'channels':
-                        emptyMessage = 'No channels yet';
-                        emptyIcon = Icons.campaign_outlined;
-                        break;
-                      case 'unread':
-                        emptyMessage = 'No unread messages';
-                        emptyIcon = Icons.mark_email_read_outlined;
-                        break;
-                      case 'mail':
-                        emptyMessage = 'No mail conversations';
-                        emptyIcon = Icons.mail_outline;
-                        break;
-                      default:
-                        emptyMessage = 'No conversations or groups yet';
-                        emptyIcon = Icons.chat_bubble_outline;
-                    }
-                    
-                    return Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Image.asset(
-                            'assets/icons/gold_no_text/128x128.png',
-                            width: 128,
-                            height: 128,
-                            errorBuilder: (context, error, stackTrace) {
-                              // Fallback to icon if image fails to load
-                              return Icon(
-                                emptyIcon,
-                                size: 64,
-                                color: isDark ? Colors.white38 : Colors.grey[400],
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            emptyMessage,
-                            style: TextStyle(
-                              color: isDark ? Colors.white70 : Colors.grey[600],
-                              fontSize: 16,
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-                  
-                  return ListView(
-                    children: allItems,
+              final groupsAsync = ref.watch(optimizedGroupsProvider);
+              
+              return conversationsAsync.when(
+                data: (allConversations) {
+                  return groupsAsync.when(
+                    data: (allGroups) {
+                      // Show data immediately - Telegram-style smooth experience
+                      return _buildConversationList(allConversations, allGroups);
+                    },
+                    loading: () {
+                      // Show conversations while groups are loading (stale-while-revalidate)
+                      return _buildConversationList(allConversations, []);
+                    },
+                    error: (error, stack) {
+                      debugPrint('Error loading groups: $error');
+                      // Show conversations even if groups fail
+                      return _buildConversationList(allConversations, []);
+                    },
+                  );
+                },
+                loading: () {
+                  // First load - show skeleton or empty state
+                  return groupsAsync.when(
+                    data: (allGroups) => _buildConversationList([], allGroups),
+                    loading: () => const Center(child: CircularProgressIndicator()),
+                    error: (_, __) => _buildConversationList([], []),
+                  );
+                },
+                error: (error, stack) {
+                  debugPrint('Error loading conversations: $error');
+                  // Try to show groups even if conversations fail
+                  return groupsAsync.when(
+                    data: (allGroups) => _buildConversationList([], allGroups),
+                    loading: () => const Center(child: Text('Error loading conversations')),
+                    error: (_, __) => const Center(child: Text('Error loading data')),
                   );
                 },
               );
@@ -1641,28 +1589,25 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
   Widget _buildFilterChip(String filter, String label, bool isDark) {
     final isSelected = _selectedFilter == filter;
     
-    // Calculate unread count for unread filter using FutureBuilder
+    // Calculate unread count for unread filter using providers
     if (filter == 'unread') {
-      return FutureBuilder<List<ConversationSummary>>(
-        future: _conversationsFuture,
-        builder: (context, conversationsSnapshot) {
-          return FutureBuilder<List<GroupSummary>>(
-            future: _groupsFuture,
-            builder: (context, groupsSnapshot) {
-              int? unreadCount;
-              if (conversationsSnapshot.hasData && groupsSnapshot.hasData) {
-                final conversations = conversationsSnapshot.data ?? [];
-                final groups = groupsSnapshot.data ?? [];
-                unreadCount = conversations
-                    .where((c) => c.unreadCount > 0 && c.archivedAt == null)
-                    .fold<int>(0, (sum, c) => sum + c.unreadCount) +
-                    groups
-                        .where((g) => g.unreadCount > 0)
-                        .fold<int>(0, (sum, g) => sum + g.unreadCount);
-              }
-              return _buildFilterChipWidget(filter, label, isDark, isSelected, unreadCount);
-            },
-          );
+      final conversationsAsync = ref.watch(optimizedConversationsProvider);
+      final groupsAsync = ref.watch(optimizedGroupsProvider);
+      
+      return Consumer(
+        builder: (context, ref, child) {
+          int? unreadCount;
+          conversationsAsync.whenData((conversations) {
+            groupsAsync.whenData((groups) {
+              unreadCount = conversations
+                  .where((c) => c.unreadCount > 0 && c.archivedAt == null)
+                  .fold<int>(0, (sum, c) => sum + c.unreadCount) +
+                  groups
+                      .where((g) => g.unreadCount > 0)
+                      .fold<int>(0, (sum, g) => sum + g.unreadCount);
+            });
+          });
+          return _buildFilterChipWidget(filter, label, isDark, isSelected, unreadCount);
         },
       );
     }
@@ -1723,6 +1668,12 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
   }
   
   Widget _buildMainContent(BuildContext context, String currentRoute, bool isDark) {
+    // Handle settings route FIRST (before other routes)
+    if (currentRoute == '/settings' || currentRoute.startsWith('/settings')) {
+      debugPrint('🔧 [SETTINGS] Showing SettingsScreen for route: $currentRoute');
+      return const SettingsScreen();
+    }
+    
     // Handle channels route
     if (currentRoute == '/channels' || currentRoute.startsWith('/channels')) {
       if (_selectedGroup != null) {
@@ -1773,14 +1724,6 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     }
     if (currentRoute == '/status') {
       return const StatusListScreen();
-    }
-    if (currentRoute == '/live-broadcast' || currentRoute.startsWith('/live')) {
-      return const LiveBroadcastScreen();
-    }
-    
-    // Handle settings route
-    if (currentRoute == '/settings') {
-      return const SettingsScreen();
     }
     
     // Default: show conversations/group chats

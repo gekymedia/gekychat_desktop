@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:system_tray/system_tray.dart';
 import 'src/app_router.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'src/features/auth/auth_provider.dart';
@@ -66,6 +67,7 @@ class MyApp extends ConsumerStatefulWidget {
 class _MyAppState extends ConsumerState<MyApp> with WindowListener {
   static bool _notificationsInitialized = false;
   static bool _authChecked = false;
+  static SystemTray? _systemTray;
 
   @override
   void initState() {
@@ -73,6 +75,9 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
     
     // Set up window listener for close events
     windowManager.addListener(this);
+    
+    // Initialize system tray
+    _initializeSystemTray();
     
     // Initialize notifications asynchronously (one-time only)
     if (!_notificationsInitialized) {
@@ -153,6 +158,46 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
   void dispose() {
     windowManager.removeListener(this);
     super.dispose();
+  }
+
+  Future<void> _initializeSystemTray() async {
+    try {
+      _systemTray = SystemTray();
+      
+      // Initialize system tray menu
+      final menu = Menu();
+      
+      // Add "Show" menu item
+      await menu.buildFrom([
+        MenuItemLabel(
+          label: 'Show GekyChat',
+          onClicked: (menuItem) async {
+            await windowManager.show();
+            await windowManager.focus();
+          },
+        ),
+        MenuItemLabel(
+          label: 'Quit',
+          onClicked: (menuItem) async {
+            await windowManager.destroy();
+          },
+        ),
+      ]);
+      
+      // Set menu
+      await _systemTray!.setContextMenu(menu);
+      
+      // Set tooltip
+      await _systemTray!.setToolTip('GekyChat');
+      
+      // Set icon (use app icon)
+      await _systemTray!.setImage('assets/icons/gold_with_text/256x256.png');
+      
+      debugPrint('✅ System tray initialized');
+      debugPrint('💡 Click the system tray icon to see menu and show/hide the app');
+    } catch (e) {
+      debugPrint('⚠️ Failed to initialize system tray: $e');
+    }
   }
 
   @override

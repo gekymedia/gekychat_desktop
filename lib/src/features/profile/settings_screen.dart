@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/providers.dart';
+import '../../core/session.dart';
 import '../auth/auth_provider.dart';
+import '../multi_account/account_repository.dart' show accountRepositoryProvider, accountsProvider;
 import 'profile_edit_screen.dart';
 import '../quick_replies/quick_replies_screen.dart';
 import '../auto_reply/auto_reply_screen.dart';
@@ -419,16 +421,28 @@ class SettingsScreen extends ConsumerWidget {
 
   Future<void> _showLogoutDialog(BuildContext context, WidgetRef ref) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    // Check if there are multiple accounts logged in
+    final accountRepo = ref.read(accountRepositoryProvider);
+    final accounts = await accountRepo.getAccounts();
+    final prefs = await SharedPreferences.getInstance();
+    final currentAccountId = prefs.getInt('current_account_id');
+    
+    // If there are multiple accounts, only remove the current account (not full logout)
+    final isMultiAccount = accounts.length > 1;
+    
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
         title: Text(
-          'Logout',
+          isMultiAccount ? 'Remove Account' : 'Logout',
           style: TextStyle(color: isDark ? Colors.white : Colors.black),
         ),
         content: Text(
-          'Are you sure you want to logout?',
+          isMultiAccount 
+            ? 'Are you sure you want to remove this account? You will be switched to another account if available.'
+            : 'Are you sure you want to logout?',
           style: TextStyle(color: isDark ? Colors.white70 : Colors.grey[700]),
         ),
         actions: [
@@ -439,7 +453,7 @@ class SettingsScreen extends ConsumerWidget {
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             style: TextButton.styleFrom(foregroundColor: const Color(0xFF008069)),
-            child: const Text('Logout', style: TextStyle(fontWeight: FontWeight.w600)),
+            child: Text(isMultiAccount ? 'Remove' : 'Logout', style: const TextStyle(fontWeight: FontWeight.w600)),
           ),
         ],
       ),
@@ -447,36 +461,89 @@ class SettingsScreen extends ConsumerWidget {
 
     if (confirmed == true) {
       try {
-        // First, clear local storage immediately
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.remove('auth_token');
-        await prefs.remove('user_id');
-        
-        // Try to call logout API first (but don't block if it fails)
-        try {
-          final apiService = ref.read(apiServiceProvider);
-          await apiService.logout();
-        } catch (e) {
-          // Ignore API errors - we'll clear local state anyway
-          debugPrint('Logout API call failed (continuing anyway): $e');
-        }
-        
-        // Clear auth state via provider
-        ref.read(authProvider.notifier).logout();
-        
-        if (context.mounted) {
-          // Navigate to login - use pushAndRemoveUntil to clear navigation stack
-          context.go('/login');
+        if (isMultiAccount && currentAccountId != null) {
+          // Multi-account scenario: Remove current account only
+          debugPrint('🔐 [LOGOUT] Removing account $currentAccountId (${accounts.length} accounts total)');
+          
+          // Find another account to switch to
+          final otherAccount = accounts.firstWhere(
+            (account) => account['id'] != currentAccountId,
+            orElse: () => accounts.first,
+          );
+          final otherAccountId = otherAccount['id'] as int;
+          
+          // Remove the current account from the server
+          try {
+            await accountRepo.removeAccount(currentAccountId);
+            debugPrint('✅ [LOGOUT] Removed account $currentAccountId from server');
+          } catch (e) {
+            debugPrint('⚠️ [LOGOUT] Failed to remove account from server: $e');
+            // Continue anyway to switch accounts
+          }
+          
+          // Switch to another account
+          try {
+            await accountRepo.switchAccount(otherAccountId);
+            debugPrint('✅ [LOGOUT] Switched to account $otherAccountId');
+            
+            // Invalidate providers to refresh data
+            ref.invalidate(currentUserProvider);
+            ref.invalidate(accountsProvider); // Refresh account switcher
+            
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Account removed. Switched to ${otherAccount['user']?['name'] ?? 'another account'}'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            }
+          } catch (e) {
+            debugPrint('❌ [LOGOUT] Failed to switch to other account: $e');
+            // If switching fails, do full logout
+            await _performFullLogout(context, ref);
+          }
+        } else {
+          // Single account scenario: Full logout
+          await _performFullLogout(context, ref);
         }
       } catch (e) {
-        // Even if there's an error, clear local state and navigate
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.clear();
-        ref.read(authProvider.notifier).logout();
-        
-        if (context.mounted) {
-          context.go('/login');
-        }
+        debugPrint('❌ [LOGOUT] Error during logout: $e');
+        // Fallback to full logout if anything fails
+        await _performFullLogout(context, ref);
+      }
+    }
+  }
+  
+  Future<void> _performFullLogout(BuildContext context, WidgetRef ref) async {
+    debugPrint('🔐 [LOGOUT] Performing full logout');
+    try {
+      // Try to call logout API first (but don't block if it fails)
+      try {
+        final apiService = ref.read(apiServiceProvider);
+        await apiService.logout();
+      } catch (e) {
+        // Ignore API errors - we'll clear local state anyway
+        debugPrint('Logout API call failed (continuing anyway): $e');
+      }
+      
+      // Clear auth state via provider
+      ref.read(authProvider.notifier).logout();
+      
+      if (context.mounted) {
+        // Navigate to login
+        context.go('/login');
+      }
+    } catch (e) {
+      // Even if there's an error, clear local state and navigate
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('auth_token');
+      await prefs.remove('user_id');
+      await prefs.remove('current_account_id');
+      ref.read(authProvider.notifier).logout();
+      
+      if (context.mounted) {
+        context.go('/login');
       }
     }
   }

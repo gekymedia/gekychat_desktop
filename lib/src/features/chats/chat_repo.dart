@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers.dart';
 import '../../core/api_service.dart';
@@ -295,16 +296,26 @@ class ChatRepository {
       // Upload attachments first and get their IDs
       // MEDIA COMPRESSION: Use medium compression level by default, but skip for voice messages
       if (attachments != null && attachments.isNotEmpty) {
+        debugPrint('📤 [SEND MESSAGE] sendMessageToConversation called with ${attachments.length} attachment(s)');
         List<int> attachmentIds = [];
         final totalFiles = attachments.length;
+        debugPrint('📤 [UPLOAD] Starting upload of $totalFiles attachment(s)');
+        
         for (int i = 0; i < attachments.length; i++) {
           final file = attachments[i];
           try {
+            debugPrint('📤 [UPLOAD] Processing attachment ${i + 1}/$totalFiles');
+            debugPrint('📤 [UPLOAD] File path: ${file.path}');
+            debugPrint('📤 [UPLOAD] File basename: ${file.path.split(Platform.pathSeparator).last}');
+            debugPrint('📤 [UPLOAD] File extension: ${file.path.split('.').last}');
+            
             if (!await file.exists()) {
               throw Exception('File does not exist: ${file.path}');
             }
             // Determine file type and compression
             final path = file.path.toLowerCase();
+            debugPrint('📤 [UPLOAD] Lowercase path: $path');
+            
             final isImage = path.endsWith('.jpg') || path.endsWith('.jpeg') || 
                            path.endsWith('.png') || path.endsWith('.gif') || 
                            path.endsWith('.webp') || path.endsWith('.bmp');
@@ -314,16 +325,29 @@ class ChatRepository {
             final isAudio = path.endsWith('.m4a') || path.endsWith('.aac') ||
                            path.endsWith('.mp3') || path.endsWith('.wav') ||
                            path.endsWith('.ogg') || path.endsWith('.flac');
+            
+            debugPrint('📤 [UPLOAD] File type detection:');
+            debugPrint('📤 [UPLOAD]   - isImage: $isImage');
+            debugPrint('📤 [UPLOAD]   - isVideo: $isVideo');
+            debugPrint('📤 [UPLOAD]   - isAudio: $isAudio');
+            
             // Only compress images and videos, not documents or audio
             // Documents should be uploaded as-is (no compression) like WhatsApp
             final compressionLevel = (skipCompression || isAudio || (!isImage && !isVideo)) 
                 ? 'none' 
                 : 'medium';
             
+            debugPrint('📤 [UPLOAD] Compression level: $compressionLevel');
+            debugPrint('📤 [UPLOAD] skipCompression flag: $skipCompression');
+            
             // Calculate progress: each file contributes 1/totalFiles to overall progress
             // Within each file, progress goes from i/totalFiles to (i+1)/totalFiles
             final fileStartProgress = i / totalFiles;
             final fileEndProgress = (i + 1) / totalFiles;
+            
+            debugPrint('📤 [UPLOAD] Calling uploadAttachment with:');
+            debugPrint('📤 [UPLOAD]   - file.path: ${file.path}');
+            debugPrint('📤 [UPLOAD]   - compressionLevel: $compressionLevel');
             
             final uploadResponse = await apiService.uploadAttachment(
               file,
@@ -716,6 +740,18 @@ class ChatRepository {
     }
   }
 
+  Future<void> sendRecordingIndicator(int conversationId, bool isRecording) async {
+    try {
+      if (isRecording) {
+        await apiService.post('/conversations/$conversationId/recording', data: {'is_recording': true});
+      } else {
+        await apiService.delete('/conversations/$conversationId/recording');
+      }
+    } catch (e) {
+      throw Exception('Failed to send recording indicator: $e');
+    }
+  }
+
   Future<void> sendTypingIndicator(int conversationId, bool isTyping) async {
     try {
       if (isTyping) {
@@ -1057,11 +1093,3 @@ class ChatRepository {
     }
   }
 }
-
-final chatRepositoryProvider = Provider<ChatRepository>((ref) {
-  final apiService = ref.read(apiServiceProvider);
-  final localStorageService = ref.read(localStorageServiceProvider);
-  final isOnline = ref.watch(connectivityProvider);
-  return ChatRepository(apiService, localStorageService: localStorageService, isOnline: isOnline);
-});
-

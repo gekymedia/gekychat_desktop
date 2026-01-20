@@ -191,6 +191,20 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: Icon(
+            Icons.arrow_back,
+            color: isDark ? Colors.white : Colors.black,
+          ),
+          onPressed: () {
+            context.go('/login');
+          },
+          tooltip: 'Back to phone number',
+        ),
+      ),
       body: Center(
         child: Container(
           constraints: const BoxConstraints(maxWidth: 500),
@@ -229,6 +243,23 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
                     'Enter the code sent to\n${widget.phone}',
                     style: Theme.of(context).textTheme.bodyMedium,
                     textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton.icon(
+                    onPressed: () {
+                      context.go('/login');
+                    },
+                    icon: Icon(
+                      Icons.edit,
+                      size: 16,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    label: Text(
+                      'Change phone number',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 32),
                   

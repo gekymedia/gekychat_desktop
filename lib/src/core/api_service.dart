@@ -330,14 +330,28 @@ class ApiService {
     String? compressionLevel,
     void Function(int sent, int total)? onSendProgress,
   }) async {
+    final filename = file.path.split(Platform.pathSeparator).last;
+    debugPrint('📤 [API UPLOAD] uploadAttachment called');
+    debugPrint('📤 [API UPLOAD] File path: ${file.path}');
+    debugPrint('📤 [API UPLOAD] Filename: $filename');
+    debugPrint('📤 [API UPLOAD] File extension: ${filename.split('.').last}');
+    debugPrint('📤 [API UPLOAD] Compression level: $compressionLevel');
+    
+    final multipartFile = await MultipartFile.fromFile(
+      file.path,
+      filename: filename,
+    );
+    
+    debugPrint('📤 [API UPLOAD] MultipartFile created');
+    debugPrint('📤 [API UPLOAD] MultipartFile filename: ${multipartFile.filename}');
+    
     final formData = FormData.fromMap({
-      'file': await MultipartFile.fromFile(
-        file.path,
-        filename: file.path.split(Platform.pathSeparator).last,
-      ),
+      'file': multipartFile,
       // MEDIA COMPRESSION: Include compression level preference
       if (compressionLevel != null) 'compression_level': compressionLevel,
     });
+    
+    debugPrint('📤 [API UPLOAD] Sending to /attachments endpoint');
     return _dio.post(
       _normalize('/attachments'),
       data: formData,

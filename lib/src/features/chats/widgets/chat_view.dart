@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -38,6 +39,14 @@ import '../../calls/incoming_call_handler.dart';
 import 'text_formatting_toolbar.dart';
 import '../../../utils/text_formatting.dart';
 
+class _SendMessageIntent extends Intent {
+  const _SendMessageIntent();
+}
+
+class _NewLineIntent extends Intent {
+  const _NewLineIntent();
+}
+
 class ChatView extends ConsumerStatefulWidget {
   final int conversationId;
   final String contactName;
@@ -65,6 +74,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
   bool _isSending = false;
   double _uploadProgress = 0.0;
   bool _isTyping = false;
+  bool _otherUserRecording = false;
   bool _showEmojiPicker = false;
   int? _currentUserId;
   
@@ -288,6 +298,23 @@ class _ChatViewState extends ConsumerState<ChatView> {
       }
     });
     
+    // Listen for recording events
+    pusherService.listen(channelName, 'UserRecording', (data) {
+      if (mounted && data != null && data is Map<String, dynamic>) {
+        final userId = data['user_id'] as int?;
+        final isRecording = data['is_recording'] as bool? ?? false;
+        
+        // Only show recording if it's from the OTHER user, not current user
+        if (userId != null && userId != _currentUserId) {
+          if (mounted) {
+            setState(() {
+              _otherUserRecording = isRecording;
+            });
+          }
+        }
+      }
+    });
+    
     // Listen for new messages
     pusherService.listen(channelName, 'MessageSent', (data) {
       if (mounted && data != null) {
@@ -414,6 +441,10 @@ class _ChatViewState extends ConsumerState<ChatView> {
       // Mark conversation as read after loading messages
       try {
         await chatRepo.markConversationAsRead(widget.conversationId);
+        
+        // Update badge immediately after marking as read to reflect new unread count
+        // This ensures unread count reduces when app is open
+        _updateTaskbarBadge();
       } catch (e) {
         debugPrint('Failed to mark conversation as read: $e');
         // Don't show error to user - this is a background operation
@@ -594,9 +625,12 @@ class _ChatViewState extends ConsumerState<ChatView> {
           // Don't reload all messages, just wait for new message to arrive via real-time updates
           // The Pusher listener will handle adding the AI response to the messages list
         } else {
-          // For regular chats, add message and scroll
+          // For regular chats, add message optimistically - WhatsApp/Telegram style smooth append
           setState(() {
-            _messages.add(newMessage);
+            // Add sent message to list immediately (optimistic update)
+            if (!_messages.any((m) => m.id == newMessage.id)) {
+              _messages.add(newMessage);
+            }
             _messageController.clear();
             _attachments.clear();
             _replyingToId = null;
@@ -604,13 +638,9 @@ class _ChatViewState extends ConsumerState<ChatView> {
           });
           _scrollToBottom();
           
-          // Reload messages after a short delay to get updated status from server
-          // This ensures that if the message status wasn't set correctly initially, it will be updated
-          Future.delayed(const Duration(seconds: 2), () {
-            if (mounted) {
-              _loadMessages();
-            }
-          });
+          // Real-time Pusher listener will handle message status updates (sent -> delivered -> read)
+          // No need to reload entire chat - Telegram/WhatsApp style smooth experience!
+          // Status updates come via MessageStatusUpdated event in real-time
         }
       }
     } catch (e) {
@@ -809,6 +839,14 @@ class _ChatViewState extends ConsumerState<ChatView> {
           _recordingDuration = Duration.zero;
         });
 
+        // Send recording indicator to other user
+        try {
+          final chatRepo = ref.read(chatRepositoryProvider);
+          await chatRepo.sendRecordingIndicator(widget.conversationId, true);
+        } catch (e) {
+          debugPrint('Failed to send recording indicator: $e');
+        }
+
         // Update duration timer
         _updateRecordingDuration();
       } else {
@@ -829,13 +867,60 @@ class _ChatViewState extends ConsumerState<ChatView> {
 
   Future<void> _stopRecording() async {
     try {
-      final path = await _audioRecorder.stop();
+      var path = await _audioRecorder.stop();
+      debugPrint('🎤 [AUDIO RECORDING] Stop recording returned path: $path');
       
       setState(() {
         _isRecording = false;
       });
 
+      // Send recording stop indicator to other user
+      try {
+        final chatRepo = ref.read(chatRepositoryProvider);
+        await chatRepo.sendRecordingIndicator(widget.conversationId, false);
+      } catch (e) {
+        debugPrint('Failed to send recording stop indicator: $e');
+      }
+
       if (path != null && mounted) {
+        // Ensure the file has .m4a extension (audio format)
+        // The record package might return .mp4, so we need to rename it
+        var audioPath = path;
+        debugPrint('🎤 [AUDIO RECORDING] Initial audioPath: $audioPath');
+        debugPrint('🎤 [AUDIO RECORDING] File extension: ${audioPath.split('.').last}');
+        
+        final file = File(audioPath);
+        if (await file.exists()) {
+          final fileSize = await file.length();
+          debugPrint('🎤 [AUDIO RECORDING] File exists, size: $fileSize bytes');
+          
+          final pathLower = audioPath.toLowerCase();
+          // If the file has .mp4 extension, rename it to .m4a
+          if (pathLower.endsWith('.mp4')) {
+            debugPrint('🎤 [AUDIO RECORDING] ⚠️ File has .mp4 extension, renaming to .m4a');
+            final newPath = audioPath.replaceAll(RegExp(r'\.mp4$', caseSensitive: false), '.m4a');
+            debugPrint('🎤 [AUDIO RECORDING] Renaming from: $audioPath');
+            debugPrint('🎤 [AUDIO RECORDING] Renaming to: $newPath');
+            final newFile = await file.rename(newPath);
+            audioPath = newFile.path;
+            debugPrint('🎤 [AUDIO RECORDING] ✅ Successfully renamed to: $audioPath');
+            debugPrint('🎤 [AUDIO RECORDING] New file extension: ${audioPath.split('.').last}');
+          } else if (!pathLower.endsWith('.m4a') && !pathLower.endsWith('.aac') && 
+                     !pathLower.endsWith('.mp3') && !pathLower.endsWith('.wav')) {
+            debugPrint('🎤 [AUDIO RECORDING] ⚠️ File has no recognized audio extension, adding .m4a');
+            final newPath = '$audioPath.m4a';
+            debugPrint('🎤 [AUDIO RECORDING] Adding extension: $newPath');
+            final newFile = await file.rename(newPath);
+            audioPath = newFile.path;
+            debugPrint('🎤 [AUDIO RECORDING] ✅ Successfully added .m4a extension: $audioPath');
+          } else {
+            debugPrint('🎤 [AUDIO RECORDING] ✅ File already has valid audio extension: ${audioPath.split('.').last}');
+          }
+        } else {
+          debugPrint('🎤 [AUDIO RECORDING] ❌ ERROR: File does not exist at path: $audioPath');
+        }
+        
+        debugPrint('🎤 [AUDIO RECORDING] Final audioPath before dialog: $audioPath');
         // Show dialog to confirm sending or canceling with audio preview
         final shouldSend = await showDialog<bool>(
           context: context,
@@ -848,7 +933,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
                 const SizedBox(height: 16),
                 // Audio preview player
                 DesktopAudioPreviewWidget(
-                  audioPath: path,
+                  audioPath: audioPath,
                   duration: _recordingDuration,
                   audioPlayer: _audioPlayer,
                 ),
@@ -865,6 +950,9 @@ class _ChatViewState extends ConsumerState<ChatView> {
                     ),
                     ElevatedButton(
                       onPressed: () {
+                        debugPrint('🎤 [AUDIO SEND] Send button pressed!');
+                        debugPrint('🎤 [AUDIO SEND] audioPath at send button: $audioPath');
+                        debugPrint('🎤 [AUDIO SEND] File extension: ${audioPath.split('.').last}');
                         _audioPlayer.stop();
                         Navigator.pop(context, true);
                       },
@@ -878,12 +966,15 @@ class _ChatViewState extends ConsumerState<ChatView> {
         );
 
         if (shouldSend == true) {
+          debugPrint('🎤 [AUDIO SEND] User confirmed send, calling _sendVoiceMessage');
+          debugPrint('🎤 [AUDIO SEND] audioPath passed to _sendVoiceMessage: $audioPath');
+          debugPrint('🎤 [AUDIO SEND] File extension: ${audioPath.split('.').last}');
           // Send voice message immediately instead of adding to attachments
-          await _sendVoiceMessage(path);
+          await _sendVoiceMessage(audioPath);
         } else {
           // Delete the recording file
           try {
-            final file = File(path);
+            final file = File(audioPath);
             if (await file.exists()) {
               await file.delete();
             }
@@ -905,6 +996,18 @@ class _ChatViewState extends ConsumerState<ChatView> {
   }
 
   Future<void> _sendVoiceMessage(String audioPath) async {
+    debugPrint('🎤 [AUDIO SEND] _sendVoiceMessage called with path: $audioPath');
+    debugPrint('🎤 [AUDIO SEND] File extension: ${audioPath.split('.').last}');
+    
+    // Verify file exists and get info
+    final file = File(audioPath);
+    if (await file.exists()) {
+      final fileSize = await file.length();
+      debugPrint('🎤 [AUDIO SEND] File exists, size: $fileSize bytes');
+    } else {
+      debugPrint('🎤 [AUDIO SEND] ❌ ERROR: File does not exist at path: $audioPath');
+    }
+    
     setState(() {
       _isSending = true;
       _uploadProgress = 0.0;
@@ -912,12 +1015,19 @@ class _ChatViewState extends ConsumerState<ChatView> {
 
     try {
       final chatRepo = ref.read(chatRepositoryProvider);
+      debugPrint('🎤 [AUDIO SEND] Creating File object from path: $audioPath');
+      final fileToSend = File(audioPath);
+      debugPrint('🎤 [AUDIO SEND] File object path: ${fileToSend.path}');
+      debugPrint('🎤 [AUDIO SEND] File object basename: ${fileToSend.path.split(Platform.pathSeparator).last}');
+      debugPrint('🎤 [AUDIO SEND] File extension from basename: ${fileToSend.path.split(Platform.pathSeparator).last.split('.').last}');
+      
       // Send voice message with no compression
+      debugPrint('🎤 [AUDIO SEND] Calling sendMessageToConversation with file: ${fileToSend.path}');
       final newMessage = await chatRepo.sendMessageToConversation(
         conversationId: widget.conversationId,
         body: null,
         replyTo: _replyingToId,
-        attachments: [File(audioPath)],
+        attachments: [fileToSend],
         skipCompression: true, // Voice messages shouldn't be compressed
         onProgress: (progress) {
           if (mounted) {
@@ -1698,7 +1808,25 @@ class _ChatViewState extends ConsumerState<ChatView> {
                         ],
                       ],
                     ),
-                    if (_isTyping)
+                    if (_otherUserRecording)
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.mic,
+                            size: 14,
+                            color: const Color(0xFF008069),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'recording audio...',
+                            style: TextStyle(
+                              color: const Color(0xFF008069),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      )
+                    else if (_isTyping)
                       Text(
                         'typing...',
                         style: TextStyle(
@@ -1754,22 +1882,24 @@ class _ChatViewState extends ConsumerState<ChatView> {
                     case 'search':
                       Navigator.push(
                         context,
-                        MaterialPageRoute(
-                          builder: (context) => SearchInChatScreen(
+                        ConstrainedSlideRightRoute(
+                          page: SearchInChatScreen(
                             conversationId: widget.conversationId,
                             title: widget.contactName,
                           ),
+                          leftOffset: 400.0, // Sidebar width
                         ),
                       );
                       break;
                     case 'media':
                       Navigator.push(
                         context,
-                        MaterialPageRoute(
-                          builder: (context) => MediaGalleryScreen(
+                        ConstrainedSlideRightRoute(
+                          page: MediaGalleryScreen(
                             conversationId: widget.conversationId,
                             title: widget.contactName,
                           ),
+                          leftOffset: 400.0, // Sidebar width
                         ),
                       );
                       break;
@@ -2113,42 +2243,76 @@ class _ChatViewState extends ConsumerState<ChatView> {
                       ),
                     // Text field
                     SelectionArea(
-                      child: TextField(
-                        controller: _messageController,
-                        minLines: 1,
-                        maxLines: 4,
-                        style: TextStyle(color: isDark ? Colors.white : Colors.black),
-                        decoration: InputDecoration(
-                          hintText: 'Type a message',
-                          hintStyle: TextStyle(color: isDark ? Colors.white38 : Colors.grey[500]),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(24),
-                            borderSide: BorderSide.none,
+                      child: Shortcuts(
+                        shortcuts: {
+                          LogicalKeySet(LogicalKeyboardKey.enter): const _SendMessageIntent(),
+                          LogicalKeySet(LogicalKeyboardKey.shift, LogicalKeyboardKey.enter): const _NewLineIntent(),
+                        },
+                        child: Actions(
+                          actions: {
+                            _SendMessageIntent: CallbackAction<_SendMessageIntent>(
+                              onInvoke: (_) {
+                                if (_messageController.text.trim().isNotEmpty) {
+                                  setState(() {
+                                    _showQuickReplySuggestions = false;
+                                  });
+                                  _sendMessage();
+                                }
+                                return null;
+                              },
+                            ),
+                            _NewLineIntent: CallbackAction<_NewLineIntent>(
+                              onInvoke: (_) {
+                                // Allow default behavior (new line)
+                                return null;
+                              },
+                            ),
+                          },
+                          child: Focus(
+                            child: TextField(
+                              controller: _messageController,
+                              minLines: 1,
+                              maxLines: 4,
+                              style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                              decoration: InputDecoration(
+                                hintText: 'Type a message (Enter to send, Shift+Enter for new line)',
+                                hintStyle: TextStyle(color: isDark ? Colors.white38 : Colors.grey[500]),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(24),
+                                  borderSide: BorderSide.none,
+                                ),
+                                filled: true,
+                                fillColor: isDark ? const Color(0xFF2A3942) : const Color(0xFFF0F2F5),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              ),
+                              onChanged: (_) {
+                                // Trigger quick reply suggestions when text changes
+                                _onMessageChanged();
+                                // Check selection after text change
+                                _checkTextSelection();
+                              },
+                              onSubmitted: (_) {
+                                // Enter pressed: send message
+                                if (_messageController.text.trim().isNotEmpty) {
+                                  setState(() {
+                                    _showQuickReplySuggestions = false;
+                                  });
+                                  _sendMessage();
+                                }
+                              },
+                              textInputAction: TextInputAction.newline,
+                              keyboardType: TextInputType.multiline,
+                              onTap: () {
+                                // Keep suggestions visible on tap if "/" is in text
+                                _onMessageChanged();
+                                // Check selection after tap
+                                Future.delayed(const Duration(milliseconds: 50), () {
+                                  _checkTextSelection();
+                                });
+                              },
+                            ),
                           ),
-                          filled: true,
-                          fillColor: isDark ? const Color(0xFF2A3942) : const Color(0xFFF0F2F5),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         ),
-                        onChanged: (_) {
-                          // Trigger quick reply suggestions when text changes
-                          _onMessageChanged();
-                          // Check selection after text change
-                          _checkTextSelection();
-                        },
-                        onSubmitted: (_) {
-                          setState(() {
-                            _showQuickReplySuggestions = false;
-                          });
-                          _sendMessage();
-                        },
-                        onTap: () {
-                          // Keep suggestions visible on tap if "/" is in text
-                          _onMessageChanged();
-                          // Check selection after tap
-                          Future.delayed(const Duration(milliseconds: 50), () {
-                            _checkTextSelection();
-                          });
-                        },
                       ),
                     ),
                   ],

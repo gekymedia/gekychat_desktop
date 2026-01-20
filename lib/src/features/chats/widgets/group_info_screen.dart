@@ -6,6 +6,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:flutter/foundation.dart';
 import '../../../core/providers.dart';
 import '../../../theme/app_theme.dart';
+import '../../../widgets/constrained_slide_route.dart';
 import '../chat_repo.dart';
 import '../models.dart';
 import '../../media/media_gallery_screen.dart';
@@ -110,11 +111,12 @@ class GroupInfoScreen extends ConsumerWidget {
                         onTap: () {
                           Navigator.push(
                             context,
-                            MaterialPageRoute(
-                              builder: (context) => SearchInChatScreen(
+                            ConstrainedSlideRightRoute(
+                              page: SearchInChatScreen(
                                 groupId: groupId,
                                 title: group['name'],
                               ),
+                              leftOffset: 400.0, // Sidebar width
                             ),
                           );
                         },
@@ -126,11 +128,12 @@ class GroupInfoScreen extends ConsumerWidget {
                         onTap: () {
                           Navigator.push(
                             context,
-                            MaterialPageRoute(
-                              builder: (context) => MediaGalleryScreen(
+                            ConstrainedSlideRightRoute(
+                              page: MediaGalleryScreen(
                                 groupId: groupId,
                                 title: group['name'],
                               ),
+                              leftOffset: 400.0, // Sidebar width
                             ),
                           );
                         },
@@ -175,11 +178,12 @@ class GroupInfoScreen extends ConsumerWidget {
                                 .toList() ?? [];
                             final result = await Navigator.push<bool>(
                               context,
-                              MaterialPageRoute(
-                                builder: (context) => AddParticipantScreen(
+                              ConstrainedSlideRightRoute(
+                                page: AddParticipantScreen(
                                   groupId: groupId,
                                   existingMemberIds: members,
                                 ),
+                                leftOffset: 400.0, // Sidebar width
                               ),
                             );
                             if (result == true) {
@@ -278,8 +282,9 @@ class GroupInfoScreen extends ConsumerWidget {
                           onTap: () {
                             Navigator.push(
                               context,
-                              MaterialPageRoute(
-                                builder: (context) => EditGroupScreen(groupId: groupId),
+                              ConstrainedSlideRightRoute(
+                                page: EditGroupScreen(groupId: groupId),
+                                leftOffset: 400.0, // Sidebar width
                               ),
                             ).then((_) {
                               ref.invalidate(groupInfoProvider(groupId));
@@ -480,12 +485,13 @@ class GroupInfoScreen extends ConsumerWidget {
                   Navigator.pop(context);
                   Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (context) => ShareGroupLinkScreen(
+                    ConstrainedSlideRightRoute(
+                      page: ShareGroupLinkScreen(
                         shareText: shareText,
                         inviteLink: inviteLink!,
                         groupName: groupName,
                       ),
+                      leftOffset: 400.0, // Sidebar width
                     ),
                   );
                 },

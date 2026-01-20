@@ -94,6 +94,9 @@ class _AccountSwitcherState extends ConsumerState<AccountSwitcher> {
               // Reload user profile and refresh
               ref.invalidate(currentUserProvider);
               
+              // Refresh account list to ensure it's up to date
+              ref.invalidate(accountsProvider);
+              
               // Invalidate chat repository to reload conversations
               ref.invalidate(chatRepositoryProvider);
               
