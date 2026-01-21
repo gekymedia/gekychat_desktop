@@ -1327,6 +1327,16 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                             itemCount: _messages.length,
                             itemBuilder: (context, index) {
                               final message = _messages[index];
+                              // Get group info to check if it's a channel and if sender is admin
+                              final group = groupAsync.value;
+                              final isChannel = group?['type'] == 'channel';
+                              final admins = (group?['admins'] as List<dynamic>?)
+                                  ?.map((a) => a['id'] as int?)
+                                  .whereType<int>()
+                                  .toList() ?? [];
+                              final senderIsAdmin = admins.contains(message.senderId);
+                              final channelName = isChannel ? (group?['name'] as String?) : null;
+                              
                               return MessageBubble(
                                 message: message,
                                 currentUserId: _currentUserId ?? 0,
@@ -1335,6 +1345,9 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                                 onReact: (emoji) => _reactToMessage(message, emoji),
                                 onEdit: (newBody) => _editMessage(message, newBody),
                                 isGroupMessage: true,
+                                isChannel: isChannel,
+                                channelName: channelName,
+                                senderIsAdmin: senderIsAdmin,
                               );
                             },
                           ),

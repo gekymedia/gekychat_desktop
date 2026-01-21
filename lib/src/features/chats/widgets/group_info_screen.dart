@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart';
 import '../../../core/providers.dart';
 import '../../../theme/app_theme.dart';
 import '../../../widgets/constrained_slide_route.dart';
-import '../chat_repo.dart';
+import '../chat_providers.dart';
 import '../models.dart';
 import '../../media/media_gallery_screen.dart';
 import 'search_in_chat_screen.dart';
@@ -138,12 +138,21 @@ class GroupInfoScreen extends ConsumerWidget {
                           );
                         },
                       ),
-                      ListTile(
-                        leading: const Icon(Icons.share),
-                        title: Text(group['type'] == 'channel' ? 'Share channel link' : 'Share group link'),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => _shareInviteLink(context, ref, groupId, group),
-                      ),
+                      // For channels: Show "Copy channel link", for groups: Show "Share group link"
+                      if (group['type'] == 'channel')
+                        ListTile(
+                          leading: const Icon(Icons.link),
+                          title: const Text('Copy channel link'),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => _copyChannelLink(context, ref, groupId, group),
+                        )
+                      else
+                        ListTile(
+                          leading: const Icon(Icons.share),
+                          title: const Text('Share group link'),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => _shareInviteLink(context, ref, groupId, group),
+                        ),
                     ],
                   ),
                 ),
@@ -158,7 +167,9 @@ class GroupInfoScreen extends ConsumerWidget {
                       Padding(
                         padding: const EdgeInsets.all(16),
                         child: Text(
-                          '${members.length} ${members.length == 1 ? 'member' : 'members'}',
+                          group['type'] == 'channel'
+                              ? '${members.length} ${members.length == 1 ? 'follower' : 'followers'}'
+                              : '${members.length} ${members.length == 1 ? 'member' : 'members'}',
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
@@ -191,7 +202,10 @@ class GroupInfoScreen extends ConsumerWidget {
                             }
                           },
                         ),
-                      ...members.map((member) {
+                      // For channels: Only show member list if user is admin
+                      // For groups: Always show member list
+                      if (group['type'] != 'channel' || canManage)
+                        ...members.map((member) {
                         final isMemberAdmin = admins.any((a) => a.id == member.id);
                         final isMemberOwner = group['owner_id'] == member.id;
 
@@ -321,9 +335,9 @@ class GroupInfoScreen extends ConsumerWidget {
                           ),
                         ListTile(
                           leading: const Icon(Icons.exit_to_app),
-                          title: Text(group['type'] == 'channel' ? 'Exit channel' : 'Exit group'),
+                          title: Text(group['type'] == 'channel' ? 'Unfollow channel' : 'Exit group'),
                           trailing: const Icon(Icons.chevron_right),
-                          onTap: () => _showExitGroupDialog(context, ref, isDark),
+                          onTap: () => _showExitGroupDialog(context, ref, isDark, group),
                         ),
                       ],
                     ),
@@ -380,13 +394,80 @@ class GroupInfoScreen extends ConsumerWidget {
     }
   }
 
-  void _showExitGroupDialog(BuildContext context, WidgetRef ref, bool isDark) {
+  Future<void> _copyChannelLink(BuildContext context, WidgetRef ref, int groupId, Map<String, dynamic> group) async {
+    try {
+      final api = ref.read(apiServiceProvider);
+      
+      // Get channel link (always available for public channels)
+      String? channelLink;
+      try {
+        final infoResponse = await api.getGroupInviteInfo(groupId);
+        if (infoResponse.data['success'] == true && infoResponse.data['invite_link'] != null) {
+          channelLink = infoResponse.data['invite_link'];
+        }
+      } catch (e) {
+        debugPrint('Failed to get channel link: $e');
+      }
+      
+      // For public channels, construct the link directly using slug
+      if (channelLink == null && group['slug'] != null) {
+        // Try to get invite info first, which should return the link
+        // If not available, we'll construct it from slug
+        try {
+          final inviteInfo = await api.getGroupInviteInfo(groupId);
+          if (inviteInfo.data['success'] == true && inviteInfo.data['invite_link'] != null) {
+            channelLink = inviteInfo.data['invite_link'];
+          }
+        } catch (e) {
+          // If invite info fails, we'll use the slug-based link
+          debugPrint('Could not get invite link from API: $e');
+        }
+        
+        // Fallback: Construct channel link using slug
+        // For channels, the link format is typically: /groups/{slug}
+        // We'll use a relative URL that the app can handle
+        if (channelLink == null) {
+          channelLink = '/groups/${group['slug']}';
+        }
+      }
+      
+      if (channelLink == null || channelLink.isEmpty) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Unable to get channel link')),
+          );
+        }
+        return;
+      }
+      
+      // Copy to clipboard
+      await Clipboard.setData(ClipboardData(text: channelLink));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Channel link copied to clipboard')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to copy channel link: $e')),
+        );
+      }
+    }
+  }
+
+  void _showExitGroupDialog(BuildContext context, WidgetRef ref, bool isDark, Map<String, dynamic>? group) {
+    // Check if it's a channel or group to show appropriate message
+    final isChannel = group?['type'] == 'channel';
+    
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
-        title: const Text('Exit Group'),
-        content: const Text('Are you sure you want to exit this group?'),
+        title: Text(isChannel ? 'Unfollow Channel' : 'Exit Group'),
+        content: Text(isChannel 
+            ? 'Are you sure you want to unfollow this channel?'
+            : 'Are you sure you want to exit this group?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -400,20 +481,20 @@ class GroupInfoScreen extends ConsumerWidget {
                 await chatRepo.leaveGroup(groupId);
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Left group successfully')),
+                    SnackBar(content: Text(isChannel ? 'Unfollowed channel successfully' : 'Left group successfully')),
                   );
                   Navigator.pop(context); // Go back to chat list
                 }
               } catch (e) {
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Failed to leave group: $e')),
+                    SnackBar(content: Text('Failed to ${isChannel ? 'unfollow channel' : 'leave group'}: $e')),
                   );
                 }
               }
             },
             style: ElevatedButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Exit'),
+            child: Text(isChannel ? 'Unfollow' : 'Exit'),
           ),
         ],
       ),

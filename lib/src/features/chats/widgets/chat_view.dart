@@ -16,6 +16,7 @@ import 'package:dio/dio.dart';
 import 'package:video_player/video_player.dart';
 import '../chat_repo.dart';
 import '../models.dart';
+import '../chat_providers.dart';
 import 'message_bubble.dart';
 import 'date_divider.dart';
 import '../../../utils/date_formatter.dart';
@@ -441,7 +442,8 @@ class _ChatViewState extends ConsumerState<ChatView> {
       // Mark conversation as read after loading messages
       try {
         await chatRepo.markConversationAsRead(widget.conversationId);
-        
+        // Reload conversations to update unread count in the list
+        ref.invalidate(optimizedConversationsProvider);
         // Update badge immediately after marking as read to reflect new unread count
         // This ensures unread count reduces when app is open
         _updateTaskbarBadge();
@@ -449,9 +451,6 @@ class _ChatViewState extends ConsumerState<ChatView> {
         debugPrint('Failed to mark conversation as read: $e');
         // Don't show error to user - this is a background operation
       }
-      
-      // Update badge after loading messages (may have changed unread count)
-      _updateTaskbarBadge();
     } catch (e) {
       setState(() {
         _isLoading = false;

@@ -35,6 +35,9 @@ class MessageBubble extends ConsumerWidget {
   final VoidCallback? onReplyPrivately;
   final Function(String)? onEdit;
   final bool isGroupMessage;
+  final bool isChannel; // Whether this is a channel message
+  final String? channelName; // Channel name (to use instead of admin name)
+  final bool? senderIsAdmin; // Whether sender is admin (for channels)
 
   const MessageBubble({
     super.key,
@@ -48,6 +51,9 @@ class MessageBubble extends ConsumerWidget {
     this.onReplyPrivately,
     this.onEdit,
     this.isGroupMessage = false,
+    this.isChannel = false,
+    this.channelName,
+    this.senderIsAdmin,
   });
 
   bool isMe(int currentUserId) => message.senderId == currentUserId;
@@ -103,19 +109,31 @@ class MessageBubble extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // Sender name and avatar for group messages
+                    // For channels: Hide admin sender name, show channel name instead
                     if (!isMeValue && isGroupMessage && message.sender != null)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 4),
                         child: Row(
                           children: [
-                            ColoredAvatar(
-                              imageUrl: message.sender!['avatar_url'] as String? ?? message.sender!['avatar_path'] as String?,
-                              name: message.sender!['name'] as String? ?? message.sender!['phone'] as String? ?? 'Unknown',
-                              radius: 12,
-                            ),
+                            // Use channel avatar if it's a channel and sender is admin
+                            if (isChannel && senderIsAdmin == true && channelName != null)
+                              ColoredAvatar(
+                                // Channel doesn't have avatar in message, use default
+                                name: channelName!,
+                                radius: 12,
+                              )
+                            else
+                              ColoredAvatar(
+                                imageUrl: message.sender!['avatar_url'] as String? ?? message.sender!['avatar_path'] as String?,
+                                name: message.sender!['name'] as String? ?? message.sender!['phone'] as String? ?? 'Unknown',
+                                radius: 12,
+                              ),
                             const SizedBox(width: 6),
                             Text(
-                              message.sender!['name'] as String? ?? message.sender!['phone'] as String? ?? 'Unknown',
+                              // For channels with admin senders, show channel name instead
+                              (isChannel && senderIsAdmin == true && channelName != null)
+                                  ? channelName!
+                                  : (message.sender!['name'] as String? ?? message.sender!['phone'] as String? ?? 'Unknown'),
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
@@ -378,7 +396,33 @@ class MessageBubble extends ConsumerWidget {
   }
 
   Widget _buildDocumentAttachment(MessageAttachment attachment, bool isDark, WidgetRef ref, BuildContext context) {
+    // Use original name if available, otherwise extract from URL
     final fileName = attachment.url.split('/').last.split('?').first;
+    
+    // Get file extension from file name
+    String? extension;
+    final urlParts = fileName.split('.');
+    if (urlParts.length > 1) {
+      extension = '.${urlParts.last.toLowerCase()}';
+    }
+    
+    // Truncate long file names, preserving extension
+    final maxLength = 30;
+    String displayFileName = fileName;
+    if (fileName.length > maxLength && extension != null) {
+      final nameWithoutExt = fileName.substring(0, fileName.length - extension.length);
+      if (nameWithoutExt.length > maxLength - extension.length - 3) {
+        displayFileName = '${nameWithoutExt.substring(0, maxLength - extension.length - 3)}...$extension';
+      }
+    } else if (fileName.length > maxLength) {
+      displayFileName = '${fileName.substring(0, maxLength - 3)}...';
+    }
+    
+    // Ensure extension is shown if we have it
+    if (extension != null && !displayFileName.endsWith(extension)) {
+      displayFileName = '$displayFileName$extension';
+    }
+    
     return FutureBuilder<String?>(
       future: _getDownloadPath(attachment.url),
       builder: (context, snapshot) {
@@ -390,6 +434,8 @@ class MessageBubble extends ConsumerWidget {
           builder: (context, fileExistsSnapshot) {
             final fileExists = fileExistsSnapshot.data ?? false;
             final showOpenIcon = isDownloaded && fileExists;
+            
+            final iconColor = _getDocumentIconColor(attachment.mimeType, fileName);
             
             return GestureDetector(
               onTap: () => _downloadFile(attachment, ref, context),
@@ -405,22 +451,44 @@ class MessageBubble extends ConsumerWidget {
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: AppTheme.primaryGreen.withOpacity(0.2),
+                        color: iconColor.withOpacity(0.2),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Icon(Icons.description, color: AppTheme.primaryGreen, size: 24),
+                      child: Icon(
+                        _getDocumentIcon(attachment.mimeType, fileName),
+                        color: iconColor,
+                        size: 24,
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: Text(
-                        fileName,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          color: isDark ? AppTheme.textPrimaryDark : AppTheme.textPrimaryLight,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            displayFileName,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: isDark ? AppTheme.textPrimaryDark : AppTheme.textPrimaryLight,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            attachment.originalSize != null 
+                                ? _formatFileSize(attachment.originalSize!)
+                                : attachment.compressedSize != null
+                                    ? _formatFileSize(attachment.compressedSize!)
+                                    : 'File',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark
+                                  ? AppTheme.textSecondaryDark
+                                  : AppTheme.textSecondaryLight,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     Icon(
@@ -1602,6 +1670,182 @@ class MessageBubble extends ConsumerWidget {
     }
     
     return cleaned.startsWith('+') ? cleaned : '+$cleaned';
+  }
+
+  IconData _getDocumentIcon(String? mimeType, String? fileName) {
+    final lowerMime = mimeType?.toLowerCase() ?? '';
+    final lowerFile = fileName?.toLowerCase() ?? '';
+    
+    // Audio files (mp3, wav, m4a, aac, ogg, flac, etc.)
+    if (lowerMime.startsWith('audio/') || 
+        lowerFile.endsWith('.mp3') || lowerFile.endsWith('.wav') || 
+        lowerFile.endsWith('.m4a') || lowerFile.endsWith('.aac') || 
+        lowerFile.endsWith('.ogg') || lowerFile.endsWith('.flac') ||
+        lowerFile.endsWith('.wma') || lowerFile.endsWith('.opus')) {
+      return Icons.audiotrack;
+    }
+    
+    // Video files (mp4, avi, mkv, mov, wmv, etc.)
+    if (lowerMime.startsWith('video/') || 
+        lowerFile.endsWith('.mp4') || lowerFile.endsWith('.avi') || 
+        lowerFile.endsWith('.mkv') || lowerFile.endsWith('.mov') || 
+        lowerFile.endsWith('.wmv') || lowerFile.endsWith('.flv') ||
+        lowerFile.endsWith('.webm') || lowerFile.endsWith('.m4v')) {
+      return Icons.videocam;
+    }
+    
+    // Image files (jpg, png, gif, webp, etc.)
+    if (lowerMime.startsWith('image/') || 
+        lowerFile.endsWith('.jpg') || lowerFile.endsWith('.jpeg') || 
+        lowerFile.endsWith('.png') || lowerFile.endsWith('.gif') || 
+        lowerFile.endsWith('.webp') || lowerFile.endsWith('.bmp') ||
+        lowerFile.endsWith('.svg') || lowerFile.endsWith('.ico')) {
+      return Icons.image;
+    }
+    
+    // PDF files
+    if (lowerMime.contains('pdf') || lowerFile.endsWith('.pdf')) {
+      return Icons.picture_as_pdf;
+    }
+    
+    // Word documents
+    if (lowerMime.contains('word') || lowerMime.contains('doc') || 
+        lowerFile.endsWith('.doc') || lowerFile.endsWith('.docx')) {
+      return Icons.description;
+    }
+    
+    // Excel/Spreadsheet files
+    if (lowerMime.contains('sheet') || lowerMime.contains('excel') || 
+        lowerFile.endsWith('.xls') || lowerFile.endsWith('.xlsx') ||
+        lowerFile.endsWith('.csv')) {
+      return Icons.table_chart;
+    }
+    
+    // PowerPoint files
+    if (lowerMime.contains('presentation') || lowerMime.contains('powerpoint') ||
+        lowerFile.endsWith('.ppt') || lowerFile.endsWith('.pptx')) {
+      return Icons.slideshow;
+    }
+    
+    // Archive/Compressed files
+    if (lowerMime.contains('zip') || lowerMime.contains('rar') || 
+        lowerMime.contains('archive') || lowerMime.contains('compressed') ||
+        lowerFile.endsWith('.zip') || lowerFile.endsWith('.rar') || 
+        lowerFile.endsWith('.7z') || lowerFile.endsWith('.tar') ||
+        lowerFile.endsWith('.gz') || lowerFile.endsWith('.bz2')) {
+      return Icons.folder_zip;
+    }
+    
+    // Text files
+    if (lowerMime.startsWith('text/') || 
+        lowerFile.endsWith('.txt') || lowerFile.endsWith('.text') ||
+        lowerFile.endsWith('.md') || lowerFile.endsWith('.json') ||
+        lowerFile.endsWith('.xml') || lowerFile.endsWith('.csv')) {
+      return Icons.text_snippet;
+    }
+    
+    // Code files
+    if (lowerFile.endsWith('.js') || lowerFile.endsWith('.ts') ||
+        lowerFile.endsWith('.py') || lowerFile.endsWith('.java') ||
+        lowerFile.endsWith('.cpp') || lowerFile.endsWith('.c') ||
+        lowerFile.endsWith('.php') || lowerFile.endsWith('.rb') ||
+        lowerFile.endsWith('.go') || lowerFile.endsWith('.rs')) {
+      return Icons.code;
+    }
+    
+    // Default file icon
+    return Icons.insert_drive_file;
+  }
+  
+  Color _getDocumentIconColor(String? mimeType, String? fileName) {
+    final lowerMime = mimeType?.toLowerCase() ?? '';
+    final lowerFile = fileName?.toLowerCase() ?? '';
+    
+    // Audio files - purple/blue
+    if (lowerMime.startsWith('audio/') || 
+        lowerFile.endsWith('.mp3') || lowerFile.endsWith('.wav') || 
+        lowerFile.endsWith('.m4a') || lowerFile.endsWith('.aac') || 
+        lowerFile.endsWith('.ogg') || lowerFile.endsWith('.flac') ||
+        lowerFile.endsWith('.wma') || lowerFile.endsWith('.opus')) {
+      return const Color(0xFF9C27B0); // Purple
+    }
+    
+    // Video files - red
+    if (lowerMime.startsWith('video/') || 
+        lowerFile.endsWith('.mp4') || lowerFile.endsWith('.avi') || 
+        lowerFile.endsWith('.mkv') || lowerFile.endsWith('.mov') || 
+        lowerFile.endsWith('.wmv') || lowerFile.endsWith('.flv') ||
+        lowerFile.endsWith('.webm') || lowerFile.endsWith('.m4v')) {
+      return const Color(0xFFE53935); // Red
+    }
+    
+    // Image files - teal
+    if (lowerMime.startsWith('image/') || 
+        lowerFile.endsWith('.jpg') || lowerFile.endsWith('.jpeg') || 
+        lowerFile.endsWith('.png') || lowerFile.endsWith('.gif') || 
+        lowerFile.endsWith('.webp') || lowerFile.endsWith('.bmp') ||
+        lowerFile.endsWith('.svg') || lowerFile.endsWith('.ico')) {
+      return const Color(0xFF00897B); // Teal
+    }
+    
+    // PDF files - red
+    if (lowerMime.contains('pdf') || lowerFile.endsWith('.pdf')) {
+      return const Color(0xFFE53935); // Red
+    }
+    
+    // Word documents - blue
+    if (lowerMime.contains('word') || lowerMime.contains('doc') || 
+        lowerFile.endsWith('.doc') || lowerFile.endsWith('.docx')) {
+      return const Color(0xFF1976D2); // Blue
+    }
+    
+    // Excel files - green
+    if (lowerMime.contains('sheet') || lowerMime.contains('excel') || 
+        lowerFile.endsWith('.xls') || lowerFile.endsWith('.xlsx') ||
+        lowerFile.endsWith('.csv')) {
+      return const Color(0xFF388E3C); // Green
+    }
+    
+    // PowerPoint files - orange
+    if (lowerMime.contains('presentation') || lowerMime.contains('powerpoint') ||
+        lowerFile.endsWith('.ppt') || lowerFile.endsWith('.pptx')) {
+      return const Color(0xFFFF6F00); // Orange
+    }
+    
+    // Archive files - amber
+    if (lowerMime.contains('zip') || lowerMime.contains('rar') || 
+        lowerMime.contains('archive') || lowerMime.contains('compressed') ||
+        lowerFile.endsWith('.zip') || lowerFile.endsWith('.rar') || 
+        lowerFile.endsWith('.7z') || lowerFile.endsWith('.tar') ||
+        lowerFile.endsWith('.gz') || lowerFile.endsWith('.bz2')) {
+      return const Color(0xFFFFA000); // Amber
+    }
+    
+    // Text files - blue-grey
+    if (lowerMime.startsWith('text/') || 
+        lowerFile.endsWith('.txt') || lowerFile.endsWith('.text') ||
+        lowerFile.endsWith('.md') || lowerFile.endsWith('.json') ||
+        lowerFile.endsWith('.xml') || lowerFile.endsWith('.csv')) {
+      return const Color(0xFF546E7A); // Blue Grey
+    }
+    
+    // Code files - indigo
+    if (lowerFile.endsWith('.js') || lowerFile.endsWith('.ts') ||
+        lowerFile.endsWith('.py') || lowerFile.endsWith('.java') ||
+        lowerFile.endsWith('.cpp') || lowerFile.endsWith('.c') ||
+        lowerFile.endsWith('.php') || lowerFile.endsWith('.rb') ||
+        lowerFile.endsWith('.go') || lowerFile.endsWith('.rs')) {
+      return const Color(0xFF3F51B5); // Indigo
+    }
+    
+    // Default - green (WhatsApp style)
+    return AppTheme.primaryGreen;
+  }
+
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
   void _handlePhoneClick(BuildContext context, String phone) {
