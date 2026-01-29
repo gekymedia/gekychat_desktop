@@ -359,6 +359,8 @@ class Message {
   final String? status; // queued | sending | sent | delivered | read | failed (for offline messages)
   final bool isSystem; // System messages (e.g., "User joined the group")
   final String? systemAction; // Action type: 'joined', 'left', 'promoted', 'demoted', 'removed'
+  final int mentionCount; // Number of @mentions in this message
+  final List<dynamic>? mentions; // List of mention objects from API
 
   Message({
     required this.id,
@@ -384,6 +386,8 @@ class Message {
     this.status,
     this.isSystem = false,
     this.systemAction,
+    this.mentionCount = 0,
+    this.mentions,
   });
 
   factory Message.fromJson(Map<String, dynamic> json) {
@@ -476,6 +480,8 @@ class Message {
       status: json['status'] as String?, // queued | sending | sent | delivered | read | failed
       isSystem: isSystem,
       systemAction: json['system_action'] as String?,
+      mentionCount: json['mention_count'] ?? 0,
+      mentions: json['mentions'] as List<dynamic>?,
     );
   }
 }

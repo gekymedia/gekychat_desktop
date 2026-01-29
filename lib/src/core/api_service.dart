@@ -831,4 +831,13 @@ class ApiService {
 
   Future<Response> toggleGroupMessageLock(int groupId) =>
     put('/groups/$groupId/toggle-message-lock');
+
+  // ---------------------------------------------------------------------------
+  // Mentions
+  // ---------------------------------------------------------------------------
+
+  Future<Response> getMentions() => get('/mentions');
+  Future<Response> getMentionStats() => get('/mentions/stats');
+  Future<Response> markMentionAsRead(int mentionId) => post('/mentions/$mentionId/read');
+  Future<Response> markAllMentionsAsRead() => post('/mentions/read-all');
 }

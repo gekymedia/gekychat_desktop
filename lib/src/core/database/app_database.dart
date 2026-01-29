@@ -28,14 +28,17 @@ class Conversations extends Table {
 
 // Messages table
 class Messages extends Table {
-  IntColumn get id => integer()();
+  IntColumn get id => integer().nullable()(); // Nullable for pending messages
+  TextColumn get clientUuid => text()(); // Client-side UUID for offline-first support
   IntColumn get conversationId => integer().nullable()();
   IntColumn get groupId => integer().nullable()();
   IntColumn get senderId => integer()();
   TextColumn get senderName => text().nullable()();
   TextColumn get senderAvatarUrl => text().nullable()();
   TextColumn get body => text()();
+  TextColumn get status => text().withDefault(const Constant('pending'))(); // pending, sending, sent, delivered, read, failed
   DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get serverCreatedAt => dateTime().nullable()(); // Server timestamp
   IntColumn get replyToId => integer().nullable()();
   IntColumn get forwardedFromId => integer().nullable()();
   TextColumn get attachmentsJson => text().nullable()(); // JSON string of attachments
@@ -51,7 +54,7 @@ class Messages extends Table {
   DateTimeColumn get lastSyncedAt => dateTime().nullable()();
   
   @override
-  Set<Column> get primaryKey => {id};
+  Set<Column> get primaryKey => {clientUuid}; // Use clientUuid as primary key
 }
 
 // Groups table
@@ -76,6 +79,7 @@ class Groups extends Table {
 // Offline message queue table
 class OfflineMessages extends Table {
   IntColumn get id => integer().autoIncrement()();
+  TextColumn get clientUuid => text()(); // Client UUID for idempotency
   IntColumn get conversationId => integer().nullable()();
   IntColumn get groupId => integer().nullable()();
   TextColumn get body => text()();
@@ -96,7 +100,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2; // Increment for clientUuid and status fields
 
   @override
   MigrationStrategy get migration {

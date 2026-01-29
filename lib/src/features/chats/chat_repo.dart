@@ -285,12 +285,14 @@ class ChatRepository {
     List<File>? attachments,
     bool skipCompression = false,
     void Function(double progress)? onProgress,
+    String? clientUuid, // Add client_uuid parameter for offline-first support
   }) async {
     try {
       final data = <String, dynamic>{
         if (body != null) 'body': body,
         if (replyTo != null) 'reply_to': replyTo,
         if (forwardFrom != null) 'forward_from_id': forwardFrom,
+        if (clientUuid != null) 'client_uuid': clientUuid, // Include client_uuid
       };
 
       // Upload attachments first and get their IDs
@@ -558,12 +560,14 @@ class ChatRepository {
     List<File>? attachments,
     bool skipCompression = false,
     void Function(double progress)? onProgress,
+    String? clientUuid, // Add client_uuid parameter for offline-first support
   }) async {
     try {
       final data = <String, dynamic>{
         if (body != null) 'body': body,
         if (replyToId != null) 'reply_to': replyToId,
         if (forwardFrom != null) 'forward_from_id': forwardFrom,
+        if (clientUuid != null) 'client_uuid': clientUuid, // Include client_uuid
       };
 
       // Upload attachments first and get their IDs

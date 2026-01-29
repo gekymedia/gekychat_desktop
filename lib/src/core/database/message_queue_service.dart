@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'app_database.dart' hide Message;
 import 'local_storage_service.dart';
 import '../../features/chats/chat_repo.dart';
@@ -12,11 +14,12 @@ class MessageQueueService {
   final AppDatabase _db;
   final ChatRepository _chatRepo;
   final bool Function() _isOnline;
+  static const _uuid = Uuid();
 
   MessageQueueService(this._db, this._chatRepo, this._isOnline);
 
-  // Queue a message for sending when online
-  Future<int> queueMessage({
+  // Queue a message for sending when online (with client_uuid support)
+  Future<String> queueMessage({
     required int? conversationId,
     required int? groupId,
     required String body,
@@ -25,7 +28,11 @@ class MessageQueueService {
     List<File>? attachments,
     Map<String, dynamic>? locationData,
     Map<String, dynamic>? contactData,
+    String? clientUuid, // Optional: provide client UUID, otherwise generate
   }) async {
+    // Generate client UUID if not provided
+    final clientId = clientUuid ?? _uuid.v4();
+    
     // Serialize attachments (store file paths)
     String? attachmentsJson;
     if (attachments != null && attachments.isNotEmpty) {
@@ -33,6 +40,7 @@ class MessageQueueService {
     }
 
     final companion = OfflineMessagesCompanion(
+      clientUuid: Value(clientId), // Add client UUID
       conversationId: Value(conversationId),
       groupId: Value(groupId),
       body: Value(body),
@@ -45,8 +53,28 @@ class MessageQueueService {
       retryCount: const Value(0),
     );
 
-    final id = await _db.into(_db.offlineMessages).insert(companion);
-    return id;
+    await _db.into(_db.offlineMessages).insert(companion);
+    
+    // Also save to Messages table with pending status
+    await _db.into(_db.messages).insert(MessagesCompanion.insert(
+      clientUuid: clientId,
+      conversationId: Value(conversationId),
+      groupId: Value(groupId),
+      body: body,
+      status: const Value('pending'),
+      createdAt: DateTime.now(),
+      senderId: Value(await _getCurrentUserId()),
+      // ... other fields
+    ));
+    
+    return clientId;
+  }
+  
+  Future<int> _getCurrentUserId() async {
+    // Get current user ID from session/storage
+    // Implementation depends on your session management
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt('user_id') ?? 0; // Replace with actual implementation
   }
 
   // Get all pending messages
@@ -121,7 +149,10 @@ class MessageQueueService {
           }
         }
 
-        // Send the message
+        // Get client UUID from queued message
+        final clientUuid = queuedMessage.clientUuid ?? _uuid.v4();
+        
+        // Send the message with client_uuid
         final sentMessage = queuedMessage.conversationId != null
             ? await _chatRepo.sendMessageToConversation(
                 conversationId: queuedMessage.conversationId!,
@@ -129,6 +160,7 @@ class MessageQueueService {
                 replyTo: queuedMessage.replyToId,
                 forwardFrom: queuedMessage.forwardFromId,
                 attachments: attachments,
+                clientUuid: clientUuid, // Pass client_uuid
               )
             : (queuedMessage.groupId != null
                 ? await _chatRepo.sendMessageToGroup(
@@ -137,14 +169,31 @@ class MessageQueueService {
                     replyToId: queuedMessage.replyToId,
                     forwardFrom: queuedMessage.forwardFromId,
                     attachments: attachments,
+                    clientUuid: clientUuid, // Pass client_uuid
                   )
                 : null);
 
         // Mark as sent
         if (sentMessage != null) {
           await markAsSent(queuedMessage.id, sentMessage.id);
+          
+          // Update message status in messages table
+          await (_db.update(_db.messages)
+                ..where((m) => m.clientUuid.equals(clientUuid)))
+              .write(MessagesCompanion(
+                id: Value(sentMessage.id),
+                status: const Value('sent'),
+                serverCreatedAt: Value(sentMessage.createdAt),
+              ));
         } else {
           await markAsFailed(queuedMessage.id, 'Failed to send message');
+          
+          // Update message status to failed
+          await (_db.update(_db.messages)
+                ..where((m) => m.clientUuid.equals(clientUuid)))
+              .write(MessagesCompanion(
+                status: const Value('failed'),
+              ));
         }
       } catch (e) {
         await markAsFailed(queuedMessage.id, e.toString());

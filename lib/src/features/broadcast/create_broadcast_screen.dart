@@ -3,9 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'broadcast_repository.dart';
 import '../contacts/contacts_repository.dart';
-import '../contacts/contacts_screen.dart';
 import '../chats/models.dart' show GekyContact;
-import '../../core/providers.dart';
 
 class CreateBroadcastScreen extends ConsumerStatefulWidget {
   const CreateBroadcastScreen({super.key});
@@ -77,7 +75,10 @@ class _CreateBroadcastScreenState extends ConsumerState<CreateBroadcastScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final contactsRepo = ref.read(contactsRepositoryProvider);
-    final contactsFuture = contactsRepo.listContacts();
+    // Filter to only show registered contacts (those with user IDs) for broadcast lists
+    final contactsFuture = contactsRepo.listContacts().then((contacts) => 
+      contactsRepo.filterRegistered(contacts)
+    );
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
@@ -155,6 +156,19 @@ class _CreateBroadcastScreenState extends ConsumerState<CreateBroadcastScreen> {
                 }
 
                 final contacts = snapshot.data!;
+                if (contacts.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.all(32.0),
+                    child: Text(
+                      'No registered contacts available. Add contacts to create a broadcast list.',
+                      style: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.grey[600],
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  );
+                }
+                
                 return ListView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
@@ -162,32 +176,46 @@ class _CreateBroadcastScreenState extends ConsumerState<CreateBroadcastScreen> {
                   itemBuilder: (context, index) {
                     final contact = contacts[index];
                     // Use contactUserId (user ID) instead of contact.id for broadcast lists
-                    final userId = contact.contactUserId ?? contact.contactUser?['id'];
-                    if (userId == null) {
+                    final userId = contact.contactUserId;
+                    // Fallback: check contactUser map if contactUserId is null
+                    final userIdFromMap = userId ?? 
+                        (contact.contactUser != null && contact.contactUser!['id'] != null
+                            ? contact.contactUser!['id'] as int
+                            : null);
+                    
+                    if (userIdFromMap == null) {
                       // Skip contacts without user IDs (not registered)
+                      // This shouldn't happen since filterRegistered already filters them
+                      debugPrint('Warning: Contact ${contact.id} is registered but has no userId');
                       return const SizedBox.shrink();
                     }
-                    final isSelected = _selectedContactIds.contains(userId);
+                    final isSelected = _selectedContactIds.contains(userIdFromMap);
+
+                    // Get display name
+                    String displayName = contact.name;
+                    
+                    // Get avatar URL
+                    String? avatarUrl = contact.avatarUrl;
 
                     return CheckboxListTile(
                       value: isSelected,
                       onChanged: (value) {
                         setState(() {
                           if (value == true) {
-                            _selectedContactIds.add(userId);
+                            _selectedContactIds.add(userIdFromMap);
                           } else {
-                            _selectedContactIds.remove(userId);
+                            _selectedContactIds.remove(userIdFromMap);
                           }
                         });
                       },
-                      title: Text(contact.name),
+                      title: Text(displayName),
                       subtitle: contact.phone != null ? Text(contact.phone!) : null,
                       secondary: CircleAvatar(
-                        backgroundImage: contact.avatarUrl != null
-                            ? CachedNetworkImageProvider(contact.avatarUrl!)
+                        backgroundImage: avatarUrl != null
+                            ? CachedNetworkImageProvider(avatarUrl)
                             : null,
-                        child: contact.avatarUrl == null
-                            ? Text(contact.name[0].toUpperCase())
+                        child: avatarUrl == null
+                            ? Text(displayName[0].toUpperCase())
                             : null,
                       ),
                     );
