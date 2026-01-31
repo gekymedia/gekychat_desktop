@@ -83,13 +83,21 @@ class ApiService {
 
           return handler.next(options);
         },
-        onError: (DioException e, handler) {
-          // Suppress expected errors that are handled gracefully
+        onError: (DioException e, handler) async {
           final path = e.requestOptions.path;
           final statusCode = e.response?.statusCode;
           
-          // Don't log 401 for endpoints that are expected to fail when not authenticated
-          // Don't log 404 for linked-devices/others as it might mean no other devices exist
+          // Handle 401 Unauthorized errors GLOBALLY - auto logout
+          if (statusCode == 401) {
+            // Clear authentication data
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.remove('auth_token');
+            await prefs.remove('user_id');
+            await prefs.remove('user_data');
+            debugPrint('🚨 401 Unauthorized - auth cleared, redirecting to login');
+          }
+          
+          // Suppress expected errors that are handled gracefully
           final shouldSuppress = 
               (statusCode == 401 && (path.contains('/linked-devices') || path.contains('/feature-flags') || path == '/me' || path == '/api/v1/me')) ||
               (statusCode == 404 && path.contains('/linked-devices/others'));
