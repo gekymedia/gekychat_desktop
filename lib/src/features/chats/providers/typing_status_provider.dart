@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../realtime/pusher_service.dart';
+import '../../../utils/json_coercion.dart';
 import '../../../core/providers.dart';
 import '../../../core/session.dart';
+import '../../realtime/pusher_service.dart';
 
 /// Provider that tracks typing status for all conversations
 final typingStatusProvider = StateNotifierProvider<TypingStatusNotifier, Map<int, bool>>((ref) {
@@ -19,53 +20,56 @@ class TypingStatusNotifier extends StateNotifier<Map<int, bool>> {
   TypingStatusNotifier(this._ref) : super({}) {
     _initializeListener();
   }
-  
+
   PusherService? _pusherService;
   final Map<int, Timer> _typingTimers = {};
   final Set<int> _subscribedConversations = {};
-  
-  void _initializeListener() async {
-    // Get or create PusherService instance
-    _pusherService = PusherService();
+
+  Future<void> _initializeListener() async {
+    _pusherService = _ref.read(pusherServiceProvider);
     await _pusherService!.connect();
   }
-  
-  /// Subscribe to typing events for a conversation
+
+  /// Re-bind after a channel was torn down (e.g. legacy full unsubscribe).
+  void resubscribeToConversation(int conversationId) {
+    _subscribedConversations.remove(conversationId);
+    subscribeToConversation(conversationId);
+  }
+
   void subscribeToConversation(int conversationId) {
     if (_subscribedConversations.contains(conversationId)) {
-      return; // Already subscribed
-    }
-    
-    if (_pusherService == null) {
-      _initializeListener();
       return;
     }
-    
+
+    if (_pusherService == null) {
+      unawaited(_initializeListener().then((_) {
+        if (_subscribedConversations.contains(conversationId)) return;
+        subscribeToConversation(conversationId);
+      }));
+      return;
+    }
+
     _subscribedConversations.add(conversationId);
-    
-    // Listen for typing events on this conversation channel
+
     _pusherService!.listen(
       'conversation.$conversationId',
       'UserTyping',
       (data) {
         if (data is Map) {
-          final userId = data['user_id'] as int?;
-          final isTyping = data['is_typing'] as bool? ?? false;
-          
-          // Get current user ID to ignore own typing
+          final userId = asInt(data['user_id']);
+          final isTyping = data['is_typing'] == true ||
+              data['is_typing'] == 1 ||
+              data['is_typing'] == '1';
+
           final currentUserAsync = _ref.read(currentUserProvider.future);
           currentUserAsync.then((currentUser) {
-            // Only track typing from other users
             if (userId != null && userId != currentUser.id) {
-              // Cancel existing timer for this conversation
               _typingTimers[conversationId]?.cancel();
-              
-              // Update typing status
+
               final newState = Map<int, bool>.from(state);
               newState[conversationId] = isTyping;
               state = newState;
-              
-              // Auto-clear typing after 3 seconds
+
               if (isTyping) {
                 _typingTimers[conversationId] = Timer(const Duration(seconds: 3), () {
                   final updatedState = Map<int, bool>.from(state);
@@ -82,15 +86,13 @@ class TypingStatusNotifier extends StateNotifier<Map<int, bool>> {
       },
     );
   }
-  
-  /// Subscribe to multiple conversations at once
+
   void subscribeToConversations(List<int> conversationIds) {
     for (final id in conversationIds) {
       subscribeToConversation(id);
     }
   }
-  
-  /// Unsubscribe from typing events for a conversation
+
   void unsubscribeFromConversation(int conversationId) {
     _subscribedConversations.remove(conversationId);
     _typingTimers[conversationId]?.cancel();
@@ -99,13 +101,9 @@ class TypingStatusNotifier extends StateNotifier<Map<int, bool>> {
     newState.remove(conversationId);
     state = newState;
   }
-  
-  /// Get typing status for a conversation
-  bool isTyping(int conversationId) {
-    return state[conversationId] ?? false;
-  }
-  
-  /// Clear typing status for a conversation
+
+  bool isTyping(int conversationId) => state[conversationId] ?? false;
+
   void clearTyping(int conversationId) {
     _typingTimers[conversationId]?.cancel();
     _typingTimers.remove(conversationId);
@@ -113,7 +111,7 @@ class TypingStatusNotifier extends StateNotifier<Map<int, bool>> {
     newState[conversationId] = false;
     state = newState;
   }
-  
+
   @override
   void dispose() {
     for (final timer in _typingTimers.values) {
@@ -130,44 +128,48 @@ class RecordingStatusNotifier extends StateNotifier<Map<int, bool>> {
   RecordingStatusNotifier(this._ref) : super({}) {
     _initializeListener();
   }
-  
+
   PusherService? _pusherService;
   final Set<int> _subscribedConversations = {};
-  
-  void _initializeListener() async {
-    // Get or create PusherService instance
-    _pusherService = PusherService();
+
+  Future<void> _initializeListener() async {
+    _pusherService = _ref.read(pusherServiceProvider);
     await _pusherService!.connect();
   }
-  
-  /// Subscribe to recording events for a conversation
+
+  void resubscribeToConversation(int conversationId) {
+    _subscribedConversations.remove(conversationId);
+    subscribeToConversation(conversationId);
+  }
+
   void subscribeToConversation(int conversationId) {
     if (_subscribedConversations.contains(conversationId)) {
-      return; // Already subscribed
-    }
-    
-    if (_pusherService == null) {
-      _initializeListener();
       return;
     }
-    
+
+    if (_pusherService == null) {
+      unawaited(_initializeListener().then((_) {
+        if (_subscribedConversations.contains(conversationId)) return;
+        subscribeToConversation(conversationId);
+      }));
+      return;
+    }
+
     _subscribedConversations.add(conversationId);
-    
-    // Listen for recording events on this conversation channel
+
     _pusherService!.listen(
       'conversation.$conversationId',
       'UserRecording',
       (data) {
         if (data is Map) {
-          final userId = data['user_id'] as int?;
-          final isRecording = data['is_recording'] as bool? ?? false;
-          
-          // Get current user ID to ignore own recording
+          final userId = asInt(data['user_id']);
+          final isRecording = data['is_recording'] == true ||
+              data['is_recording'] == 1 ||
+              data['is_recording'] == '1';
+
           final currentUserAsync = _ref.read(currentUserProvider.future);
           currentUserAsync.then((currentUser) {
-            // Only track recording from other users
             if (userId != null && userId != currentUser.id) {
-              // Update recording status
               final newState = Map<int, bool>.from(state);
               newState[conversationId] = isRecording;
               state = newState;
@@ -177,34 +179,28 @@ class RecordingStatusNotifier extends StateNotifier<Map<int, bool>> {
       },
     );
   }
-  
-  /// Subscribe to multiple conversations at once
+
   void subscribeToConversations(List<int> conversationIds) {
     for (final id in conversationIds) {
       subscribeToConversation(id);
     }
   }
-  
-  /// Unsubscribe from recording events for a conversation
+
   void unsubscribeFromConversation(int conversationId) {
     _subscribedConversations.remove(conversationId);
     final newState = Map<int, bool>.from(state);
     newState.remove(conversationId);
     state = newState;
   }
-  
-  /// Get recording status for a conversation
-  bool isRecording(int conversationId) {
-    return state[conversationId] ?? false;
-  }
-  
-  /// Clear recording status for a conversation
+
+  bool isRecording(int conversationId) => state[conversationId] ?? false;
+
   void clearRecording(int conversationId) {
     final newState = Map<int, bool>.from(state);
     newState[conversationId] = false;
     state = newState;
   }
-  
+
   @override
   void dispose() {
     _subscribedConversations.clear();

@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'linked_devices_repository.dart';
 import 'models.dart';
-import '../../core/providers.dart';
 import '../../theme/app_theme.dart';
 
 final linkedDevicesProvider = FutureProvider<List<LinkedDevice>>((ref) async {
@@ -215,10 +214,12 @@ class LinkedDevicesScreen extends ConsumerWidget {
     if (lower.contains('mac') || lower.contains('ios')) return Icons.laptop_mac;
     if (lower.contains('android')) return Icons.smartphone;
     if (lower.contains('linux')) return Icons.computer;
-    if (lower.contains('mobile') || lower.contains('phone'))
+    if (lower.contains('mobile') || lower.contains('phone')) {
       return Icons.smartphone;
-    if (lower.contains('web') || lower.contains('browser'))
+    }
+    if (lower.contains('web') || lower.contains('browser')) {
       return Icons.web;
+    }
     return Icons.devices;
   }
 

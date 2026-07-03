@@ -65,6 +65,7 @@ class _PrivacySettingsScreenState extends ConsumerState<PrivacySettingsScreen> {
               children: [
                 _PrivacySection(
                   title: 'Who can see',
+                  isDark: isDark,
                   children: [
                     _PrivacyOption(
                       title: 'Last Seen',
@@ -94,11 +95,11 @@ class _PrivacySettingsScreenState extends ConsumerState<PrivacySettingsScreen> {
                       isDark: isDark,
                     ),
                   ],
-                  isDark: isDark,
                 ),
                 const SizedBox(height: 24),
                 _PrivacySection(
                   title: 'Status',
+                  isDark: isDark,
                   children: [
                     _PrivacyOption(
                       title: 'Status Privacy',
@@ -112,7 +113,40 @@ class _PrivacySettingsScreenState extends ConsumerState<PrivacySettingsScreen> {
                       isDark: isDark,
                     ),
                   ],
+                ),
+                const SizedBox(height: 24),
+                _PrivacySection(
+                  title: 'Messages',
                   isDark: isDark,
+                  children: [
+                    Consumer(
+                      builder: (context, ref, _) {
+                        final showForwarded =
+                            ref.watch(showForwardedMarkProvider);
+                        return SwitchListTile(
+                          title: Text(
+                            'Show forwarded label',
+                            style: TextStyle(
+                              color: isDark ? Colors.white : Colors.black,
+                            ),
+                          ),
+                          subtitle: Text(
+                            'Show "Forwarded" on messages you forward',
+                            style: TextStyle(
+                              color: isDark ? Colors.white54 : Colors.grey[700],
+                            ),
+                          ),
+                          value: showForwarded,
+                          activeThumbColor: AppTheme.primaryGreen,
+                          onChanged: (value) {
+                            ref
+                                .read(showForwardedMarkProvider.notifier)
+                                .set(value);
+                          },
+                        );
+                      },
+                    ),
+                  ],
                 ),
               ],
             ),

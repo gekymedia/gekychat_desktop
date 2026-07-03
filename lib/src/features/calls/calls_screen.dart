@@ -4,11 +4,14 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
 import 'models.dart';
 import 'providers.dart';
-import 'call_screen.dart';
+import 'call_navigation.dart';
+import 'livekit_call_screen.dart';
 import '../../core/feature_flags.dart';
 import '../../core/session.dart';
 import '../live/live_broadcast_repository.dart';
 import '../live/broadcast_streaming_screen.dart';
+import '../contacts/contact_display_service.dart';
+import '../../utils/phone_formatter.dart';
 
 final callLogsProvider = FutureProvider<List<CallLog>>((ref) async {
   final repo = ref.read(callRepositoryProvider);
@@ -174,6 +177,17 @@ class _CallLogItem extends ConsumerWidget {
     }
 
     final user = call.otherUser!;
+    final displayService = ref.read(contactDisplayServiceProvider);
+    final displayName = displayService.resolve(
+      userId: user.id,
+      phone: user.phone,
+      apiName: user.name,
+    );
+    final formattedPhone = (user.phone != null &&
+            user.phone!.isNotEmpty &&
+            displayName != user.phone)
+        ? PhoneFormatter.format(user.phone)
+        : null;
 
     return ListTile(
       leading: CircleAvatar(
@@ -183,20 +197,33 @@ class _CallLogItem extends ConsumerWidget {
             : null,
         child: user.avatarUrl == null
             ? Text(
-                user.name[0].toUpperCase(),
+                displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
                 style: const TextStyle(fontSize: 20),
               )
             : null,
       ),
       title: Text(
-        user.name,
+        displayName,
         style: TextStyle(
           color: isDark ? Colors.white : Colors.black,
           fontWeight: FontWeight.w500,
         ),
       ),
-      subtitle: Row(
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (formattedPhone != null) ...[
+            Text(
+              formattedPhone,
+              style: TextStyle(
+                fontSize: 13,
+                color: isDark ? Colors.white60 : Colors.grey[600],
+              ),
+            ),
+            const SizedBox(height: 2),
+          ],
+          Row(
+            children: [
           Icon(
             call.isOutgoing
                 ? (call.isMissed ? Icons.call_missed_outgoing : Icons.call_made)
@@ -212,6 +239,8 @@ class _CallLogItem extends ConsumerWidget {
             style: TextStyle(
               color: isDark ? Colors.white70 : Colors.grey[600],
             ),
+          ),
+            ],
           ),
         ],
       ),
@@ -281,28 +310,34 @@ class _CallLogItem extends ConsumerWidget {
     try {
       final callManager = ref.read(callManagerProvider);
       final user = call.otherUser!;
+      final displayService = ref.read(contactDisplayServiceProvider);
+      final peerDisplayName = displayService.resolve(
+        userId: user.id,
+        phone: user.phone,
+        apiName: user.name,
+      );
 
-      // Start the call (desktop CallLog doesn't have conversationId, so we just use calleeId)
       await callManager.startCall(
         calleeId: user.id,
         type: call.type,
       );
 
-      // Get the call session from CallManager
       final callSession = callManager.currentCall;
-      if (callSession != null) {
-        // Navigate to call screen
+      if (callSession != null && context.mounted) {
+        final roomName = 'call_${callSession.id}';
+        final tokenResult = await ref
+            .read(liveKitTokenServiceProvider)
+            .fetchToken(roomName: roomName, displayName: 'User');
         if (context.mounted) {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (context) => CallScreen(
-                call: callSession,
-                userName: user.name,
-                userAvatar: user.avatarUrl,
-                isIncoming: false,
-                callManager: callManager,
-              ),
-            ),
+          await pushLiveKitCallScreenOnRoot(
+            url: tokenResult.url,
+            token: tokenResult.token,
+            roomName: roomName,
+            callId: callSession.id,
+            videoEnabled: call.type == 'video',
+            peerName: peerDisplayName,
+            peerAvatar: user.avatarUrl,
+            isOutgoingCall: true,
           );
         }
       }

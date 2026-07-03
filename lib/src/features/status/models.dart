@@ -2,6 +2,7 @@ enum StatusType {
   text,
   image,
   video,
+  audio,
 }
 
 enum StatusPrivacy {
@@ -19,6 +20,8 @@ class StatusUpdate {
   final String? mediaUrl;
   final String? thumbnailUrl;
   final String? backgroundColor;
+  final String? textColor;
+  final int? fontSize;
   final String? fontFamily;
   final DateTime createdAt;
   final DateTime expiresAt;
@@ -35,6 +38,8 @@ class StatusUpdate {
     this.thumbnailUrl,
     this.allowDownload,
     this.backgroundColor,
+    this.textColor,
+    this.fontSize,
     this.fontFamily,
     required this.createdAt,
     required this.expiresAt,
@@ -46,15 +51,25 @@ class StatusUpdate {
     return StatusUpdate(
       id: json['id'],
       userId: json['user_id'],
-      type: StatusType.values.firstWhere(
-        (e) => e.name == json['type'],
-        orElse: () => StatusType.text,
-      ),
+      type: () {
+        final t = json['type']?.toString();
+        for (final e in StatusType.values) {
+          if (e.name == t) return e;
+        }
+        return StatusType.text;
+      }(),
       text: json['text'],
       mediaUrl: json['media_url'],
       thumbnailUrl: json['thumbnail_url'],
-      backgroundColor: json['background_color'],
-      fontFamily: json['font_family'],
+      backgroundColor: json['background_color'] as String?,
+      textColor: json['text_color'] as String?,
+      fontSize: () {
+        final v = json['font_size'];
+        if (v is int) return v;
+        if (v is String) return int.tryParse(v);
+        return null;
+      }(),
+      fontFamily: json['font_family'] as String?,
       createdAt: DateTime.parse(json['created_at']),
       expiresAt: DateTime.parse(json['expires_at']),
       viewCount: json['view_count'] ?? 0,

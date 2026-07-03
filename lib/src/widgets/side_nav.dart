@@ -77,7 +77,8 @@ class SideNav extends ConsumerWidget {
           icon: Icons.videocam_outlined,
           label: 'Live',
           route: '/live-broadcast',
-          isActive: currentRoute.startsWith('/live'),
+          isActive: currentRoute == '/live-broadcast' ||
+              currentRoute.startsWith('/live-broadcast'),
         ),
       _NavItem(
         icon: Icons.phone_outlined,
@@ -149,10 +150,8 @@ class _NavItemWidget extends ConsumerWidget {
       child: InkWell(
         onTap: () {
           if (isMainSection) {
-            // Use provider for main sections to avoid route navigation
             ref.read(currentSectionProvider.notifier).setSection(item.route);
           } else {
-            // Use context.go for external routes like /settings
             context.go(item.route);
           }
         },

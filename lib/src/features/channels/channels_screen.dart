@@ -2,10 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
-import '../chats/chat_repo.dart';
+import '../chats/chat_providers.dart';
 import '../chats/models.dart';
 import '../chats/widgets/group_chat_view.dart';
-import '../../core/providers.dart';
 
 final channelsProvider = FutureProvider<List<GroupSummary>>((ref) async {
   final repo = ref.read(chatRepositoryProvider);

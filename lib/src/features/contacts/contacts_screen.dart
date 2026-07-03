@@ -5,7 +5,8 @@ import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'contacts_repository.dart';
 import '../chats/models.dart';
-import '../chats/chat_repo.dart';
+import '../chats/chat_providers.dart';
+import '../../widgets/skeleton_loader.dart';
 
 class ContactsScreen extends ConsumerStatefulWidget {
   const ContactsScreen({super.key});
@@ -17,6 +18,7 @@ class ContactsScreen extends ConsumerStatefulWidget {
 class _ContactsScreenState extends ConsumerState<ContactsScreen> {
   final List<GekyContact> _allContacts = [];
   final ScrollController _scrollController = ScrollController();
+  final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   int _currentPage = 1;
   bool _isLoading = false;
@@ -33,6 +35,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -228,10 +231,22 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
           Padding(
             padding: const EdgeInsets.all(8),
             child: TextField(
-              decoration: const InputDecoration(
+              controller: _searchController,
+              decoration: InputDecoration(
                 hintText: 'Search contacts...',
-                prefixIcon: Icon(Icons.search),
-                border: OutlineInputBorder(),
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          setState(() {
+                            _searchController.clear();
+                            _searchQuery = '';
+                          });
+                        },
+                      )
+                    : null,
+                border: const OutlineInputBorder(),
               ),
               onChanged: (value) {
                 setState(() {
@@ -242,7 +257,10 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
           ),
           Expanded(
             child: _allContacts.isEmpty && _isLoading
-                ? const Center(child: CircularProgressIndicator())
+                ? const SkeletonList(
+                    skeletonItem: SkeletonContactItem(),
+                    itemCount: 10,
+                  )
                 : Builder(
                     builder: (context) {
                       final filtered = _searchQuery.isEmpty
@@ -254,11 +272,36 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
 
                       if (filtered.isEmpty && !_isLoading) {
                         return Center(
-                          child: Text(
-                            _searchQuery.isEmpty ? 'No contacts' : 'No contacts found',
-                            style: TextStyle(
-                              color: isDark ? Colors.white70 : Colors.grey[600],
-                            ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                _searchQuery.isEmpty ? Icons.contacts_outlined : Icons.search_off,
+                                size: 80,
+                                color: Colors.grey[400],
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                _searchQuery.isEmpty 
+                                    ? 'No contacts yet'
+                                    : 'No contacts found',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w500,
+                                  color: isDark ? Colors.white70 : Colors.grey[700],
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                _searchQuery.isEmpty
+                                    ? 'Contacts you add will appear here'
+                                    : 'Try a different search term',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey[500],
+                                ),
+                              ),
+                            ],
                           ),
                         );
                       }

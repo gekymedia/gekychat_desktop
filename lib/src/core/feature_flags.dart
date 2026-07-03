@@ -1,7 +1,28 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import 'api_service.dart';
 import 'providers.dart';
+
+/// When true, [featureEnabled] returns true for every feature (sidebar, gates, etc.).
+///
+/// Enable via `--dart-define=FEATURE_FLAGS_BYPASS=true` and/or `.env`:
+/// `FEATURE_FLAGS_BYPASS=true` or `GEKYCHAT_BYPASS_FEATURE_FLAGS=true`
+bool featureFlagsClientBypassAll() {
+  const fromDefine = bool.fromEnvironment(
+    'FEATURE_FLAGS_BYPASS',
+    defaultValue: false,
+  );
+  if (fromDefine) return true;
+  try {
+    final a = dotenv.env['FEATURE_FLAGS_BYPASS']?.toLowerCase();
+    final b = dotenv.env['GEKYCHAT_BYPASS_FEATURE_FLAGS']?.toLowerCase();
+    return a == 'true' || a == '1' || b == 'true' || b == '1';
+  } catch (_) {
+    return false;
+  }
+}
 
 /// PHASE 2: Feature Flags Service
 class FeatureFlagService {
@@ -68,6 +89,9 @@ final featureFlagsProvider = FutureProvider<Map<String, bool>>((ref) async {
 
 /// Helper function to check if a feature is enabled
 bool featureEnabled(WidgetRef ref, String featureName) {
+  // Temporary product override: World Feed must always be visible.
+  if (featureName == 'world_feed') return true;
+  if (featureFlagsClientBypassAll()) return true;
   final flagsAsync = ref.watch(featureFlagsProvider);
   return flagsAsync.when(
     data: (flags) => flags[featureName] ?? false,

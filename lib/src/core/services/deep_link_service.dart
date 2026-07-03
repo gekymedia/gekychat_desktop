@@ -1,5 +1,4 @@
 import 'package:flutter/foundation.dart';
-import 'dart:io';
 
 /// Service to handle deep links from web to desktop app
 /// Supports gekychat:// protocol links
@@ -12,13 +11,12 @@ class DeepLinkService {
   Function(String)? _onLinkReceived;
   List<String> _commandLineArgs = [];
 
-  /// Initialize the deep link service with command line arguments
-  /// On Windows, protocol links are passed as command line arguments
+  /// Initialize the deep link service with command line arguments.
+  /// The OS passes `gekychat://...` as argv when the protocol handler runs.
   Future<void> initialize({List<String>? args}) async {
     _commandLineArgs = args ?? [];
-    
-    if (Platform.isWindows && _commandLineArgs.isNotEmpty) {
-      // Find protocol link in command line arguments
+
+    if (_commandLineArgs.isNotEmpty) {
       final protocolLink = _commandLineArgs.firstWhere(
         (arg) => arg.startsWith('gekychat://'),
         orElse: () => '',
@@ -65,8 +63,13 @@ class DeepLinkService {
       final path = uri.path;
       final queryParams = uri.queryParameters;
 
+      // `gekychat://web?url=...` from the Laravel web app: `web` is the host,
+      // not the path (path is empty). Also accept `gekychat:///web?url=...`.
+      final isWebBridge = queryParams.containsKey('url') &&
+          (uri.host == 'web' || path == 'web' || path == '/web');
+
       // Handle web?url parameter (from web interface)
-      if (path == 'web' && queryParams.containsKey('url')) {
+      if (isWebBridge) {
         final webUrl = queryParams['url']!;
         try {
           final webUri = Uri.parse(webUrl);

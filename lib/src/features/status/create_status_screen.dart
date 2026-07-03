@@ -6,7 +6,11 @@ import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:video_player/video_player.dart';
 import 'status_repository.dart';
 import '../../core/providers.dart';
+import '../../utils/clipboard_media_helper.dart';
 import '../world/widgets/video_trimmer_widget.dart';
+import '../chats/chat_providers.dart';
+import '../contacts/contacts_repository.dart';
+import '../chats/models.dart' show GekyContact;
 
 class CreateStatusScreen extends ConsumerStatefulWidget {
   const CreateStatusScreen({super.key});
@@ -16,8 +20,32 @@ class CreateStatusScreen extends ConsumerStatefulWidget {
 }
 
 class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
+  static const _statusMediaExtensions = [
+    'jpg',
+    'jpeg',
+    'png',
+    'gif',
+    'webp',
+    'bmp',
+    'heic',
+    'heif',
+    'mp4',
+    'mov',
+    'avi',
+    'mkv',
+    'webm',
+    'm4v',
+  ];
+
   final _textController = TextEditingController();
-  
+
+  final List<_StatusMentionTarget> _mentionedTargets = [];
+
+  /// Matches API `privacy`: contacts | only_share_with | contacts_except
+  String _statusPrivacy = 'contacts';
+  List<int> _privacyIncludedUserIds = [];
+  List<int> _privacyExcludedUserIds = [];
+
   File? _selectedMedia;
   bool _isVideo = false;
   bool _isLoading = false;
@@ -43,6 +71,225 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
   void initState() {
     super.initState();
     _loadUploadLimits();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadStatusPrivacy());
+  }
+
+  Future<void> _loadStatusPrivacy() async {
+    try {
+      final m = await ref.read(statusRepositoryProvider).getStatusPrivacySettings();
+      if (!mounted) return;
+      final p = m['privacy']?.toString() ?? 'contacts';
+      setState(() {
+        _statusPrivacy = p;
+        _privacyIncludedUserIds = _parseIdList(m['included_user_ids']);
+        _privacyExcludedUserIds = _parseIdList(m['excluded_user_ids']);
+      });
+    } catch (_) {}
+  }
+
+  List<int> _parseIdList(dynamic v) {
+    if (v is! List) return [];
+    return v.map((e) => e is int ? e : int.tryParse('$e') ?? 0).where((i) => i > 0).toList();
+  }
+
+  String _privacySummary() {
+    switch (_statusPrivacy) {
+      case 'only_share_with':
+        return _privacyIncludedUserIds.isEmpty
+            ? 'Only selected people…'
+            : 'Only ${_privacyIncludedUserIds.length} contact(s)';
+      case 'contacts_except':
+        return _privacyExcludedUserIds.isEmpty
+            ? 'All contacts'
+            : 'All contacts except ${_privacyExcludedUserIds.length}';
+      case 'everyone':
+        return 'Everyone';
+      default:
+        return 'All contacts';
+    }
+  }
+
+  Future<void> _openPrivacyEditor() async {
+    if (_isLoading) return;
+    var mode = _statusPrivacy;
+    var inc = List<int>.from(_privacyIncludedUserIds);
+    var exc = List<int>.from(_privacyExcludedUserIds);
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          return AlertDialog(
+            title: const Text('Who can see your status'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Applied when you tap Share (same as your status privacy in settings).',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                  const SizedBox(height: 12),
+                  RadioListTile<String>(
+                    title: const Text('All my contacts'),
+                    value: 'contacts',
+                    groupValue: mode,
+                    onChanged: (v) {
+                      if (v == null) return;
+                      setLocal(() {
+                        mode = v;
+                        inc = [];
+                        exc = [];
+                      });
+                    },
+                  ),
+                  RadioListTile<String>(
+                    title: const Text('Only selected people'),
+                    subtitle: Text(inc.isEmpty ? 'Tap Choose…' : '${inc.length} selected'),
+                    value: 'only_share_with',
+                    groupValue: mode,
+                    onChanged: (v) {
+                      if (v == null) return;
+                      setLocal(() => mode = v);
+                    },
+                  ),
+                  if (mode == 'only_share_with')
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: () async {
+                          final ids = await _pickRegisteredUserIds(
+                            title: 'Share with',
+                            initial: inc,
+                          );
+                          if (ids != null) setLocal(() => inc = ids);
+                        },
+                        child: const Text('Choose…'),
+                      ),
+                    ),
+                  RadioListTile<String>(
+                    title: const Text('My contacts except…'),
+                    subtitle: Text(exc.isEmpty ? 'Optional' : '${exc.length} excluded'),
+                    value: 'contacts_except',
+                    groupValue: mode,
+                    onChanged: (v) {
+                      if (v == null) return;
+                      setLocal(() => mode = v);
+                    },
+                  ),
+                  if (mode == 'contacts_except')
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: () async {
+                          final ids = await _pickRegisteredUserIds(
+                            title: 'Exclude',
+                            initial: exc,
+                          );
+                          if (ids != null) setLocal(() => exc = ids);
+                        },
+                        child: const Text('Choose to exclude…'),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+              FilledButton(
+                onPressed: () {
+                  if (mode == 'only_share_with' && inc.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Pick at least one person for “Only selected”.')),
+                    );
+                    return;
+                  }
+                  Navigator.pop(ctx, true);
+                },
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (ok == true && mounted) {
+      setState(() {
+        _statusPrivacy = mode;
+        _privacyIncludedUserIds = mode == 'only_share_with' ? inc : [];
+        _privacyExcludedUserIds = mode == 'contacts_except' ? exc : [];
+      });
+    }
+  }
+
+  Future<List<int>?> _pickRegisteredUserIds({
+    required String title,
+    required List<int> initial,
+  }) async {
+    final repo = ref.read(contactsRepositoryProvider);
+    List<GekyContact> contacts;
+    try {
+      contacts = await repo.listContacts();
+    } catch (_) {
+      return null;
+    }
+    final rows = <({int id, String label})>[];
+    for (final c in contacts) {
+      final uidRaw = c.contactUserId ?? c.contactUser?['id'];
+      final uid = uidRaw is int ? uidRaw : int.tryParse('$uidRaw');
+      if (uid == null || uid <= 0) continue;
+      final name = c.name.trim();
+      rows.add((id: uid, label: name.isNotEmpty ? name : (c.phone ?? 'User')));
+    }
+    rows.sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
+
+    return showDialog<List<int>>(
+      context: context,
+      builder: (ctx) {
+        final sel = Set<int>.from(initial);
+        return StatefulBuilder(
+          builder: (ctx, setL) {
+            return AlertDialog(
+              title: Text(title),
+              content: SizedBox(
+                width: 420,
+                height: 400,
+                child: rows.isEmpty
+                    ? const Center(child: Text('No registered contacts'))
+                    : ListView.builder(
+                        itemCount: rows.length,
+                        itemBuilder: (_, i) {
+                          final r = rows[i];
+                          return CheckboxListTile(
+                            value: sel.contains(r.id),
+                            onChanged: (v) {
+                              setL(() {
+                                if (v == true) {
+                                  sel.add(r.id);
+                                } else {
+                                  sel.remove(r.id);
+                                }
+                              });
+                            },
+                            title: Text(r.label),
+                          );
+                        },
+                      ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, sel.toList()),
+                  child: const Text('OK'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
@@ -119,25 +366,36 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
 
   Future<void> _pickMedia() async {
     final result = await FilePicker.platform.pickFiles(
-      type: FileType.media,
+      type: FileType.custom,
+      allowedExtensions: _statusMediaExtensions,
       allowMultiple: false,
+      dialogTitle: 'Photos and videos',
     );
 
-    if (result != null && result.files.single.path != null) {
-      final file = File(result.files.single.path!);
-      final extension = result.files.single.extension?.toLowerCase();
-      final isVideo = extension == 'mp4' || extension == 'mov' || extension == 'avi';
-      
-      if (isVideo) {
-        // Check video duration and show trim UI if needed
-        await _checkVideoAndTrim(file);
-      } else {
-        setState(() {
-          _selectedMedia = file;
-          _isVideo = false;
-        });
-      }
+    if (result == null || result.files.isEmpty) return;
+
+    final picked = result.files.single;
+    final path = picked.path;
+    if (path == null || path.isEmpty) {
+      _showError('Could not read the selected file.');
+      return;
     }
+
+    final file = File(path);
+    if (ClipboardMediaHelper.isVideoPath(path)) {
+      await _checkVideoAndTrim(file);
+      return;
+    }
+
+    if (ClipboardMediaHelper.isImagePath(path)) {
+      setState(() {
+        _selectedMedia = file;
+        _isVideo = false;
+      });
+      return;
+    }
+
+    _showError('Please choose a photo or video file.');
   }
 
   Future<void> _createStatus() async {
@@ -152,28 +410,62 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
 
     try {
       final repo = ref.read(statusRepositoryProvider);
+      if (_statusPrivacy == 'only_share_with' && _privacyIncludedUserIds.isEmpty) {
+        _showError(
+          'Choose at least one person for “Only selected people”, or change audience.',
+        );
+        setState(() => _isLoading = false);
+        return;
+      }
+      final audience = StatusRepository.audienceFieldsForStatusPost(
+        privacy: _statusPrivacy,
+        excludedUserIds: _privacyExcludedUserIds,
+        includedUserIds: _privacyIncludedUserIds,
+      );
+
+      late final int createdStatusId;
 
       if (_selectedMedia != null) {
         if (_isVideo) {
-          await repo.createVideoStatus(
+          createdStatusId = (await repo.createVideoStatus(
             videoFile: _selectedMedia!,
             caption: _textController.text.isNotEmpty ? _textController.text : null,
-          );
+            audience: audience,
+          ))
+              .id;
         } else {
-          await repo.createImageStatus(
+          createdStatusId = (await repo.createImageStatus(
             imageFile: _selectedMedia!,
             caption: _textController.text.isNotEmpty ? _textController.text : null,
-          );
+            audience: audience,
+          ))
+              .id;
         }
       } else {
-        await repo.createTextStatus(
+        createdStatusId = (await repo.createTextStatus(
           text: _textController.text,
           backgroundColor: '#${_selectedColor.value.toRadixString(16).substring(2)}',
-        );
+          audience: audience,
+        ))
+            .id;
+      }
+
+      if (_mentionedTargets.isNotEmpty) {
+        await _sendStatusMentionAlerts(createdStatusId);
       }
 
       if (mounted) {
         Navigator.pop(context, true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _mentionedTargets.isNotEmpty
+                  ? 'Status posted. Mention alerts sent to ${_mentionedTargets.length} contact(s).'
+                  : 'Status posted successfully',
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
       }
     } catch (e) {
       _showError('Failed to create status: $e');
@@ -190,6 +482,67 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
     );
   }
 
+  Future<void> _pickMentionTargets() async {
+    final selected = await showDialog<List<_StatusMentionTarget>>(
+      context: context,
+      builder: (ctx) => _StatusMentionPickerDialog(
+        initialSelection: List<_StatusMentionTarget>.from(_mentionedTargets),
+      ),
+    );
+    if (!mounted || selected == null) return;
+    setState(() {
+      _mentionedTargets
+        ..clear()
+        ..addAll(selected);
+    });
+  }
+
+  int? _parseConversationIdFromStartResponse(dynamic raw) {
+    if (raw is! Map) return null;
+    final data = raw['data'];
+    if (data is Map) {
+      final id = data['id'] ?? data['conversation_id'];
+      if (id is int) return id;
+      if (id is num) return id.toInt();
+      if (id is String) return int.tryParse(id);
+      final conv = data['conversation'];
+      if (conv is Map && conv['id'] != null) {
+        final cid = conv['id'];
+        if (cid is int) return cid;
+        if (cid is num) return cid.toInt();
+        if (cid is String) return int.tryParse(cid);
+      }
+    }
+    final top = raw['id'];
+    if (top is int) return top;
+    if (top is num) return top.toInt();
+    if (top is String) return int.tryParse(top);
+    return null;
+  }
+
+  Future<void> _sendStatusMentionAlerts(int statusId) async {
+    final api = ref.read(apiServiceProvider);
+    final chatRepo = ref.read(chatRepositoryProvider);
+    for (final target in _mentionedTargets) {
+      try {
+        final response = await api.startConversation(target.userId);
+        final conversationId =
+            _parseConversationIdFromStartResponse(response.data);
+        if (conversationId == null) continue;
+
+        await chatRepo.sendMessageToConversation(
+          conversationId: conversationId,
+          body: 'You were mentioned in my status',
+          referencedStatusId: statusId,
+        );
+      } catch (e) {
+        debugPrint(
+          'Failed to send status mention alert to ${target.userId}: $e',
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -199,6 +552,43 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
       appBar: AppBar(
         title: const Text('Create Status'),
         actions: [
+          IconButton(
+            tooltip: 'Who can see your status',
+            onPressed: _isLoading ? null : _openPrivacyEditor,
+            icon: const Icon(Icons.privacy_tip_outlined),
+          ),
+          IconButton(
+            tooltip: 'Mention people in this status',
+            onPressed: _isLoading ? null : _pickMentionTargets,
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.alternate_email_rounded),
+                if (_mentionedTargets.isNotEmpty)
+                  Positioned(
+                    right: -6,
+                    top: -4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF008069),
+                        shape: BoxShape.circle,
+                      ),
+                      constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                      child: Text(
+                        '${_mentionedTargets.length}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
           TextButton(
             onPressed: _isLoading ? null : _createStatus,
             child: const Text('Share'),
@@ -301,6 +691,15 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
                 ],
                 
                 const SizedBox(height: 24),
+
+                ListTile(
+                  leading: const Icon(Icons.privacy_tip_outlined),
+                  title: const Text('Audience'),
+                  subtitle: Text(_privacySummary()),
+                  onTap: _isLoading ? null : _openPrivacyEditor,
+                ),
+
+                const SizedBox(height: 8),
                 
                 // Color picker (for text status)
                 if (_selectedMedia == null)
@@ -335,6 +734,19 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
                   icon: const Icon(Icons.add_photo_alternate),
                   label: Text(_selectedMedia != null ? 'Change Media' : 'Add Photo/Video'),
                 ),
+                if (_mentionedTargets.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Will notify: ${_mentionedTargets.map((e) => e.name).join(', ')}',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isDark ? Colors.white70 : Colors.black54,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -344,4 +756,191 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
   }
 }
 
+class _StatusMentionTarget {
+  final int userId;
+  final String name;
+  final String? avatarUrl;
+
+  const _StatusMentionTarget({
+    required this.userId,
+    required this.name,
+    this.avatarUrl,
+  });
+}
+
+class _StatusMentionPickerDialog extends ConsumerStatefulWidget {
+  final List<_StatusMentionTarget> initialSelection;
+
+  const _StatusMentionPickerDialog({required this.initialSelection});
+
+  @override
+  ConsumerState<_StatusMentionPickerDialog> createState() =>
+      _StatusMentionPickerDialogState();
+}
+
+class _StatusMentionPickerDialogState
+    extends ConsumerState<_StatusMentionPickerDialog> {
+  final TextEditingController _searchController = TextEditingController();
+  List<_StatusMentionTarget> _contacts = [];
+  late Set<int> _selectedUserIds;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedUserIds = widget.initialSelection.map((e) => e.userId).toSet();
+    _loadPeople();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadPeople() async {
+    setState(() => _loading = true);
+    try {
+      final repo = ref.read(chatRepositoryProvider);
+      final conversations = await repo.getConversations();
+      final mapped = <_StatusMentionTarget>[];
+      final seen = <int>{};
+
+      for (final conversation in conversations) {
+        if (conversation.isSavedMessages) continue;
+        final user = conversation.otherUser;
+        if (user.id <= 0 || seen.contains(user.id)) continue;
+        seen.add(user.id);
+        mapped.add(
+          _StatusMentionTarget(
+            userId: user.id,
+            name: user.name,
+            avatarUrl: user.avatarUrl,
+          ),
+        );
+      }
+
+      for (final initial in widget.initialSelection) {
+        if (seen.contains(initial.userId)) continue;
+        seen.add(initial.userId);
+        mapped.add(initial);
+      }
+
+      mapped.sort(
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
+      if (mounted) {
+        setState(() {
+          _contacts = mapped;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  List<_StatusMentionTarget> _currentSelection() {
+    final selected = _contacts
+        .where((c) => _selectedUserIds.contains(c.userId))
+        .toList();
+    final foundIds = selected.map((e) => e.userId).toSet();
+    for (final initial in widget.initialSelection) {
+      if (_selectedUserIds.contains(initial.userId) &&
+          !foundIds.contains(initial.userId)) {
+        selected.add(initial);
+      }
+    }
+    return selected;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final q = _searchController.text.trim().toLowerCase();
+    final filtered = q.isEmpty
+        ? _contacts
+        : _contacts
+            .where(
+              (c) =>
+                  c.name.toLowerCase().contains(q) ||
+                  (c.userId.toString().contains(q)),
+            )
+            .toList();
+
+    return AlertDialog(
+      title: const Text('Mention people'),
+      content: SizedBox(
+        width: 420,
+        height: 420,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              controller: _searchController,
+              decoration: const InputDecoration(
+                hintText: 'Search people',
+                prefixIcon: Icon(Icons.search),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : filtered.isEmpty
+                      ? const Center(child: Text('No people found.'))
+                      : ListView.builder(
+                          itemCount: filtered.length,
+                          itemBuilder: (context, i) {
+                            final c = filtered[i];
+                            final checked = _selectedUserIds.contains(c.userId);
+                            return CheckboxListTile(
+                              value: checked,
+                              onChanged: (v) {
+                                setState(() {
+                                  if (v == true) {
+                                    _selectedUserIds.add(c.userId);
+                                  } else {
+                                    _selectedUserIds.remove(c.userId);
+                                  }
+                                });
+                              },
+                              title: Text(c.name),
+                              secondary: CircleAvatar(
+                                radius: 18,
+                                backgroundImage: c.avatarUrl != null &&
+                                        c.avatarUrl!.isNotEmpty
+                                    ? NetworkImage(c.avatarUrl!)
+                                    : null,
+                                child: c.avatarUrl == null || c.avatarUrl!.isEmpty
+                                    ? const Icon(Icons.person, size: 20)
+                                    : null,
+                              ),
+                            );
+                          },
+                        ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () =>
+              Navigator.pop(context, _currentSelection()),
+          child: Text(
+            _selectedUserIds.isEmpty
+                ? 'Done'
+                : 'Done (${_selectedUserIds.length})',
+          ),
+        ),
+      ],
+      backgroundColor: isDark ? const Color(0xFF202C33) : null,
+    );
+  }
+}
 

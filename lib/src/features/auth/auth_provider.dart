@@ -5,10 +5,15 @@ import 'package:flutter/foundation.dart';
 import '../../core/providers.dart';
 import '../../core/api_service.dart';
 import '../../core/device_id.dart';
+import '../../features/notifications/notification_manager.dart';
+import '../../services/post_auth_bootstrap.dart';
+
+/// Sentinel so `copyWith(token: null)` / `copyWith(error: null)` actually clear fields.
+const Object _authFieldUnset = Object();
 
 final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
   final apiService = ref.read(apiServiceProvider);
-  return AuthNotifier(apiService);
+  return AuthNotifier(apiService, ref);
 });
 
 class AuthState {
@@ -18,19 +23,24 @@ class AuthState {
 
   AuthState({this.isLoading = false, this.token, this.error});
 
-  AuthState copyWith({bool? isLoading, String? token, String? error}) {
+  AuthState copyWith({
+    bool? isLoading,
+    Object? token = _authFieldUnset,
+    Object? error = _authFieldUnset,
+  }) {
     return AuthState(
       isLoading: isLoading ?? this.isLoading,
-      token: token ?? this.token,
-      error: error ?? this.error,
+      token: identical(token, _authFieldUnset) ? this.token : token as String?,
+      error: identical(error, _authFieldUnset) ? this.error : error as String?,
     );
   }
 }
 
 class AuthNotifier extends StateNotifier<AuthState> {
   final ApiService _apiService;
+  final Ref _ref;
 
-  AuthNotifier(this._apiService) : super(AuthState()) {
+  AuthNotifier(this._apiService, this._ref) : super(AuthState()) {
     // Load token from storage immediately on initialization
     // This ensures auth state is available when router is created
     _loadTokenFromStorage();
@@ -51,6 +61,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
+  /// Call after switchAccount to reload token from storage and update auth state.
+  Future<void> refreshTokenFromStorage() async {
+    await _loadTokenFromStorage();
+    await checkAuthStatus();
+  }
+
   String _formatError(dynamic e, String defaultMessage) {
     if (e is DioException) {
       switch (e.type) {
@@ -65,7 +81,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
           
           if (statusCode == 301 || statusCode == 302) {
             final location = e.response?.headers.value('location') ?? 'unknown';
-            return 'Redirect error (${statusCode}). The server redirected to: $location\nCurrent API URL: ${_apiService.baseUrl}/auth/phone\nPlease check API_BASE_URL in .env file.';
+            return 'Redirect error ($statusCode). The server redirected to: $location\nCurrent API URL: ${_apiService.baseUrl}/auth/phone\nPlease check API_BASE_URL in .env file.';
           } else if (statusCode == 404) {
             return 'Endpoint not found at ${_apiService.baseUrl}/auth/phone';
           } else if (statusCode == 429) {
@@ -132,24 +148,34 @@ class AuthNotifier extends StateNotifier<AuthState> {
         'device_type': 'desktop',
       });
       
-      final token = response.data['token'];
-      final user = response.data['user'];
-      final accountId = response.data['account_id'];
+      // Support multiple response shapes: token, access_token, or data.token
+      final data = response.data is Map ? response.data as Map<String, dynamic> : <String, dynamic>{};
+      final nested = data['data'] is Map ? data['data'] as Map<String, dynamic> : null;
+      final token = data['token'] as String? ??
+          data['access_token'] as String? ??
+          nested?['token'] as String?;
+      final user = data['user'] ?? nested?['user'];
+      final accountId = data['account_id'] ?? nested?['account_id'];
       
-      if (token != null) {
+      if (token != null && token.isNotEmpty) {
         await _apiService.saveToken(token);
+        _apiService.setPendingAuthToken(token);
         
-        if (user != null && user['id'] != null) {
+        if (user != null && user is Map && user['id'] != null) {
           final prefs = await SharedPreferences.getInstance();
-          await prefs.setInt('user_id', user['id']);
+          final rawId = user['id'];
+          final userId = rawId is int ? rawId : (rawId as num).toInt();
+          await prefs.setInt('user_id', userId);
           // Store phone number for account-specific database paths
           await prefs.setString('user_phone', phone);
-          if (accountId != null) {
-            await prefs.setInt('current_account_id', accountId);
+          final accountIdInt = accountId is int ? accountId : (accountId != null ? int.tryParse(accountId.toString()) : null);
+          if (accountIdInt != null) {
+            await prefs.setInt('current_account_id', accountIdInt);
           }
         }
         
         state = state.copyWith(isLoading: false, token: token);
+        await bootstrapAfterAuth(_ref);
       } else {
         state = state.copyWith(isLoading: false, error: 'No token received');
       }
@@ -189,6 +215,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
         if (state.token != token) {
           state = state.copyWith(token: token);
         }
+        await bootstrapAfterAuth(_ref);
       } else {
         // Token is invalid, clear it
         await logout();
@@ -208,6 +235,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<void> logout() async {
+    try {
+      await _ref.read(pusherServiceProvider).disconnect();
+      NotificationManager.reset();
+    } catch (e) {
+      debugPrint('⚠️ Logout realtime cleanup: $e');
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
     await prefs.remove('user_id');

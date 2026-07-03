@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/theme/theme_provider.dart';
-import '../core/theme/app_theme_mode.dart';
 
 /// Quick toggle widget for theme switching
 class ThemeQuickToggle extends ConsumerWidget {
-  const ThemeQuickToggle({Key? key}) : super(key: key);
+  const ThemeQuickToggle({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -44,7 +43,7 @@ class ThemeQuickToggle extends ConsumerWidget {
 
 /// Floating theme toggle button
 class FloatingThemeToggle extends ConsumerWidget {
-  const FloatingThemeToggle({Key? key}) : super(key: key);
+  const FloatingThemeToggle({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

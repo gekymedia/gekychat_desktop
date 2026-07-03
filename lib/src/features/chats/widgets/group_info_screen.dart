@@ -3,13 +3,15 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:flutter/foundation.dart';
 import '../../../core/providers.dart';
 import '../../../theme/app_theme.dart';
 import '../../../widgets/constrained_slide_route.dart';
 import '../chat_providers.dart';
 import '../models.dart';
+import '../../contacts/contact_display_service.dart';
+import '../../contacts/contact_info_screen.dart';
 import '../../media/media_gallery_screen.dart';
+import '../../../utils/phone_formatter.dart';
 import 'search_in_chat_screen.dart';
 import 'edit_group_screen.dart';
 import 'add_participant_screen.dart';
@@ -23,26 +25,26 @@ final groupInfoProvider = FutureProvider.family<Map<String, dynamic>, int>((ref,
 
 class GroupInfoScreen extends ConsumerWidget {
   final int groupId;
+  final bool embedded;
+  final VoidCallback? onClose;
+  /// When set (embedded panel), member taps show contact info via callback
+  /// instead of pushing a route on the root navigator.
+  final void Function(User member)? onMemberTap;
 
-  const GroupInfoScreen({super.key, required this.groupId});
+  const GroupInfoScreen({
+    super.key,
+    required this.groupId,
+    this.embedded = false,
+    this.onClose,
+    this.onMemberTap,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final groupAsync = ref.watch(groupInfoProvider(groupId));
 
-    return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
-      appBar: AppBar(
-        title: groupAsync.when(
-          data: (group) => Text(group['type'] == 'channel' ? 'Channel Info' : 'Group Info'),
-          loading: () => const Text('Group Info'),
-          error: (_, __) => const Text('Group Info'),
-        ),
-        backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
-        foregroundColor: isDark ? Colors.white : Colors.black,
-      ),
-      body: groupAsync.when(
+    final content = groupAsync.when(
         data: (group) {
           final members = (group['members'] as List?)
                   ?.map((m) => User.fromJson(m))
@@ -208,6 +210,15 @@ class GroupInfoScreen extends ConsumerWidget {
                         ...members.map((member) {
                         final isMemberAdmin = admins.any((a) => a.id == member.id);
                         final isMemberOwner = group['owner_id'] == member.id;
+                        final contactService = ref.read(contactDisplayServiceProvider);
+                        final displayName = contactService.resolve(
+                          userId: member.id,
+                          phone: member.phone,
+                          apiName: member.name,
+                        );
+                        final formattedPhone = member.phone != null
+                            ? PhoneFormatter.format(member.phone)
+                            : null;
 
                         return ListTile(
                           leading: CircleAvatar(
@@ -215,12 +226,12 @@ class GroupInfoScreen extends ConsumerWidget {
                                 ? CachedNetworkImageProvider(member.avatarUrl!)
                                 : null,
                             child: member.avatarUrl == null
-                                ? Text(member.name[0].toUpperCase())
+                                ? Text(displayName[0].toUpperCase())
                                 : null,
                           ),
                           title: Row(
                             children: [
-                              Expanded(child: Text(member.name)),
+                              Expanded(child: Text(displayName)),
                               if (isMemberOwner)
                                 Container(
                                   padding: const EdgeInsets.symmetric(
@@ -255,9 +266,34 @@ class GroupInfoScreen extends ConsumerWidget {
                                 ),
                             ],
                           ),
-                          subtitle: member.phone != null
-                              ? Text(member.phone!)
+                          subtitle: formattedPhone != null
+                              ? Text(formattedPhone)
                               : null,
+                          onTap: () {
+                            final user = User(
+                              id: member.id,
+                              name: displayName,
+                              phone: member.phone,
+                              avatarUrl: member.avatarUrl,
+                              isOnline: member.isOnline,
+                              lastSeenAt: member.lastSeenAt,
+                            );
+                            if (onMemberTap != null) {
+                              onMemberTap!(user);
+                              return;
+                            }
+                            Navigator.push(
+                              context,
+                              ConstrainedSlideRightRoute(
+                                page: ContactInfoScreen(
+                                  user: user,
+                                  embedded: true,
+                                  onClose: () => Navigator.pop(context),
+                                ),
+                                leftOffset: 400.0,
+                              ),
+                            );
+                          },
                           trailing: canManage && !isMemberOwner
                               ? PopupMenuButton<String>(
                                   onSelected: (value) {
@@ -360,7 +396,63 @@ class GroupInfoScreen extends ConsumerWidget {
             ],
           ),
         ),
+    );
+
+    final title = groupAsync.when(
+      data: (group) => group['type'] == 'channel' ? 'Channel Info' : 'Group Info',
+      loading: () => 'Group Info',
+      error: (_, __) => 'Group Info',
+    );
+
+    if (embedded) {
+      return ColoredBox(
+        color: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF202C33) : Colors.white,
+                border: Border(
+                  bottom: BorderSide(
+                    color: isDark ? const Color(0xFF2A3942) : const Color(0xFFD1D7DB),
+                  ),
+                ),
+              ),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: Icon(Icons.close, color: isDark ? Colors.white70 : Colors.grey[700]),
+                    onPressed: onClose,
+                    tooltip: 'Close',
+                  ),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(child: content),
+          ],
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
+      appBar: AppBar(
+        title: Text(title),
+        backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
+        foregroundColor: isDark ? Colors.white : Colors.black,
       ),
+      body: content,
     );
   }
 
@@ -426,9 +518,7 @@ class GroupInfoScreen extends ConsumerWidget {
         // Fallback: Construct channel link using slug
         // For channels, the link format is typically: /groups/{slug}
         // We'll use a relative URL that the app can handle
-        if (channelLink == null) {
-          channelLink = '/groups/${group['slug']}';
-        }
+        channelLink ??= '/groups/${group['slug']}';
       }
       
       if (channelLink == null || channelLink.isEmpty) {

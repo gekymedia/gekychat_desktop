@@ -12,6 +12,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   flutter_webrtc
   geolocator_windows
   livekit_client
+  pasteboard
   permission_handler_windows
   record_windows
   screen_retriever

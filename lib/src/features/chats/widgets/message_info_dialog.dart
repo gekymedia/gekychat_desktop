@@ -66,7 +66,7 @@ class _MessageInfoDialogState extends State<MessageInfoDialog> {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Container(
+      child: SizedBox(
         width: 500,
         height: 600,
         child: Column(

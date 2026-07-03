@@ -1,9 +1,10 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:window_manager/window_manager.dart';
-import '../../features/chats/chat_repo.dart';
+import '../../features/chats/sidebar_inbox_bump.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'badge_icon_generator.dart';
+import 'system_tray_service.dart';
 
 // Windows-specific taskbar support
 import 'package:windows_taskbar/windows_taskbar.dart';
@@ -14,33 +15,10 @@ class TaskbarBadgeService {
 
   TaskbarBadgeService(this._ref);
 
-  /// Calculate total unread messages from conversations and groups
-  Future<int> _calculateTotalUnreadCount() async {
+  /// Matches sidebar list badges (merged providers, no channels/archived).
+  int _calculateTotalUnreadCount() {
     try {
-      final chatRepo = _ref.read(chatRepositoryProvider);
-      
-      // Get conversations and groups
-      final conversations = await chatRepo.getConversations();
-      final groups = await chatRepo.getGroups();
-      
-      // Sum unread counts
-      int totalUnread = 0;
-      
-      // Count unread conversations (excluding archived)
-      for (final conv in conversations) {
-        if (conv.archivedAt == null && conv.unreadCount > 0) {
-          totalUnread += conv.unreadCount;
-        }
-      }
-      
-      // Count unread groups
-      for (final group in groups) {
-        if (group.unreadCount > 0) {
-          totalUnread += group.unreadCount;
-        }
-      }
-      
-      return totalUnread;
+      return _ref.read(sidebarUnreadTotalProvider);
     } catch (e) {
       debugPrint('Error calculating unread count: $e');
       return 0;
@@ -51,27 +29,22 @@ class TaskbarBadgeService {
   /// For testing: Always show badge even when app is open
   Future<void> updateBadge() async {
     try {
-      final unreadCount = await _calculateTotalUnreadCount();
-      
-      // Update badge when count changes
+      final unreadCount = _calculateTotalUnreadCount();
+      await SystemTrayService.updateUnreadIndicator(unreadCount);
+
       if (unreadCount != _lastUnreadCount) {
         _lastUnreadCount = unreadCount;
         
-        // Debug platform detection
         debugPrint('🔍 Platform check - isWindows: ${Platform.isWindows}, isMacOS: ${Platform.isMacOS}, isLinux: ${Platform.isLinux}');
-        debugPrint('📊 Updating badge with unread count: $unreadCount (last: $_lastUnreadCount)');
+        debugPrint('📊 Updating badge with unread count: $unreadCount');
         
         if (Platform.isWindows) {
-          // Use Windows-specific taskbar badge
           await _updateWindowsBadge(unreadCount);
         } else if (Platform.isMacOS) {
-          // Use macOS-specific badge (window_manager)
           await _updateMacOSBadge(unreadCount);
         } else {
           debugPrint('⚠️ Taskbar badge not supported on this platform (unread: $unreadCount)');
         }
-      } else {
-        debugPrint('📊 Badge count unchanged: $unreadCount');
       }
     } catch (e, stackTrace) {
       debugPrint('Error updating taskbar badge: $e');
@@ -83,24 +56,32 @@ class TaskbarBadgeService {
   Future<void> _updateWindowsBadge(int unreadCount) async {
     try {
       if (unreadCount == 0) {
-        // Clear badge when no unread messages
         WindowsTaskbar.resetOverlayIcon();
         debugPrint('📊 Windows taskbar badge cleared');
         return;
       }
-      
-      // Generate badge icon for unread count
+
+      // Overlay only applies when the window is on the taskbar (not hide-to-tray).
+      final skipTaskbar = await windowManager.isSkipTaskbar();
+      if (skipTaskbar) {
+        debugPrint(
+          '📊 Windows taskbar badge skipped (app hidden from taskbar — see tray icon)',
+        );
+        return;
+      }
+
       final iconPath = await BadgeIconGenerator.generateBadgeIcon(unreadCount);
-      
-      // Verify the file exists
+
       final iconFile = File(iconPath);
       if (!await iconFile.exists()) {
         debugPrint('⚠️ Badge icon file does not exist: $iconPath');
         return;
       }
-      
-      // Set overlay icon on Windows taskbar
-      // WindowsTaskbar.setOverlayIcon expects a ThumbnailToolbarAssetIcon
+      if (!iconPath.toLowerCase().endsWith('.ico')) {
+        debugPrint('⚠️ Badge icon must be .ico for Windows taskbar: $iconPath');
+        return;
+      }
+
       WindowsTaskbar.setOverlayIcon(
         ThumbnailToolbarAssetIcon(iconPath),
       );
@@ -141,6 +122,7 @@ class TaskbarBadgeService {
       }
       _lastUnreadCount = 0;
       debugPrint('📊 Taskbar badge cleared');
+      await SystemTrayService.updateUnreadIndicator(0);
     } catch (e) {
       debugPrint('Error clearing taskbar badge: $e');
     }

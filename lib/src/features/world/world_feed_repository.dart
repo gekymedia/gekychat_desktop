@@ -65,6 +65,36 @@ class WorldFeedRepository {
     final response = await _apiService.getWorldFeedPostShareUrl(postId);
     return response.data['share_url'] ?? 'https://chat.gekychat.com/wf/unknown';
   }
+
+  /// Notify server of a completed share.
+  Future<void> recordShare(int postId) async {
+    try {
+      await _apiService.recordWorldFeedPostShare(postId);
+    } catch (_) {}
+  }
+
+  /// Load a single post by public [share_code] (deep link /wf/{code}).
+  Future<Map<String, dynamic>> getPostByShareCode(String code) async {
+    final response = await _apiService.getWorldFeedPostByShareCode(code);
+    final data = response.data;
+    if (data is Map && data['data'] is Map) {
+      return Map<String, dynamic>.from(data['data'] as Map);
+    }
+    throw Exception('Post not found');
+  }
+
+  /// Load a single post by numeric id (activity / notification links).
+  Future<Map<String, dynamic>> getPostById(int postId) async {
+    final response = await _apiService.getWorldFeedPost(postId);
+    final data = response.data;
+    if (data is Map && data['data'] is Map) {
+      return Map<String, dynamic>.from(data['data'] as Map);
+    }
+    if (data is Map) {
+      return Map<String, dynamic>.from(data);
+    }
+    throw Exception('Post not found');
+  }
 }
 
 final worldFeedRepositoryProvider = Provider<WorldFeedRepository>((ref) {

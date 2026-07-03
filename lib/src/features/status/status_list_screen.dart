@@ -6,9 +6,9 @@ import 'status_repository.dart';
 import 'widgets/status_ring.dart';
 import 'status_viewer_screen.dart';
 import 'create_status_screen.dart';
-import '../../core/providers.dart';
 import '../../core/session.dart';
 import '../../theme/app_theme.dart';
+import '../contacts/contact_display_service.dart';
 
 final statusListProvider = FutureProvider<List<StatusSummary>>((ref) async {
   final repo = ref.read(statusRepositoryProvider);
@@ -36,6 +36,15 @@ class StatusListScreen extends ConsumerWidget {
     } else {
       return 'Yesterday';
     }
+  }
+
+  /// Resolve the status owner's display name, preferring the contact-book name.
+  String _displayName(WidgetRef ref, StatusSummary status) {
+    final service = ref.read(contactDisplayServiceProvider);
+    return service.resolve(
+      userId: status.userId,
+      apiName: status.userName,
+    );
   }
 
   @override
@@ -248,7 +257,7 @@ class StatusListScreen extends ConsumerWidget {
                                       color: Colors.teal,
                                       child: Center(
                                         child: Text(
-                                          status.userName[0].toUpperCase(),
+                                          _displayName(ref, status)[0].toUpperCase(),
                                           style: const TextStyle(
                                             color: Colors.white,
                                             fontSize: 20,
@@ -262,7 +271,7 @@ class StatusListScreen extends ConsumerWidget {
                                     color: Colors.teal,
                                     child: Center(
                                       child: Text(
-                                        status.userName[0].toUpperCase(),
+                                        _displayName(ref, status)[0].toUpperCase(),
                                         style: const TextStyle(
                                           color: Colors.white,
                                           fontSize: 20,
@@ -278,7 +287,7 @@ class StatusListScreen extends ConsumerWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  status.userName,
+                                  _displayName(ref, status),
                                   style: TextStyle(
                                     color: isDark ? Colors.white : Colors.black,
                                     fontWeight: FontWeight.w600,

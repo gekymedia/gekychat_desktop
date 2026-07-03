@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,6 +15,21 @@ class StatusRepository {
   final ApiService _api;
 
   StatusRepository(this._api);
+
+  /// Optional per-status audience for POST /statuses (lists JSON-encoded for multipart).
+  static Map<String, dynamic> audienceFieldsForStatusPost({
+    required String privacy,
+    List<int> excludedUserIds = const [],
+    List<int> includedUserIds = const [],
+  }) {
+    return {
+      'privacy': privacy,
+      if (excludedUserIds.isNotEmpty)
+        'excluded_user_ids': jsonEncode(excludedUserIds),
+      if (includedUserIds.isNotEmpty)
+        'included_user_ids': jsonEncode(includedUserIds),
+    };
+  }
 
   Future<List<StatusSummary>> getStatuses() async {
     try {
@@ -55,13 +71,15 @@ class StatusRepository {
     required String text,
     String? backgroundColor,
     String? fontFamily,
+    Map<String, dynamic>? audience,
   }) async {
     try {
       final response = await _api.post('/statuses', data: {
         'type': 'text',
         'text': text,
-        'background_color': backgroundColor,
-        'font_family': fontFamily,
+        if (backgroundColor != null) 'background_color': backgroundColor,
+        if (fontFamily != null) 'font_family': fontFamily,
+        if (audience != null) ...audience,
       });
       
       final raw = response.data;
@@ -88,6 +106,7 @@ class StatusRepository {
   Future<StatusUpdate> createImageStatus({
     required File imageFile,
     String? caption,
+    Map<String, dynamic>? audience,
   }) async {
     try {
       final formData = FormData.fromMap({
@@ -97,6 +116,7 @@ class StatusRepository {
           filename: imageFile.path.split(Platform.pathSeparator).last,
         ),
         if (caption != null) 'caption': caption,
+        if (audience != null) ...audience,
       });
 
       final response = await _api.post('/statuses', data: formData);
@@ -125,6 +145,7 @@ class StatusRepository {
   Future<StatusUpdate> createVideoStatus({
     required File videoFile,
     String? caption,
+    Map<String, dynamic>? audience,
   }) async {
     try {
       final formData = FormData.fromMap({
@@ -134,6 +155,7 @@ class StatusRepository {
           filename: videoFile.path.split(Platform.pathSeparator).last,
         ),
         if (caption != null) 'caption': caption,
+        if (audience != null) ...audience,
       });
 
       final response = await _api.post('/statuses', data: formData);
@@ -241,6 +263,26 @@ class StatusRepository {
     } catch (e) {
       throw Exception('Failed to delete status: $e');
     }
+  }
+
+  /// Server-wide status audience (same as mobile GET /statuses/privacy).
+  Future<Map<String, dynamic>> getStatusPrivacySettings() async {
+    final response = await _api.get('/statuses/privacy');
+    final raw = response.data;
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    return {};
+  }
+
+  Future<void> putStatusPrivacySettings({
+    required String privacy,
+    List<int> excludedUserIds = const [],
+    List<int> includedUserIds = const [],
+  }) async {
+    await _api.put('/statuses/privacy', data: {
+      'privacy': privacy,
+      'excluded_user_ids': excludedUserIds,
+      'included_user_ids': includedUserIds,
+    });
   }
 }
 

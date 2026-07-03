@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers.dart';
-import '../../core/api_service.dart';
-import '../../theme/app_theme.dart';
+import '../notifications/desktop_inbox_notification.dart';
 
 final notificationSettingsProvider =
     FutureProvider<Map<String, dynamic>>((ref) async {
@@ -123,6 +122,13 @@ class _NotificationSettingsScreenState
         'desktop_enabled': _desktopEnabled,
         'preview_enabled': _previewEnabled,
       });
+      DesktopInboxNotification.applyLocalPrefs(
+        desktopEnabled: _desktopEnabled,
+        previewEnabled: _previewEnabled,
+      );
+      final prefs = await ref.read(sharedPreferencesProvider);
+      await prefs.setBool('desktop_notifications_enabled', _desktopEnabled ?? true);
+      await prefs.setBool('notification_preview_enabled', _previewEnabled ?? true);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Settings updated')),

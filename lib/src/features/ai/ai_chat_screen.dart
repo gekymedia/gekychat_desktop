@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/feature_flags.dart';
 import '../../core/providers.dart';
-import '../chats/chat_repo.dart' show chatRepositoryProvider;
+import '../chats/chat_providers.dart';
 
 /// PHASE 2: AI Chat Screen - Enhanced AI assistant
 class AiChatScreen extends ConsumerStatefulWidget {

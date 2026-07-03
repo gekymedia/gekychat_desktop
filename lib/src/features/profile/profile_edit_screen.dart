@@ -286,7 +286,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
                         children: [
                           Expanded(
                             child: DropdownButtonFormField<int>(
-                              value: _selectedMonth,
+                              initialValue: _selectedMonth,
                               decoration: const InputDecoration(
                                 labelText: 'Birth Month',
                                 border: OutlineInputBorder(),
@@ -311,7 +311,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
                           const SizedBox(width: 16),
                           Expanded(
                             child: DropdownButtonFormField<int>(
-                              value: _selectedDay,
+                              initialValue: _selectedDay,
                               decoration: const InputDecoration(
                                 labelText: 'Birth Day',
                                 border: OutlineInputBorder(),

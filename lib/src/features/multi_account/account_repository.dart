@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/api_service.dart';
 import '../../core/providers.dart';
 import '../../core/device_id.dart';
@@ -30,13 +31,13 @@ class AccountRepository {
       accountId: accountId,
     );
     
-    // Update token in storage
+    // Update token and current account id in storage
     final responseData = response.data is Map ? response.data : {};
     if (responseData['token'] != null) {
       final token = responseData['token'] as String;
       await _apiService.saveToken(token);
-      // Force API service to reload token on next request
-      // The interceptor reads from SharedPreferences on each request, so this should work
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('current_account_id', accountId);
     } else {
       throw Exception('No token received from switch account response');
     }

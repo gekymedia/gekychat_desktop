@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api_service.dart';
 import '../../utils/date_formatter.dart';
-import 'models.dart';
 
 /// Screen that displays all @mentions for the current user
 class MentionsScreen extends ConsumerStatefulWidget {

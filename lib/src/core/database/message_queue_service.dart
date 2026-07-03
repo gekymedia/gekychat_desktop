@@ -3,12 +3,23 @@ import 'dart:io';
 import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'app_database.dart' hide Message;
 import 'local_storage_service.dart';
+import '../../features/chats/chat_providers.dart';
 import '../../features/chats/chat_repo.dart';
-import '../../features/chats/models.dart';
 import '../../core/providers/connectivity_provider.dart';
+
+bool _inferVoiceNote({required String body, List<File>? attachments}) {
+  if (body.trim().isNotEmpty) return false;
+  if (attachments == null || attachments.length != 1) return false;
+  final p = attachments.first.path.toLowerCase();
+  return p.endsWith('.m4a') ||
+      p.endsWith('.aac') ||
+      p.endsWith('.mp3') ||
+      p.endsWith('.wav') ||
+      p.endsWith('.ogg') ||
+      p.endsWith('.flac');
+}
 
 class MessageQueueService {
   final AppDatabase _db;
@@ -18,7 +29,8 @@ class MessageQueueService {
 
   MessageQueueService(this._db, this._chatRepo, this._isOnline);
 
-  // Queue a message for sending when online (with client_uuid support)
+  // Queue a message for sending when online.
+  // Returns the stable clientUuid that will be sent to the server for idempotency.
   Future<String> queueMessage({
     required int? conversationId,
     required int? groupId,
@@ -28,55 +40,51 @@ class MessageQueueService {
     List<File>? attachments,
     Map<String, dynamic>? locationData,
     Map<String, dynamic>? contactData,
-    String? clientUuid, // Optional: provide client UUID, otherwise generate
+    String? clientUuid,
+    int? referencedStatusId,
+    int? referencedGroupId,
+    int? referencedGroupMessageId,
+    String? referencedContextJson,
+    String? messageType,
+    bool viewOnce = false,
+    DateTime? scheduledAt,
+    int? expiresInHours,
   }) async {
-    // Generate client UUID if not provided
+    // Always generate/preserve a stable UUID — this same value is sent to the server.
     final clientId = clientUuid ?? _uuid.v4();
-    
-    // Serialize attachments (store file paths)
+
+    // Serialize attachments (store file paths for later upload)
     String? attachmentsJson;
     if (attachments != null && attachments.isNotEmpty) {
       attachmentsJson = jsonEncode(attachments.map((f) => f.path).toList());
     }
 
-    final companion = OfflineMessagesCompanion(
-      clientUuid: Value(clientId), // Add client UUID
+    final companion = OfflineMessagesCompanion.insert(
+      clientUuid: Value(clientId),
       conversationId: Value(conversationId),
       groupId: Value(groupId),
-      body: Value(body),
+      body: body,
       replyToId: Value(replyToId),
       forwardFromId: Value(forwardFromId),
       attachmentsJson: Value(attachmentsJson),
       locationDataJson: Value(locationData != null ? jsonEncode(locationData) : null),
       contactDataJson: Value(contactData != null ? jsonEncode(contactData) : null),
+      messageType: Value(messageType),
+      viewOnce: Value(viewOnce),
+      scheduledAt: Value(scheduledAt),
+      expiresInHours: Value(expiresInHours),
+      referencedStatusId: Value(referencedStatusId),
+      referencedGroupId: Value(referencedGroupId),
+      referencedGroupMessageId: Value(referencedGroupMessageId),
+      referencedContextJson: Value(referencedContextJson),
       isSent: const Value(false),
       retryCount: const Value(0),
     );
 
     await _db.into(_db.offlineMessages).insert(companion);
-    
-    // Also save to Messages table with pending status
-    await _db.into(_db.messages).insert(MessagesCompanion.insert(
-      clientUuid: clientId,
-      conversationId: Value(conversationId),
-      groupId: Value(groupId),
-      body: body,
-      status: const Value('pending'),
-      createdAt: DateTime.now(),
-      senderId: Value(await _getCurrentUserId()),
-      // ... other fields
-    ));
-    
     return clientId;
   }
   
-  Future<int> _getCurrentUserId() async {
-    // Get current user ID from session/storage
-    // Implementation depends on your session management
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt('user_id') ?? 0; // Replace with actual implementation
-  }
-
   // Get all pending messages
   Future<List<OfflineMessage>> getPendingMessages() async {
     return await (_db.select(_db.offlineMessages)
@@ -149,10 +157,16 @@ class MessageQueueService {
           }
         }
 
-        // Get client UUID from queued message
+        // Use the stable UUID stored at queue time for server-side idempotency.
+        // If the row predates schema v5 it will be null — fall back to a fresh UUID (no dedup, but safe).
         final clientUuid = queuedMessage.clientUuid ?? _uuid.v4();
-        
-        // Send the message with client_uuid
+
+        final voiceNote = _inferVoiceNote(
+          body: queuedMessage.body,
+          attachments: attachments,
+        );
+
+        // Send the message with the stable client_uuid
         final sentMessage = queuedMessage.conversationId != null
             ? await _chatRepo.sendMessageToConversation(
                 conversationId: queuedMessage.conversationId!,
@@ -160,7 +174,15 @@ class MessageQueueService {
                 replyTo: queuedMessage.replyToId,
                 forwardFrom: queuedMessage.forwardFromId,
                 attachments: attachments,
-                clientUuid: clientUuid, // Pass client_uuid
+                clientUuid: clientUuid,
+                referencedStatusId: queuedMessage.referencedStatusId,
+                referencedGroupId: queuedMessage.referencedGroupId,
+                referencedGroupMessageId: queuedMessage.referencedGroupMessageId,
+                messageType: queuedMessage.messageType,
+                viewOnce: queuedMessage.viewOnce,
+                voiceNote: voiceNote,
+                scheduledAt: queuedMessage.scheduledAt,
+                expiresInHours: queuedMessage.expiresInHours,
               )
             : (queuedMessage.groupId != null
                 ? await _chatRepo.sendMessageToGroup(
@@ -169,31 +191,19 @@ class MessageQueueService {
                     replyToId: queuedMessage.replyToId,
                     forwardFrom: queuedMessage.forwardFromId,
                     attachments: attachments,
-                    clientUuid: clientUuid, // Pass client_uuid
+                    clientUuid: clientUuid,
+                    messageType: queuedMessage.messageType,
+                    viewOnce: queuedMessage.viewOnce,
+                    voiceNote: voiceNote,
+                    scheduledAt: queuedMessage.scheduledAt,
+                    expiresInHours: queuedMessage.expiresInHours,
                   )
                 : null);
 
-        // Mark as sent
         if (sentMessage != null) {
           await markAsSent(queuedMessage.id, sentMessage.id);
-          
-          // Update message status in messages table
-          await (_db.update(_db.messages)
-                ..where((m) => m.clientUuid.equals(clientUuid)))
-              .write(MessagesCompanion(
-                id: Value(sentMessage.id),
-                status: const Value('sent'),
-                serverCreatedAt: Value(sentMessage.createdAt),
-              ));
         } else {
           await markAsFailed(queuedMessage.id, 'Failed to send message');
-          
-          // Update message status to failed
-          await (_db.update(_db.messages)
-                ..where((m) => m.clientUuid.equals(clientUuid)))
-              .write(MessagesCompanion(
-                status: const Value('failed'),
-              ));
         }
       } catch (e) {
         await markAsFailed(queuedMessage.id, e.toString());
@@ -208,6 +218,6 @@ class MessageQueueService {
 final messageQueueServiceProvider = Provider<MessageQueueService>((ref) {
   final db = ref.read(appDatabaseProvider);
   final chatRepo = ref.read(chatRepositoryProvider);
-  final isOnline = () => ref.read(connectivityProvider);
+  bool isOnline() => ref.read(connectivityProvider);
   return MessageQueueService(db, chatRepo, isOnline);
 });

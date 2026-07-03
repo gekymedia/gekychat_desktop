@@ -103,7 +103,7 @@ class MentionUtils {
     
     if (atIndex == -1) {
       // Just append the mention
-      return text + ' @$username ';
+      return '$text @$username ';
     }
     
     // Replace from @ to cursor with the full mention

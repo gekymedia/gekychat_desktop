@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 import 'dart:io';
 import '../../core/providers.dart';
-import '../../core/api_service.dart';
 import '../audio/audio_search_screen.dart';
 import 'widgets/video_trimmer_widget.dart';
 

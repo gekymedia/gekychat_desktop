@@ -6,8 +6,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
   late final Dio _dio;
+  String? _pendingAuthToken;
+  void Function()? onUnauthorized;
 
-  ApiService() {
+  ApiService({void Function()? onUnauthorized}) : onUnauthorized = onUnauthorized {
     // 🔴 MUST come from .env
     final baseUrl = dotenv.env['API_BASE_URL'];
 
@@ -67,8 +69,18 @@ class ApiService {
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {
-          final prefs = await SharedPreferences.getInstance();
-          final token = prefs.getString('auth_token');
+          // Use in-memory token first (set right after OTP verify) so the very next request has it
+          String? token = _pendingAuthToken;
+          if (token == null || token.isEmpty) {
+            final prefs = await SharedPreferences.getInstance();
+            final accountId = prefs.getInt('current_account_id');
+            if (accountId != null) {
+              token = prefs.getString('auth_token_$accountId');
+            }
+            token ??= prefs.getString('auth_token');
+          } else {
+            _pendingAuthToken = null;
+          }
 
           if (token != null && token.isNotEmpty) {
             options.headers['Authorization'] = 'Bearer $token';
@@ -87,20 +99,42 @@ class ApiService {
           final path = e.requestOptions.path;
           final statusCode = e.response?.statusCode;
           
-          // Handle 401 Unauthorized errors GLOBALLY - auto logout
+          // Only treat 401 as "session invalid" when we actually sent credentials.
+          // Otherwise background calls without a token (e.g. /conversations while on OTP screen)
+          // clear a freshly saved token when their 401 responses arrive after login.
           if (statusCode == 401) {
-            // Clear authentication data
+            final headers = e.requestOptions.headers;
+            final authHeader = headers['Authorization'] ?? headers['authorization'];
+            final hadBearer = authHeader != null &&
+                authHeader.toString().trim().isNotEmpty &&
+                !authHeader.toString().contains('Bearer null');
+            if (!hadBearer) {
+              return handler.next(e);
+            }
+            _pendingAuthToken = null;
             final prefs = await SharedPreferences.getInstance();
             await prefs.remove('auth_token');
             await prefs.remove('user_id');
             await prefs.remove('user_data');
-            debugPrint('🚨 401 Unauthorized - auth cleared, redirecting to login');
+            debugPrint('🚨 401 Unauthorized - auth cleared');
+            onUnauthorized?.call();
           }
           
           // Suppress expected errors that are handled gracefully
+          final isGroupMessages403 =
+              statusCode == 403 &&
+              RegExp(r'/groups/\d+/messages').hasMatch(path);
+          final isGroupDecline422 =
+              statusCode == 422 &&
+              path.contains('/decline') &&
+              e.response?.data is Map &&
+              (e.response!.data['message']?.toString() ?? '')
+                  .contains('Group calls do not use decline');
           final shouldSuppress = 
               (statusCode == 401 && (path.contains('/linked-devices') || path.contains('/feature-flags') || path == '/me' || path == '/api/v1/me')) ||
-              (statusCode == 404 && path.contains('/linked-devices/others'));
+              (statusCode == 404 && path.contains('/linked-devices/others')) ||
+              isGroupMessages403 ||
+              isGroupDecline422;
           
           if (!shouldSuppress) {
             // Log detailed error information for debugging
@@ -239,6 +273,17 @@ class ApiService {
     await prefs.setString('auth_token', token);
   }
 
+  /// Set token for the next request(s). Used right after login so the first API call has the token
+  /// even if SharedPreferences hasn't flushed yet. Cleared after first use or on 401.
+  void setPendingAuthToken(String token) {
+    _pendingAuthToken = token;
+  }
+
+  /// Call when 401 is received so the app can logout and redirect to login.
+  void setOnUnauthorized(void Function()? callback) {
+    onUnauthorized = callback;
+  }
+
   // Get upload limits for current user
   Future<Response> getUploadLimits() => get('/upload-limits');
 
@@ -308,8 +353,14 @@ class ApiService {
   Future<Response> deleteMessage(int messageId, {bool deleteForEveryone = false}) =>
       delete('/messages/$messageId?delete_for=${deleteForEveryone ? 'everyone' : 'me'}');
 
+  Future<Response> deleteGroupMessage(int messageId, {bool deleteForEveryone = false}) =>
+      delete('/group-messages/$messageId?delete_for=${deleteForEveryone ? 'everyone' : 'me'}');
+
   Future<Response> editMessage(int messageId, String body) =>
       put('/messages/$messageId', data: {'body': body});
+
+  Future<Response> editGroupMessage(int messageId, String body) =>
+      put('/group-messages/$messageId', data: {'body': body});
 
   // ---------------------------------------------------------------------------
   // Search
@@ -336,6 +387,10 @@ class ApiService {
   Future<Response> uploadAttachment(
     File file, {
     String? compressionLevel,
+    /// Sent to `/attachments` so the row is stored as a voice note (UI + playback).
+    bool isVoicenote = false,
+    /// When true, image/video is treated as a document (no in-chat media treatment).
+    bool sharedAsDocument = false,
     void Function(int sent, int total)? onSendProgress,
   }) async {
     final filename = file.path.split(Platform.pathSeparator).last;
@@ -355,8 +410,10 @@ class ApiService {
     
     final formData = FormData.fromMap({
       'file': multipartFile,
-      // MEDIA COMPRESSION: Include compression level preference
       if (compressionLevel != null) 'compression_level': compressionLevel,
+      // Laravel boolean rule accepts 1/0 reliably in multipart (see mobile client).
+      'is_voicenote': isVoicenote ? '1' : '0',
+      'shared_as_document': sharedAsDocument ? '1' : '0',
     });
     
     debugPrint('📤 [API UPLOAD] Sending to /attachments endpoint');
@@ -491,6 +548,9 @@ class ApiService {
   Future<Response> getArchivedConversations() =>
       get('/conversations/archived');
 
+  Future<Response> startConversation(int userId) =>
+      post('/conversations/start', data: {'user_id': userId});
+
   // ---------------------------------------------------------------------------
   // Labels
   // ---------------------------------------------------------------------------
@@ -567,6 +627,12 @@ class ApiService {
       get('/conversations/$conversationId/export');
 
   // ---------------------------------------------------------------------------
+  // Bot contacts
+  // ---------------------------------------------------------------------------
+
+  Future<Response> getBots() => get('/bots');
+
+  // ---------------------------------------------------------------------------
   // Group Management
   // ---------------------------------------------------------------------------
 
@@ -584,6 +650,9 @@ class ApiService {
   // Group Actions
   Future<Response> pinGroup(int groupId) => post('/groups/$groupId/pin');
   Future<Response> unpinGroup(int groupId) => delete('/groups/$groupId/pin');
+
+  Future<Response> markGroupUnread(int groupId) =>
+      post('/groups/$groupId/mark-unread');
   Future<Response> leaveGroup(int groupId) => delete('/groups/$groupId/leave');
   
   Future<Response> muteGroup(int groupId, {int? minutes, DateTime? until}) {
@@ -634,16 +703,6 @@ class ApiService {
   // ---------------------------------------------------------------------------
 
   Future<Response> getStorageUsage() => get('/storage-usage');
-
-  // ---------------------------------------------------------------------------
-  // Starred Messages
-  // ---------------------------------------------------------------------------
-
-  Future<Response> getStarredMessages() => get('/starred-messages');
-  Future<Response> starMessage(int messageId) => post('/messages/$messageId/star');
-  Future<Response> unstarMessage(int messageId) => delete('/messages/$messageId/star');
-  Future<Response> starGroupMessage(int groupId, int messageId) => post('/groups/$groupId/messages/$messageId/star');
-  Future<Response> unstarGroupMessage(int groupId, int messageId) => delete('/groups/$groupId/messages/$messageId/star');
 
   // ---------------------------------------------------------------------------
   // Account
@@ -782,6 +841,14 @@ class ApiService {
     post('/world-feed/creators/$creatorId/follow'); // Use toggle endpoint for unfollow too
   Future<Response> getWorldFeedPostShareUrl(int postId) =>
     get('/world-feed/posts/$postId/share-url');
+  Future<Response> recordWorldFeedPostShare(int postId) =>
+    post('/world-feed/posts/$postId/share');
+
+  /// Public share code from /wf/{code}
+  Future<Response> getWorldFeedPostByShareCode(String code) =>
+      get('/world-feed/posts/by-share/${Uri.encodeComponent(code)}');
+  Future<Response> getWorldFeedPost(int postId) =>
+      get('/world-feed/posts/$postId');
 
   // ---------------------------------------------------------------------------
   // PHASE 2: Email Chat (Mail)
@@ -805,6 +872,7 @@ class ApiService {
   Future<Response> endLiveBroadcast(int broadcastId) =>
     post('/live/$broadcastId/end');
   Future<Response> getActiveLiveBroadcasts() => get('/live/active');
+  Future<Response> getLiveBroadcastStats(int id) => get('/live/$id/stats');
   Future<Response> sendLiveBroadcastChat(int broadcastId, {required String message}) =>
     post('/live/$broadcastId/chat', data: {'message': message});
   Future<Response> getLiveKitToken({required String roomName, required String role}) =>
@@ -848,4 +916,12 @@ class ApiService {
   Future<Response> getMentionStats() => get('/mentions/stats');
   Future<Response> markMentionAsRead(int mentionId) => post('/mentions/$mentionId/read');
   Future<Response> markAllMentionsAsRead() => post('/mentions/read-all');
+
+  Future<Response> markMessageDelivered(int messageId) =>
+      post('/messages/$messageId/delivered');
+
+  /// GET /sync/changes?since=ISO8601 — conversations/groups updated since timestamp.
+  Future<Response> getSyncChanges(String sinceIso8601) {
+    return get('/sync/changes', queryParameters: {'since': sinceIso8601});
+  }
 }

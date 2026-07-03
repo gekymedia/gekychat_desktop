@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'media_auto_download_repository.dart';
-import '../../core/providers.dart';
 import '../../theme/app_theme.dart';
 
 final mediaAutoDownloadSettingsProvider =

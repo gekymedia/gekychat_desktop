@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/feature_flags.dart';
-import '../../core/providers.dart';
 import '../../core/session.dart';
 
 /// PHASE 2: Mail Screen - Email as chat threads

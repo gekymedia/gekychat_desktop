@@ -4,6 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:livekit_client/livekit_client.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
 import 'live_broadcast_repository.dart';
+import 'live_broadcast_social_overlay.dart';
+import 'live_broadcast_screen.dart' show liveBroadcastsProvider;
+import '../../core/providers.dart';
 
 /// PHASE 2: Broadcast Viewer Screen for Desktop
 /// Shows the live broadcast stream and chat with LiveKit integration
@@ -28,17 +31,83 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
   RemoteParticipant? _broadcaster;
   bool _isConnecting = true;
   String? _errorMessage;
+  bool _streamEnded = false;
+  bool _hadBroadcaster = false;
+  Timer? _statsPollTimer;
+  void Function(dynamic)? _endedListener;
 
   @override
   void initState() {
     super.initState();
     _connectToRoom();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _attachEndedListener());
+  }
+
+  void _attachEndedListener() {
+    final pusher = ref.read(pusherServiceProvider);
+    unawaited(pusher.connect());
+    _endedListener = (raw) {
+      final m = decodePusherPayload(raw);
+      if (m == null) return;
+      final id = int.tryParse(m['id']?.toString() ?? '');
+      if (id == widget.broadcastId) {
+        _handleStreamEnded();
+      }
+    };
+    pusher.listen('live-broadcasts', 'LiveBroadcastEnded', _endedListener!);
+    _startStatsPolling();
+  }
+
+  void _handleStreamEnded() {
+    if (_streamEnded || !mounted) return;
+    _streamEnded = true;
+    _statsPollTimer?.cancel();
+    unawaited(_room?.disconnect());
+    ref.invalidate(liveBroadcastsProvider);
+    setState(() {
+      _broadcaster = null;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('This live has ended'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+    Future<void>.delayed(const Duration(seconds: 2), () {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+    });
+  }
+
+  void _startStatsPolling() {
+    _statsPollTimer?.cancel();
+    _statsPollTimer = Timer.periodic(const Duration(seconds: 8), (_) async {
+      if (!mounted || _streamEnded) return;
+      try {
+        final repo = ref.read(liveBroadcastRepositoryProvider);
+        final stats = await repo.getBroadcastStats(widget.broadcastId);
+        if (!mounted || _streamEnded || stats.isEmpty) return;
+        final status = stats['status']?.toString();
+        if (status != null && status != 'live') {
+          _handleStreamEnded();
+        }
+      } catch (_) {}
+    });
   }
 
   EventsListener<RoomEvent>? _listener;
 
   @override
   void dispose() {
+    _statsPollTimer?.cancel();
+    if (_endedListener != null) {
+      ref.read(pusherServiceProvider).removeListener(
+            'live-broadcasts',
+            'LiveBroadcastEnded',
+            _endedListener!,
+          );
+    }
     _chatController.dispose();
     _listener?.dispose();
     _room?.disconnect();
@@ -105,40 +174,49 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
 
       // Listen for remote participants
       room.addListener(() {
-        if (mounted) {
-          setState(() {
-            // Get first remote participant (broadcaster)
-            _broadcaster = room.remoteParticipants.values.isNotEmpty
-                ? room.remoteParticipants.values.first
-                : null;
-          });
-        }
+        if (!mounted || _streamEnded) return;
+        setState(() {
+          final next = room.remoteParticipants.values.isNotEmpty
+              ? room.remoteParticipants.values.first
+              : null;
+          if (next != null) {
+            _hadBroadcaster = true;
+          } else if (_hadBroadcaster) {
+            _handleStreamEnded();
+            return;
+          }
+          _broadcaster = next;
+        });
       });
 
       // Listen for participant events
       _listener = room.createListener();
       _listener!
         ..on<RoomDisconnectedEvent>((event) {
-          if (mounted) {
-            setState(() {
-              _errorMessage = 'Disconnected from broadcast';
-              _isConnecting = false;
-              _broadcaster = null;
-            });
+          if (mounted && !_streamEnded) {
+            _handleStreamEnded();
           }
         })
         ..on<ParticipantConnectedEvent>((event) {
-          if (mounted) {
+          if (mounted && !_streamEnded) {
             final participant = event.participant;
             // Only handle remote participants (broadcasters)
             if (participant is! LocalParticipant) {
               setState(() {
-                _broadcaster = participant as RemoteParticipant;
+                _broadcaster = participant;
+                _hadBroadcaster = true;
               });
               // Check for existing tracks and update UI
-              _subscribeToParticipantTracks(participant as RemoteParticipant);
-              debugPrint('📹 Broadcaster connected: ${participant.identity}, tracks: ${(participant as RemoteParticipant).trackPublications.length}');
+              _subscribeToParticipantTracks(participant);
+              debugPrint('📹 Broadcaster connected: ${participant.identity}, tracks: ${(participant).trackPublications.length}');
             }
+          }
+        })
+        ..on<ParticipantDisconnectedEvent>((event) {
+          if (!mounted || _streamEnded) return;
+          final left = event.participant;
+          if (_broadcaster?.sid == left.sid || _hadBroadcaster) {
+            _handleStreamEnded();
           }
         })
         ..on<TrackPublishedEvent>((event) {
@@ -186,7 +264,7 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
               '• LiveKit server is running and accessible\n'
               '• The WebSocket URL format is correct (ws:// or wss://)\n\n'
               'Attempted URL: ${websocketUrl.isEmpty ? "Not provided" : websocketUrl}\n\n'
-              'Error: ${errorString.length > 300 ? errorString.substring(0, 300) + "..." : errorString}';
+              'Error: ${errorString.length > 300 ? "${errorString.substring(0, 300)}..." : errorString}';
         } else if (errorString.contains('timeout') || errorString.contains('Timeout')) {
           errorMsg = 'Connection timeout. LiveKit server may be unreachable.\n\n'
               'The server at ${websocketUrl.isEmpty ? "unknown URL" : websocketUrl} did not respond.\n\n'
@@ -254,6 +332,36 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
                       ],
                     ),
                   )
+                else if (_streamEnded)
+                  Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.videocam_off_outlined,
+                          size: 100,
+                          color: Colors.white.withOpacity(0.55),
+                        ),
+                        const SizedBox(height: 24),
+                        Text(
+                          'This live has ended',
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.85),
+                            fontSize: 24,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Leaving…',
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.55),
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
                 else if (_errorMessage != null)
                   Center(
                     child: SingleChildScrollView(
@@ -312,7 +420,7 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
                   ),
 
                 // Live Indicator
-                if (!_isConnecting && _errorMessage == null)
+                if (!_isConnecting && _errorMessage == null && !_streamEnded)
                   Positioned(
                     top: 16,
                     left: 16,

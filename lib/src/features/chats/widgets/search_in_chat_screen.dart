@@ -2,11 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/providers.dart';
-import '../../../core/api_service.dart';
 import '../models.dart';
-import '../chat_repo.dart';
 import 'message_bubble.dart';
-import '../../../theme/app_theme.dart';
 
 final searchInConversationProvider =
     FutureProvider.family<List<Message>, Map<String, dynamic>>((ref, params) async {

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'two_factor_repository.dart';
 import 'models.dart';
-import '../../core/providers.dart';
 import '../../theme/app_theme.dart';
 
 final twoFactorStatusProvider =
@@ -48,6 +48,17 @@ class _TwoFactorScreenState extends ConsumerState<TwoFactorScreen> {
         title: const Text('Two-Step Verification'),
         backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
         foregroundColor: isDark ? Colors.white : Colors.black,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          tooltip: 'Back',
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/chats');
+            }
+          },
+        ),
       ),
       body: statusAsync.when(
         data: (status) {

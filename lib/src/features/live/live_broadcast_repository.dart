@@ -1,6 +1,19 @@
+import 'package:dio/dio.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../core/api_service.dart';
 import '../../core/providers.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+/// Thrown when [LiveBroadcastRepository.joinBroadcast] fails; [message] is safe to show in UI.
+class LiveBroadcastJoinException implements Exception {
+  LiveBroadcastJoinException(this.message, {this.errorCode});
+
+  final String message;
+  final String? errorCode;
+
+  @override
+  String toString() => message;
+}
 
 /// PHASE 2: Live Broadcast Repository
 class LiveBroadcastRepository {
@@ -16,8 +29,51 @@ class LiveBroadcastRepository {
 
   /// Join a live broadcast
   Future<Map<String, dynamic>> joinBroadcast(int id) async {
-    final response = await _apiService.joinLiveBroadcast(id);
-    return Map<String, dynamic>.from(response.data);
+    try {
+      final response = await _apiService.joinLiveBroadcast(id);
+      final raw = response.data;
+      if (raw is Map) {
+        return Map<String, dynamic>.from(raw);
+      }
+      throw LiveBroadcastJoinException('Invalid join response.');
+    } on DioException catch (e) {
+      throw _joinFailureFromDio(e);
+    }
+  }
+
+  LiveBroadcastJoinException _joinFailureFromDio(DioException e) {
+    final data = e.response?.data;
+    if (data is Map) {
+      final code = data['error_code']?.toString();
+      final m = data['message']?.toString();
+      if (m != null && m.isNotEmpty) {
+        return LiveBroadcastJoinException(m, errorCode: code);
+      }
+    }
+    switch (e.response?.statusCode) {
+      case 410:
+        return LiveBroadcastJoinException(
+          'This live has ended.',
+          errorCode: 'BROADCAST_ENDED',
+        );
+      case 404:
+        return LiveBroadcastJoinException(
+          'This broadcast is no longer available.',
+          errorCode: 'BROADCAST_NOT_FOUND',
+        );
+      default:
+        break;
+    }
+    if (e.type == DioExceptionType.connectionTimeout ||
+        e.type == DioExceptionType.receiveTimeout ||
+        e.type == DioExceptionType.connectionError) {
+      return LiveBroadcastJoinException(
+        'Could not join the live. Check your connection and try again.',
+      );
+    }
+    return LiveBroadcastJoinException(
+      'Could not join the live. Please try again.',
+    );
   }
 
   /// End a live broadcast
@@ -37,6 +93,19 @@ class LiveBroadcastRepository {
   /// Send chat message in live broadcast
   Future<void> sendChatMessage(int id, {required String message}) async {
     await _apiService.sendLiveBroadcastChat(id, message: message);
+  }
+
+  /// Lightweight counters/status refresh used as fallback when a realtime event is missed.
+  Future<Map<String, dynamic>> getBroadcastStats(int broadcastId) async {
+    final response = await _apiService.getLiveBroadcastStats(broadcastId);
+    final raw = response.data;
+    if (raw is Map && raw['data'] is Map) {
+      return Map<String, dynamic>.from(raw['data'] as Map);
+    }
+    if (raw is Map) {
+      return Map<String, dynamic>.from(raw);
+    }
+    return const <String, dynamic>{};
   }
 
   /// Get LiveKit token for joining broadcast

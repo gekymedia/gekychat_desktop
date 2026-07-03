@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../core/providers.dart';
 import '../../../theme/app_theme.dart';
-import '../chat_repo.dart';
+import '../chat_providers.dart';
 import '../models.dart';
 
 class ShareGroupLinkScreen extends ConsumerStatefulWidget {

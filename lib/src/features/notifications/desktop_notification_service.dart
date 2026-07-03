@@ -1,89 +1,267 @@
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'notification_service.dart';
-import 'package:flutter/foundation.dart';
+import 'dart:async';
+import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../realtime/pusher_service.dart';
+import 'desktop_notification_constants.dart';
+import 'notification_avatar_helper.dart';
+import 'notification_large_icon.dart';
+import 'notification_service.dart';
+
+/// Desktop notifications via the shared [PusherService] (same WebSocket as chat/calls)
+/// plus OS local notifications.
 class DesktopNotificationService extends NotificationService {
+  DesktopNotificationService(this._pusher);
+
+  final PusherService _pusher;
+
+  /// Windows inline-reply actions may omit [NotificationResponse.payload].
+  final Map<int, String> _notificationPayloadById = {};
+  static const int _maxCachedPayloads = 64;
+
+  Function(Map<String, dynamic> payload)? onInboxMessage;
+
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
-  bool _isInitialized = false;
+
+  int? _userId;
+  bool _userChannelWired = false;
 
   @override
   Future<void> initialize() async {
-    // Prevent multiple initializations
-    if (_isInitialized) {
-      debugPrint('⚠️ Notifications already initialized, skipping...');
+    debugPrint('🖥️ Initializing Desktop Notification Service...');
+    await _initializeLocalNotifications();
+    await _wireUserChannelIfReady();
+    debugPrint('✅ Desktop Notification Service initialized');
+  }
+
+  /// Call after login or when [initialize] ran before `user_id` / token was available.
+  Future<void> refreshAfterLogin() async {
+    final prefs = await SharedPreferences.getInstance();
+    final accountId = prefs.getInt('current_account_id');
+    String? token = accountId != null
+        ? prefs.getString('auth_token_$accountId')
+        : null;
+    token ??= prefs.getString('auth_token');
+    final newId = prefs.getInt('user_id');
+    if (token == null || token.isEmpty || newId == null) return;
+    if (newId == _userId && _userChannelWired) {
       return;
     }
+    _userId = newId;
+    _userChannelWired = false;
+    await _wireUserChannelIfReady();
+  }
 
+  Future<void> _initializeLocalNotifications() async {
+    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    final initSettings = InitializationSettings(
+      android: androidSettings,
+      iOS: DarwinInitializationSettings(
+        notificationCategories: [kDesktopMessageCategory],
+      ),
+      macOS: DarwinInitializationSettings(
+        notificationCategories: [kDesktopMessageCategory],
+      ),
+      linux: LinuxInitializationSettings(
+        defaultActionName: 'Open notification',
+      ),
+      windows: WindowsInitializationSettings(
+        appUserModelId: 'gekychat.desktop',
+        appName: 'GekyChat',
+        guid: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+      ),
+    );
+
+    await _localNotifications.initialize(
+      initSettings,
+      onDidReceiveNotificationResponse: _onNotificationTapped,
+    );
+  }
+
+  Future<void> _wireUserChannelIfReady() async {
     try {
-      const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
-      const iosSettings = DarwinInitializationSettings();
-      const initSettings = InitializationSettings(
-        android: androidSettings,
-        iOS: iosSettings,
-        macOS: iosSettings,
-        linux: const LinuxInitializationSettings(
-          defaultActionName: 'Open notification',
-        ),
-        windows: const WindowsInitializationSettings(
-          appUserModelId: 'gekychat.desktop',
-          appName: 'GekyChat',
-          guid: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890', // Valid GUID format for Windows notifications
-        ),
-      );
+      final prefs = await SharedPreferences.getInstance();
+      final accountId = prefs.getInt('current_account_id');
+      String? token = accountId != null
+          ? prefs.getString('auth_token_$accountId')
+          : null;
+      token ??= prefs.getString('auth_token');
+      _userId = prefs.getInt('user_id');
 
-      await _localNotifications.initialize(
-        initSettings,
-        onDidReceiveNotificationResponse: _onNotificationTapped,
-      );
-      
-      _isInitialized = true;
-      debugPrint('✅ Desktop notifications initialized successfully');
+      if (token == null || token.isEmpty) {
+        debugPrint('⚠️ No auth token, skipping Pusher inbox for notifications');
+        return;
+      }
+      if (_userId == null) {
+        debugPrint('⚠️ No user_id, skipping Pusher inbox for notifications');
+        return;
+      }
+
+      await _wireUserChannel();
+      if (!_pusher.isConnected) {
+        unawaited(_pusher.connect().catchError((e) {
+          debugPrint('⚠️ Shared Pusher connect from notifications: $e');
+        }));
+      }
+      debugPrint('✅ Pusher inbox wired for desktop notifications (user $_userId)');
     } catch (e) {
-      debugPrint('❌ Failed to initialize desktop notifications: $e');
-      _isInitialized = false;
-      rethrow;
+      debugPrint('❌ Pusher inbox wire for notifications: $e');
+      _userChannelWired = false;
     }
+  }
+
+  Future<void> _wireUserChannel() async {
+    if (_userId == null || _userChannelWired) return;
+    final uid = _userId!;
+    final channel = 'user.$uid';
+
+    await _pusher.subscribePrivate(channel, (_) {});
+
+    _pusher.listen(channel, 'CallInvite', _onCallInvite);
+    _pusher.listen(channel, 'UserInboxMessage', _onUserInboxMessage);
+    _pusher.listen(channel, 'UserInboxGroupMessage', _onUserInboxMessage);
+
+    _userChannelWired = true;
+  }
+
+  void _onUserInboxMessage(dynamic data) {
+    try {
+      final payload = _parseInboxPayload(data);
+      if (payload == null) return;
+      onInboxMessage?.call(payload);
+    } catch (e) {
+      debugPrint('DesktopNotificationService inbox event: $e');
+    }
+  }
+
+  static Map<String, dynamic>? _parseInboxPayload(dynamic data) {
+    if (data is Map<String, dynamic>) return data;
+    if (data is Map) return Map<String, dynamic>.from(data);
+    if (data is String) {
+      try {
+        final decoded = jsonDecode(data);
+        if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  void _onCallInvite(dynamic data) {
+    if (data is! Map) return;
+    final caller = data['caller'] is Map ? data['caller'] as Map : null;
+    final name = caller?['name']?.toString() ?? 'Someone';
+    final callType = data['type']?.toString() == 'video' ? 'video call' : 'call';
+    onForegroundNotification?.call(Map<String, dynamic>.from(
+        data.map((k, v) => MapEntry(k.toString(), v))));
+    final sessionId = data['session_id'] ?? data['call_id'];
+    showLocalNotification(
+      title: 'Incoming $callType',
+      body: '$name is calling you',
+      data: <String, dynamic>{
+        'type': 'incoming_call',
+        'action': 'incoming_call',
+        'session_id': sessionId,
+        'call_type': data['type']?.toString() ?? 'voice',
+        if (caller?['id'] != null) 'caller_id': caller!['id'],
+        'caller_name': name,
+        if (caller?['avatar'] != null) 'caller_avatar': caller!['avatar'],
+        if (data['conversation_id'] != null)
+          'conversation_id': data['conversation_id'],
+        if (data['group_id'] != null) 'group_id': data['group_id'],
+      },
+      senderName: name,
+      senderAvatarUrl: NotificationAvatarHelper.resolveAvatarUrl(
+        caller?['avatar']?.toString() ?? caller?['avatar_url']?.toString(),
+      ),
+    );
   }
 
   void _onNotificationTapped(NotificationResponse response) {
-    debugPrint('📬 Desktop notification response: ${response.id}, ${response.actionId}, ${response.input}');
-    
-    // Handle inline reply
-    if (response.actionId == 'reply' && response.input != null && response.input!.isNotEmpty) {
-      _handleNotificationReply(response.payload ?? '', response.input!);
+    debugPrint(
+        '📬 Desktop notification response: ${response.id}, ${response.actionId}, ${response.input}, data=${response.data}');
+
+    final replyText = _extractReplyText(response);
+    final isReplyAction = response.actionId == kDesktopReplyActionId ||
+        response.actionId == 'send-reply' ||
+        response.actionId == 'Send' ||
+        (replyText != null &&
+            replyText.isNotEmpty &&
+            response.notificationResponseType ==
+                NotificationResponseType.selectedNotificationAction);
+
+    if (isReplyAction &&
+        replyText != null &&
+        replyText.trim().isNotEmpty) {
+      var payload = response.payload ?? '';
+      if (payload.isEmpty && response.id != null) {
+        payload = _notificationPayloadById[response.id] ?? '';
+      }
+      _handleNotificationReply(payload, replyText.trim());
       return;
     }
-    
-    // Handle notification tap
-    final data = response.payload != null
-        ? {'data': response.payload}
-        : <String, dynamic>{};
-    onNotificationTap?.call(data);
+
+    final payload = response.payload;
+    if (payload != null && payload.isNotEmpty) {
+      onNotificationTap?.call({'data': payload});
+    } else {
+      onNotificationTap?.call(<String, dynamic>{});
+    }
   }
-  
-  void _handleNotificationReply(String payload, String replyText) {
-    debugPrint('💬 Desktop notification reply received: $replyText');
+
+  String? _extractReplyText(NotificationResponse response) {
+    final direct = response.input?.trim();
+    if (direct != null && direct.isNotEmpty) return direct;
+
+    final data = response.data;
+    if (data.isEmpty) return null;
+
+    for (final key in [kDesktopReplyInputId, 'reply', 'text']) {
+      final value = data[key]?.toString().trim();
+      if (value != null && value.isNotEmpty) return value;
+    }
+
+    if (data.length == 1) {
+      final only = data.values.first?.toString().trim();
+      if (only != null && only.isNotEmpty) return only;
+    }
+    return null;
+  }
+
+  Map<String, dynamic>? _parsePayloadString(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return null;
     try {
-      // Parse payload to get conversation_id and message_id
-      final data = <String, dynamic>{'payload': payload};
-      
-      // Try to extract conversation_id from payload if it's in format like "conversation_id=123&message_id=456"
-      if (payload.contains('conversation_id')) {
-        final parts = payload.split('&');
-        for (final part in parts) {
-          final kv = part.split('=');
-          if (kv.length == 2) {
-            data[kv[0]] = kv[1];
-          }
-        }
+      final decoded = jsonDecode(trimmed);
+      if (decoded is Map) {
+        return decoded.map((k, v) => MapEntry(k.toString(), v));
       }
-      
-      // Add reply text
-      data['reply_text'] = replyText;
-      data['type'] = 'message_reply';
-      
-      // Call callback to handle the reply
+    } catch (_) {}
+    if (!trimmed.contains('=')) return null;
+    final map = <String, dynamic>{};
+    for (final part in trimmed.split('&')) {
+      final kv = part.split('=');
+      if (kv.length == 2) {
+        map[kv[0]] = Uri.decodeComponent(kv[1]);
+      }
+    }
+    return map.isEmpty ? null : map;
+  }
+
+  void _handleNotificationReply(String payload, String replyText) {
+    try {
+      final parsed = _parsePayloadString(payload);
+      final data = <String, dynamic>{
+        if (parsed != null) ...parsed,
+        'reply_text': replyText,
+        'type': 'message_reply',
+      };
+      if (parsed == null && payload.isNotEmpty) {
+        data['payload'] = payload;
+      }
       onNotificationTap?.call(data);
     } catch (e) {
       debugPrint('❌ Error handling notification reply: $e');
@@ -92,13 +270,11 @@ class DesktopNotificationService extends NotificationService {
 
   @override
   Future<bool> requestPermissions() async {
-    // Desktop platforms typically don't require permission requests
     return true;
   }
 
   @override
   Future<String?> getDeviceToken() async {
-    // Desktop doesn't use FCM tokens
     return null;
   }
 
@@ -108,55 +284,192 @@ class DesktopNotificationService extends NotificationService {
     required String body,
     Map<String, dynamic>? data,
     String? imageUrl,
+    String? senderName,
+    String? senderAvatarUrl,
+    String? subtitle,
   }) async {
-    // Extract conversation and message IDs for reply
     final conversationId = data?['conversation_id']?.toString() ?? '';
-    final messageId = data?['message_id']?.toString() ?? '';
-    
-    // Create payload string with conversation and message IDs
-    final payloadString = conversationId.isNotEmpty && messageId.isNotEmpty
-        ? 'conversation_id=$conversationId&message_id=$messageId'
-        : (data?.toString() ?? '');
-    
-    // Windows notification details
-    const windowsDetails = WindowsNotificationDetails();
-    
-    // macOS supports inline replies via categoryIdentifier
-    const darwinDetails = DarwinNotificationDetails(
-      categoryIdentifier: 'MESSAGE_CATEGORY',
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: true,
-    );
+    final groupId = data?['group_id']?.toString() ?? '';
+    final messageId = data?['message_id']?.toString() ?? data?['id']?.toString() ?? '';
+    final isCall = data?['type'] == 'incoming_call' ||
+        data?['action'] == 'incoming_call';
+    final isMessage =
+        !isCall && (conversationId.isNotEmpty || groupId.isNotEmpty);
 
-    // Linux notification details
-    const linuxDetails = LinuxNotificationDetails(
-      defaultActionName: 'Open',
-    );
+    String payloadString;
+    if (isMessage) {
+      final payloadMap = <String, dynamic>{
+        'type': 'message',
+        if (conversationId.isNotEmpty) 'conversation_id': conversationId,
+        if (groupId.isNotEmpty) 'group_id': groupId,
+        if (messageId.isNotEmpty) 'message_id': messageId,
+      };
+      if (data != null) {
+        for (final entry in data.entries) {
+          payloadMap.putIfAbsent(entry.key, () => entry.value);
+        }
+      }
+      try {
+        payloadString = jsonEncode(payloadMap);
+      } catch (_) {
+        payloadString = payloadMap.entries
+            .map((e) => '${e.key}=${e.value}')
+            .join('&');
+      }
+    } else if (groupId.isNotEmpty && messageId.isNotEmpty) {
+      payloadString = 'group_id=$groupId&message_id=$messageId';
+    } else if (conversationId.isNotEmpty && messageId.isNotEmpty) {
+      payloadString = 'conversation_id=$conversationId&message_id=$messageId';
+    } else if (data != null && data.isNotEmpty) {
+      try {
+        payloadString = jsonEncode(data);
+      } catch (_) {
+        payloadString = data.toString();
+      }
+    } else {
+      payloadString = '';
+    }
 
-    const androidDetails = AndroidNotificationDetails(
-      'gekychat_channel',
-      'GekyChat Notifications',
-      channelDescription: 'Notifications for GekyChat messages',
-      importance: Importance.high,
-      priority: Priority.high,
-    );
+    final darwinDetails = isMessage
+        ? buildMessageDarwinDetails(
+            subtitle: subtitle,
+            attachments: null,
+          )
+        : const DarwinNotificationDetails(
+            presentAlert: true,
+            presentBadge: true,
+            presentSound: true,
+          );
+    const linuxDetails = LinuxNotificationDetails(defaultActionName: 'Open');
 
-    const notificationDetails = NotificationDetails(
+    final resolvedAvatarUrl = NotificationAvatarHelper.resolveAvatarUrl(
+          senderAvatarUrl ?? imageUrl,
+        ) ??
+        senderAvatarUrl ??
+        imageUrl;
+    final avatarLabel = senderName ?? title;
+
+    String? largeIconPath;
+    try {
+      largeIconPath = await NotificationLargeIconComposer.compose(
+        avatarUrl: resolvedAvatarUrl,
+        displayName: avatarLabel,
+      );
+    } catch (e) {
+      debugPrint('NotificationLargeIconComposer: $e');
+    }
+
+    final windowsImages = <WindowsImage>[];
+    if (largeIconPath != null && largeIconPath.isNotEmpty) {
+      windowsImages.add(
+        WindowsImage(
+          Uri.file(largeIconPath),
+          altText: avatarLabel,
+          placement: WindowsImagePlacement.appLogoOverride,
+        ),
+      );
+    }
+
+    final windowsDetails = isMessage
+        ? buildMessageWindowsDetails(
+            images: windowsImages,
+            subtitle: subtitle,
+          )
+        : const WindowsNotificationDetails();
+
+    final darwinMessageDetails = isMessage
+        ? buildMessageDarwinDetails(
+            subtitle: subtitle,
+            attachments: largeIconPath != null
+                ? [DarwinNotificationAttachment(largeIconPath)]
+                : null,
+          )
+        : darwinDetails;
+
+    final androidDetails = largeIconPath != null
+        ? AndroidNotificationDetails(
+            'gekychat_channel',
+            'GekyChat Notifications',
+            channelDescription: 'Notifications for GekyChat messages and calls',
+            importance: Importance.high,
+            priority: Priority.high,
+            largeIcon: FilePathAndroidBitmap(largeIconPath),
+            actions: isMessage ? [kDesktopAndroidReplyAction] : null,
+          )
+        : AndroidNotificationDetails(
+            'gekychat_channel',
+            'GekyChat Notifications',
+            channelDescription: 'Notifications for GekyChat messages and calls',
+            importance: Importance.high,
+            priority: Priority.high,
+            actions: isMessage ? [kDesktopAndroidReplyAction] : null,
+          );
+
+    final notificationDetails = NotificationDetails(
       android: androidDetails,
-      iOS: darwinDetails,
-      macOS: darwinDetails,
+      iOS: darwinMessageDetails,
+      macOS: darwinMessageDetails,
       linux: linuxDetails,
       windows: windowsDetails,
     );
 
-    await _localNotifications.show(
-      DateTime.now().millisecondsSinceEpoch % 100000,
-      title,
-      body,
-      notificationDetails,
-      payload: payloadString,
-    );
+    try {
+      final notificationId = DateTime.now().millisecondsSinceEpoch % 100000;
+      if (payloadString.isNotEmpty) {
+        _notificationPayloadById[notificationId] = payloadString;
+        while (_notificationPayloadById.length > _maxCachedPayloads) {
+          _notificationPayloadById.remove(_notificationPayloadById.keys.first);
+        }
+      }
+      await _localNotifications.show(
+        notificationId,
+        title,
+        body,
+        notificationDetails,
+        payload: payloadString.isEmpty ? null : payloadString,
+      );
+    } catch (e) {
+      debugPrint('❌ showLocalNotification (with reply + avatar): $e');
+      if (!isMessage) return;
+      try {
+        final notificationId = DateTime.now().millisecondsSinceEpoch % 100000;
+        if (payloadString.isNotEmpty) {
+          _notificationPayloadById[notificationId] = payloadString;
+        }
+        await _localNotifications.show(
+          notificationId,
+          title,
+          body,
+          NotificationDetails(
+            android: androidDetails,
+            iOS: buildMessageDarwinDetails(subtitle: subtitle),
+            macOS: buildMessageDarwinDetails(subtitle: subtitle),
+            linux: linuxDetails,
+            windows: kDesktopMessageWindowsDetails,
+          ),
+          payload: payloadString.isEmpty ? null : payloadString,
+        );
+      } catch (fallbackError) {
+        debugPrint('❌ showLocalNotification reply fallback: $fallbackError');
+        try {
+          await _localNotifications.show(
+            DateTime.now().millisecondsSinceEpoch % 100000,
+            title,
+            body,
+            NotificationDetails(
+              android: androidDetails,
+              iOS: darwinMessageDetails,
+              macOS: darwinMessageDetails,
+              linux: linuxDetails,
+              windows: const WindowsNotificationDetails(),
+            ),
+            payload: payloadString.isEmpty ? null : payloadString,
+          );
+        } catch (plainError) {
+          debugPrint('❌ showLocalNotification plain fallback: $plainError');
+        }
+      }
+    }
   }
 
   @override
@@ -166,7 +479,7 @@ class DesktopNotificationService extends NotificationService {
 
   @override
   void dispose() {
-    // Desktop notifications don't need disposal
+    _userChannelWired = false;
+    _userId = null;
   }
 }
-

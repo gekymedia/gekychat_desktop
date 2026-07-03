@@ -267,9 +267,16 @@ class LiveBroadcastScreen extends ConsumerWidget {
         }
       }
     } catch (e) {
+      if (!context.mounted) return;
+      final msg = e is LiveBroadcastJoinException
+          ? e.message
+          : 'Could not join the live.';
+      if (e is LiveBroadcastJoinException && e.errorCode == 'BROADCAST_ENDED') {
+        ref.invalidate(liveBroadcastsProvider);
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to join broadcast: $e'),
+          content: Text(msg),
           backgroundColor: Colors.red,
         ),
       );

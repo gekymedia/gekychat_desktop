@@ -10,8 +10,21 @@ abstract class NotificationService {
     required String body,
     Map<String, dynamic>? data,
     String? imageUrl,
+    String? senderName,
+    String? senderAvatarUrl,
+    String? subtitle,
   });
   Future<void> clearAllNotifications();
+
+  /// Tray notification for a message (parity with mobile); default uses [showLocalNotification].
+  Future<void> showMessageReceivedNotification({
+    required String title,
+    required String body,
+    Map<String, dynamic>? data,
+  }) async {
+    await showLocalNotification(title: title, body: body, data: data);
+  }
+
   void dispose();
 }
 

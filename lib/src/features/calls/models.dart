@@ -1,3 +1,5 @@
+import 'call_duration_format.dart';
+
 class CallLog {
   final int id;
   final String type; // 'voice' or 'video'
@@ -25,7 +27,7 @@ class CallLog {
     return CallLog(
       id: json['id'],
       type: json['type'] ?? 'voice',
-      duration: json['duration'],
+      duration: parseCallDurationSeconds(json['duration']),
       isMissed: json['is_missed'] ?? false,
       isOutgoing: json['is_outgoing'] ?? false,
       otherUser: json['other_user'] != null 
@@ -41,12 +43,7 @@ class CallLog {
     );
   }
 
-  String get formattedDuration {
-    if (duration == null) return '';
-    final minutes = duration! ~/ 60;
-    final seconds = duration! % 60;
-    return '${minutes}:${seconds.toString().padLeft(2, '0')}';
-  }
+  String get formattedDuration => formatCallDurationLabel(duration ?? 0);
 }
 
 class CallUser {

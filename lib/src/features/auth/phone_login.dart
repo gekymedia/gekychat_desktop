@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'auth_provider.dart';
 import '../../app_router.dart';
+import '../../utils/phone_matcher.dart';
 
 class PhoneLoginScreen extends ConsumerStatefulWidget {
   const PhoneLoginScreen({super.key});
@@ -28,10 +27,9 @@ class _PhoneLoginState extends ConsumerState<PhoneLoginScreen> {
   }
 
   String? _validatePhone(String? v) {
-    final s = (v ?? '').replaceAll(RegExp(r'\D'), '');
-    if (s.isEmpty) return 'Please enter your phone number';
-    if (!RegExp(r'^0\d{9}$').hasMatch(s)) {
-      return 'Please enter a valid phone number (0XXXXXXXXX)';
+    if ((v ?? '').trim().isEmpty) return 'Please enter your phone number';
+    if (!PhoneMatcher.isValidGhanaLoginPhone(v)) {
+      return 'Enter a valid mobile number';
     }
     return null;
   }
@@ -52,7 +50,7 @@ class _PhoneLoginState extends ConsumerState<PhoneLoginScreen> {
       _error = null;
     });
 
-    final phone = _phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
+    final phone = PhoneMatcher.normalizeGhanaLoginPhone(_phoneCtrl.text);
     
     // Capture router before async call to avoid using ref after widget disposal
     final router = ref.read(routerProvider);
@@ -143,12 +141,14 @@ class _PhoneLoginState extends ConsumerState<PhoneLoginScreen> {
                       focusNode: _focusNode,
                       decoration: const InputDecoration(
                         labelText: 'Phone Number',
-                        hintText: '0XXXXXXXXX',
+                        hintText: '24 123 4567',
+                        prefixText: '+233 ',
                         prefixIcon: Icon(Icons.phone),
                       ),
                       keyboardType: TextInputType.phone,
                       inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9]')),
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(10),
                       ],
                       validator: _validatePhone,
                       onFieldSubmitted: (_) => _submit(),

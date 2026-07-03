@@ -9,6 +9,8 @@ import 'package:path_provider/path_provider.dart';
 import 'models.dart';
 import 'status_repository.dart';
 import '../../core/providers.dart';
+import '../chats/models.dart'
+    show DesktopPendingStatusChatOpen, PendingStatusReply;
 
 /// Helper function to build avatar with error handling
 Widget _buildStatusAvatar({required String? avatarUrl, required String name, required double radius}) {
@@ -110,6 +112,9 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
         if (status.mediaUrl != null) {
           await _initializeVideo(status.mediaUrl!);
         }
+        break;
+      case StatusType.audio:
+        _startAutoAdvance(const Duration(seconds: 30));
         break;
     }
   }
@@ -248,10 +253,15 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
           child: Center(
             child: Text(
               status.text ?? '',
-              style: const TextStyle(
-                fontSize: 32,
+              style: TextStyle(
+                fontSize: (status.fontSize ?? 32).toDouble(),
                 fontWeight: FontWeight.bold,
-                color: Colors.white,
+                color: status.textColor != null
+                    ? Color(int.parse(
+                        status.textColor!.replaceFirst('#', '0xFF'),
+                      ))
+                    : Colors.white,
+                fontFamily: status.fontFamily,
               ),
               textAlign: TextAlign.center,
             ),
@@ -271,6 +281,31 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
                 child: VideoPlayer(_videoController!),
               )
             : const Center(child: CircularProgressIndicator());
+      case StatusType.audio:
+        return ColoredBox(
+          color: const Color(0xFF1A1A2E),
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.mic_rounded, size: 72, color: Colors.white70),
+                if (status.text != null && status.text!.trim().isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      status.text!.trim(),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
     }
   }
 
@@ -438,6 +473,12 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
+                  if (!widget.isOwnStatus)
+                    IconButton(
+                      icon: const Icon(Icons.reply, color: Colors.white, size: 28),
+                      tooltip: 'Reply in chat',
+                      onPressed: _openReplyInDm,
+                    ),
                   IconButton(
                     icon: const Icon(Icons.comment_outlined, color: Colors.white, size: 28),
                     onPressed: () => _showCommentsDialog(widget.statusSummary.updates[currentIndex].id),
@@ -487,6 +528,45 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
         ),
       ],
     );
+  }
+
+  Future<void> _openReplyInDm() async {
+    if (widget.isOwnStatus) return;
+    final updates = widget.statusSummary.updates;
+    if (currentIndex < 0 || currentIndex >= updates.length) return;
+    final st = updates[currentIndex];
+    final thumb = st.thumbnailUrl ??
+        (st.type == StatusType.image ? st.mediaUrl : null);
+    final pending = PendingStatusReply(
+      statusId: st.id,
+      ownerUserId: widget.statusSummary.userId,
+      statusType: st.type.name,
+      textPreview: st.text,
+      thumbnailUrl: thumb,
+    );
+    try {
+      final api = ref.read(apiServiceProvider);
+      final response = await api.startConversation(widget.statusSummary.userId);
+      final data = response.data;
+      final conversationId = data is Map
+          ? (data['data'] is Map
+              ? data['data']['id'] as int?
+              : data['id'] as int?)
+          : null;
+      if (conversationId == null || !mounted) return;
+      ref.read(pendingDesktopStatusChatOpenProvider.notifier).state =
+          DesktopPendingStatusChatOpen(
+        conversationId: conversationId,
+        reply: pending,
+      );
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open chat: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _showViewersList(int statusId) async {
@@ -567,6 +647,8 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
       String fileExtension = 'jpg';
       if (status.type == StatusType.video) {
         fileExtension = 'mp4';
+      } else if (status.type == StatusType.audio) {
+        fileExtension = 'm4a';
       } else if (status.type == StatusType.image) {
         final url = status.mediaUrl ?? '';
         if (url.contains('.')) {
@@ -782,7 +864,7 @@ class _CommentsDialogState extends ConsumerState<_CommentsDialog> {
 
     return Dialog(
       backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
-      child: Container(
+      child: SizedBox(
         width: 500,
         height: 600,
         child: Column(

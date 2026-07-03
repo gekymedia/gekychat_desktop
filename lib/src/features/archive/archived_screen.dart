@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../chats/chat_repo.dart';
+import '../chats/chat_providers.dart';
 import '../chats/models.dart';
 import '../chats/widgets/conversation_list_item.dart';
 import '../chats/widgets/chat_view.dart';

@@ -4,7 +4,7 @@ import '../../core/theme/app_theme_mode.dart';
 import '../../core/theme/theme_provider.dart';
 
 class ThemeSettingsScreen extends ConsumerWidget {
-  const ThemeSettingsScreen({Key? key}) : super(key: key);
+  const ThemeSettingsScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

@@ -194,7 +194,7 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
             }
           },
           child: Center(
-            child: Container(
+            child: SizedBox(
               width: portraitWidth,
               height: portraitHeight,
               child: Stack(

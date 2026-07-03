@@ -2,27 +2,33 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../utils/text_sanitize.dart';
 import '../models.dart';
 import '../providers/typing_status_provider.dart';
 import '../../../theme/app_theme.dart';
+import 'chat_list_last_message_preview.dart';
 import '../../../utils/avatar_utils.dart';
 
 class ConversationListItem extends ConsumerWidget {
   final ConversationSummary conversation;
   final bool isSelected;
   final VoidCallback onTap;
+  final bool forceUnreadBadge;
 
   const ConversationListItem({
     super.key,
     required this.conversation,
     required this.isSelected,
     required this.onTap,
+    this.forceUnreadBadge = false,
   });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final hasUnread = conversation.unreadCount > 0;
+    final hasUnread = conversation.unreadCount > 0 || forceUnreadBadge;
+    final displayName =
+        sanitizeDisplayText(conversation.otherUser.name, fallback: 'Unknown');
     
     // Watch typing and recording status
     final typingStatus = ref.watch(typingStatusProvider);
@@ -32,8 +38,8 @@ class ConversationListItem extends ConsumerWidget {
     
     // Subscribe to typing and recording events for this conversation
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      typingNotifier.subscribeToConversation(conversation.id);
-      recordingNotifier.subscribeToConversation(conversation.id);
+      typingNotifier.resubscribeToConversation(conversation.id);
+      recordingNotifier.resubscribeToConversation(conversation.id);
     });
     
     final isTyping = typingStatus[conversation.id] ?? false;
@@ -64,7 +70,7 @@ class ConversationListItem extends ConsumerWidget {
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: conversation.otherUser.avatarUrl == null
-                      ? AvatarUtils.getGradientForName(conversation.otherUser.name)
+                      ? AvatarUtils.getGradientForName(displayName)
                       : null,
                   color: conversation.otherUser.avatarUrl != null
                       ? (isDark ? AppTheme.darkSurface : AppTheme.lightBorder)
@@ -82,7 +88,7 @@ class ConversationListItem extends ConsumerWidget {
                             ),
                             child: Center(
                             child: Text(
-                                AvatarUtils.getInitials(conversation.otherUser.name),
+                                AvatarUtils.getInitials(displayName),
                                 style: const TextStyle(
                                   color: Colors.white,
                                 fontSize: 20,
@@ -98,7 +104,7 @@ class ConversationListItem extends ConsumerWidget {
                             ),
                             child: Center(
                             child: Text(
-                                AvatarUtils.getInitials(conversation.otherUser.name),
+                                AvatarUtils.getInitials(displayName),
                                 style: const TextStyle(
                                   color: Colors.white,
                                 fontSize: 20,
@@ -111,7 +117,7 @@ class ConversationListItem extends ConsumerWidget {
                       )
                     : Center(
                         child: Text(
-                          AvatarUtils.getInitials(conversation.otherUser.name),
+                          AvatarUtils.getInitials(displayName),
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 20,
@@ -142,7 +148,7 @@ class ConversationListItem extends ConsumerWidget {
                             children: [
                               Flexible(
                                 child: Text(
-                                  conversation.otherUser.name,
+                                  displayName,
                                   style: TextStyle(
                                     color: isDark
                                         ? AppTheme.textPrimaryDark
@@ -221,18 +227,14 @@ class ConversationListItem extends ConsumerWidget {
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                     )
-                                  : Text(
-                                      conversation.lastMessage ?? 'No messages yet',
-                                      style: TextStyle(
-                                        color: isDark
-                                            ? AppTheme.textSecondaryDark
-                                            : AppTheme.textSecondaryLight,
-                                        fontSize: 14,
-                                        fontWeight:
-                                            hasUnread ? FontWeight.w500 : FontWeight.w400,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
+                                  : ChatListLastMessagePreview(
+                                      text: conversation.lastMessage ??
+                                          'No messages yet',
+                                      isDark: isDark,
+                                      hasUnread: hasUnread,
+                                      fromMe: conversation.lastMessageFromMe,
+                                      outgoingStatus:
+                                          conversation.lastMessageOutgoingStatus,
                                     ),
                         ),
                         if (hasUnread) ...[

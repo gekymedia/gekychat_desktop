@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'auth_provider.dart';
+import '../chats/chat_providers.dart';
+import '../../core/session.dart';
 
 class PasteIntent extends Intent {
   const PasteIntent();
@@ -56,8 +58,12 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
 
   @override
   void dispose() {
-    for (final n in _nodes) n.dispose();
-    for (final c in _ctrls) c.dispose();
+    for (final n in _nodes) {
+      n.dispose();
+    }
+    for (final c in _ctrls) {
+      c.dispose();
+    }
     _timer?.cancel();
     super.dispose();
   }
@@ -91,6 +97,11 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
     final err = ref.read(authProvider).error;
 
     if ((token ?? '').isNotEmpty) {
+      // Drop stale error state from pre-login API failures (401 without token).
+      ref.invalidate(conversationsProvider);
+      ref.invalidate(archivedConversationsProvider);
+      ref.invalidate(groupsProvider);
+      ref.invalidate(currentUserProvider);
       context.go('/chats');
     } else {
       setState(() => _error = err ?? 'Verification failed.');
@@ -216,9 +227,10 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
             ),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                   Image.asset(
                     'assets/icons/gold_no_text/128x128.png',
                     width: 128,
@@ -349,6 +361,7 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
                     ),
                   ),
                 ],
+                ),
               ),
             ),
           ),

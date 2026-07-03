@@ -1,20 +1,17 @@
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/material.dart';
+import 'core/global_navigator_key.dart';
 import 'features/auth/auth_provider.dart';
 import 'features/auth/phone_login.dart';
 import 'features/auth/otp_verify.dart';
 import 'features/chats/desktop_chat_screen.dart';
-import 'features/profile/settings_screen.dart';
-import 'features/profile/settings_wrapper.dart';
 import 'features/profile/profile_edit_screen.dart';
 import 'features/quick_replies/quick_replies_screen.dart';
 import 'features/auto_reply/auto_reply_screen.dart';
 import 'features/contacts/contacts_screen.dart';
-import 'features/search/search_screen.dart';
 import 'features/status/create_status_screen.dart';
 import 'features/chats/create_group_screen.dart';
-import 'features/starred/starred_screen.dart';
 import 'features/archive/archived_screen.dart';
 import 'features/broadcast/broadcast_lists_screen.dart';
 import 'features/two_factor/two_factor_screen.dart';
@@ -49,10 +46,7 @@ final routerRefreshNotifierProvider = Provider((ref) {
   
   // Listen to auth state changes and refresh router
   ref.listen<AuthState>(authProvider, (previous, next) {
-    // Update the auth state in the notifier
     notifier.updateAuthState(next);
-    // When auth state changes, refresh router
-    notifier.refresh();
   });
   
   return notifier;
@@ -66,6 +60,7 @@ final routerProvider = Provider<GoRouter>((ref) {
   final initialLocation = (initialAuthState.token != null && initialAuthState.token!.isNotEmpty) ? '/chats' : '/login';
   
   return GoRouter(
+    navigatorKey: rootNavigatorKey,
     initialLocation: initialLocation, // Set initial location based on auth state
     refreshListenable: refreshNotifier,
     routes: [
@@ -137,7 +132,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/search',
-        builder: (context, state) => const SearchScreen(),
+        redirect: (context, state) => '/chats',
       ),
       GoRoute(
         path: '/status/create',
@@ -146,10 +141,6 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/create-group',
         builder: (context, state) => const CreateGroupScreen(),
-      ),
-      GoRoute(
-        path: '/starred',
-        builder: (context, state) => const StarredMessagesScreen(),
       ),
       GoRoute(
         path: '/archived',

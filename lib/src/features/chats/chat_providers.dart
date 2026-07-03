@@ -48,14 +48,19 @@ extension KeepAliveExtension<T> on AutoDisposeFutureProvider<T> {
   }
 }
 
+/// Tick counter watched by list providers — incremented on inbox Pusher events.
+final inboxListRefreshTickProvider = StateProvider<int>((ref) => 0);
+
 /// Optimized conversations provider with stale-while-revalidate pattern
 final optimizedConversationsProvider = FutureProvider<List<ConversationSummary>>((ref) async {
+  ref.watch(inboxListRefreshTickProvider);
   final repo = ref.watch(chatRepositoryProvider);
   return repo.getConversations();
 });
 
 /// Optimized groups provider
 final optimizedGroupsProvider = FutureProvider<List<GroupSummary>>((ref) async {
+  ref.watch(inboxListRefreshTickProvider);
   final repo = ref.watch(chatRepositoryProvider);
   return repo.getGroups();
 });

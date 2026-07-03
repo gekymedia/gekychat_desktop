@@ -1,10 +1,7 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../core/providers.dart';
 import '../../core/api_service.dart';
 import '../../core/database/local_storage_service.dart';
-import '../../core/providers/connectivity_provider.dart';
 import 'models.dart';
 import 'package:dio/dio.dart';
 
@@ -13,7 +10,364 @@ class ChatRepository {
   final LocalStorageService? localStorageService;
   final bool isOnline;
 
+  static const int _initialMessagesLimit = 100;
+  static const int _olderMessagesLimit = 50;
+
   ChatRepository(this.apiService, {this.localStorageService, this.isOnline = true});
+
+  static bool _localPreviewIsNewer(DateTime? local, DateTime? remote) {
+    if (local == null) return false;
+    if (remote == null) return true;
+    return local.isAfter(remote);
+  }
+
+  static int _mergedUnreadCount(int apiUnread, int localUnread) {
+    return localUnread < apiUnread ? localUnread : apiUnread;
+  }
+
+  Future<List<ConversationSummary>> _mergeConversationsWithLocalPreview(
+    List<ConversationSummary> fromApi,
+  ) async {
+    if (localStorageService == null || fromApi.isEmpty) return fromApi;
+    try {
+      final localRows = await localStorageService!.loadConversations();
+      if (localRows.isEmpty) return fromApi;
+      final localById = {for (final row in localRows) row.id: row};
+      return fromApi.map((api) {
+        final local = localById[api.id];
+        if (local == null) return api;
+
+        final unreadCount = _mergedUnreadCount(api.unreadCount, local.unreadCount);
+        final useLocalPreview =
+            _localPreviewIsNewer(local.updatedAt, api.updatedAt);
+
+        if (!useLocalPreview && unreadCount == api.unreadCount) {
+          return api;
+        }
+
+        if (!useLocalPreview) {
+          return ConversationSummary(
+            id: api.id,
+            otherUser: api.otherUser,
+            lastMessage: api.lastMessage,
+            lastMessageFromMe: api.lastMessageFromMe,
+            lastMessageOutgoingStatus: api.lastMessageOutgoingStatus,
+            unreadCount: unreadCount,
+            updatedAt: api.updatedAt,
+            isPinned: api.isPinned,
+            isMuted: api.isMuted,
+            archivedAt: api.archivedAt,
+            labelIds: api.labelIds,
+            isSavedMessages: api.isSavedMessages,
+          );
+        }
+
+        return ConversationSummary(
+          id: api.id,
+          otherUser: api.otherUser,
+          lastMessage: local.lastMessage ?? api.lastMessage,
+          lastMessageFromMe: local.lastMessageFromMe,
+          lastMessageOutgoingStatus:
+              local.lastMessageOutgoingStatus ?? api.lastMessageOutgoingStatus,
+          unreadCount: unreadCount,
+          updatedAt: local.updatedAt,
+          isPinned: api.isPinned,
+          isMuted: api.isMuted,
+          archivedAt: api.archivedAt,
+          labelIds: api.labelIds,
+          isSavedMessages: api.isSavedMessages,
+        );
+      }).toList();
+    } catch (_) {
+      return fromApi;
+    }
+  }
+
+  Future<List<GroupSummary>> _mergeGroupsWithLocalPreview(
+    List<GroupSummary> fromApi,
+  ) async {
+    if (localStorageService == null || fromApi.isEmpty) return fromApi;
+    try {
+      final localRows = await localStorageService!.loadGroups();
+      if (localRows.isEmpty) return fromApi;
+      final localById = {for (final row in localRows) row.id: row};
+      return fromApi.map((api) {
+        final local = localById[api.id];
+        if (local == null) return api;
+
+        final unreadCount = _mergedUnreadCount(api.unreadCount, local.unreadCount);
+        final useLocalPreview =
+            _localPreviewIsNewer(local.updatedAt, api.updatedAt);
+
+        if (!useLocalPreview && unreadCount == api.unreadCount) {
+          return api;
+        }
+
+        if (!useLocalPreview) {
+          return GroupSummary(
+            id: api.id,
+            name: api.name,
+            avatarUrl: api.avatarUrl,
+            unreadCount: unreadCount,
+            memberCount: api.memberCount,
+            updatedAt: api.updatedAt,
+            type: api.type,
+            isVerified: api.isVerified,
+            lastMessage: api.lastMessage,
+            lastMessageFromMe: api.lastMessageFromMe,
+            lastMessageOutgoingStatus: api.lastMessageOutgoingStatus,
+            isPinned: api.isPinned,
+            isMuted: api.isMuted,
+            labelIds: api.labelIds,
+          );
+        }
+
+        return GroupSummary(
+          id: api.id,
+          name: api.name,
+          avatarUrl: api.avatarUrl,
+          unreadCount: unreadCount,
+          memberCount: api.memberCount,
+          updatedAt: local.updatedAt,
+          type: api.type,
+          isVerified: api.isVerified,
+          lastMessage: local.lastMessage ?? api.lastMessage,
+          lastMessageFromMe: local.lastMessageFromMe,
+          lastMessageOutgoingStatus:
+              local.lastMessageOutgoingStatus ?? api.lastMessageOutgoingStatus,
+          isPinned: api.isPinned,
+          isMuted: api.isMuted,
+          labelIds: api.labelIds,
+        );
+      }).toList();
+    } catch (_) {
+      return fromApi;
+    }
+  }
+
+  static Message _enrichFromCache(Message api, Message? cached) {
+    if (cached == null) return api;
+    var msg = api;
+    final preview = api.replyToPreview;
+    if ((preview == null || preview.isEmpty) &&
+        cached.replyToPreview != null &&
+        cached.replyToPreview!.isNotEmpty) {
+      msg = msg.copyWith(replyToPreview: cached.replyToPreview);
+    }
+    return msg;
+  }
+
+  /// Keep cached rows the API batch omitted (realtime upserts, optimistic sends).
+  static List<Message> mergeMessageHistory(
+    List<Message> cached,
+    List<Message> fromApi,
+  ) {
+    if (fromApi.isEmpty) return cached;
+    if (cached.isEmpty) return fromApi;
+
+    final cachedById = {
+      for (final m in cached)
+        if (m.id > 0) m.id: m,
+    };
+    final apiById = {for (final m in fromApi) m.id: m};
+    final merged = fromApi
+        .map((m) => _enrichFromCache(m, cachedById[m.id]))
+        .toList();
+
+    for (final m in cached) {
+      if (m.id > 0 && !apiById.containsKey(m.id)) {
+        merged.add(m);
+      } else if (m.id <= 0 &&
+          m.clientId != null &&
+          m.clientId!.isNotEmpty &&
+          !fromApi.any((a) => a.clientId == m.clientId)) {
+        merged.add(m);
+      }
+    }
+
+    merged.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return merged;
+  }
+
+  Future<void> persistConversationMessages(
+    int conversationId,
+    List<Message> messages,
+  ) async {
+    if (localStorageService == null || messages.isEmpty) return;
+    try {
+      final cached = await localStorageService!.loadMessages(conversationId);
+      final merged = mergeMessageHistory(cached, messages);
+      await localStorageService!.saveMessages(conversationId, merged);
+    } catch (e) {
+      debugPrint('persistConversationMessages failed: $e');
+    }
+  }
+
+  Future<void> persistGroupMessages(int groupId, List<Message> messages) async {
+    if (localStorageService == null || messages.isEmpty) return;
+    try {
+      final cached = await localStorageService!.loadGroupMessages(groupId);
+      final merged = mergeMessageHistory(cached, messages);
+      await localStorageService!.saveGroupMessages(groupId, merged);
+    } catch (e) {
+      debugPrint('persistGroupMessages failed: $e');
+    }
+  }
+
+  /// Pull messages newer than the highest id in local cache (`after_id` delta sync).
+  /// When no cache exists, fetches the latest page instead.
+  Future<List<Message>> pullNewMessagesForConversation(int conversationId) async {
+    if (!isOnline) return const [];
+
+    final storage = localStorageService;
+    final lastId =
+        storage != null ? await storage.getMaxMessageIdForConversation(conversationId) : null;
+
+    if (lastId == null || lastId <= 0) {
+      return getConversationMessages(conversationId);
+    }
+
+    final pulled = <Message>[];
+    var cursor = lastId;
+    while (true) {
+      final response = await apiService.get(
+        '/conversations/$conversationId/messages',
+        queryParameters: {'after_id': cursor, 'limit': 100},
+      );
+      final data = _messageListFromResponse(response.data);
+      final batch =
+          _parseMessageList(data, contextLabel: 'DM#$conversationId delta');
+      if (batch.isEmpty) break;
+
+      pulled.addAll(batch);
+      await persistConversationMessages(conversationId, batch);
+
+      final maxId = batch.map((m) => m.id).reduce((a, b) => a > b ? a : b);
+      if (batch.length < 100) break;
+      cursor = maxId;
+    }
+    return pulled;
+  }
+
+  /// Pull group messages newer than the highest id in local cache.
+  Future<List<Message>> pullNewMessagesForGroup(int groupId) async {
+    if (!isOnline) return const [];
+
+    final storage = localStorageService;
+    final lastId =
+        storage != null ? await storage.getMaxMessageIdForGroup(groupId) : null;
+
+    try {
+      if (lastId == null || lastId <= 0) {
+        return getGroupMessages(groupId);
+      }
+
+      final pulled = <Message>[];
+      var cursor = lastId;
+      while (true) {
+        final response = await apiService.get(
+          '/groups/$groupId/messages',
+          queryParameters: {'after_id': cursor, 'limit': 100},
+        );
+        final data = _messageListFromResponse(response.data);
+        final batch =
+            _parseMessageList(data, contextLabel: 'group#$groupId delta');
+        if (batch.isEmpty) break;
+
+        pulled.addAll(batch);
+        await persistGroupMessages(groupId, batch);
+
+        final maxId = batch.map((m) => m.id).reduce((a, b) => a > b ? a : b);
+        if (batch.length < 100) break;
+        cursor = maxId;
+      }
+      return pulled;
+    } on DioException catch (e) {
+      if (_isGroupAccessDenied(e)) {
+        await _evictInaccessibleGroup(groupId);
+        return const [];
+      }
+      rethrow;
+    }
+  }
+
+  static bool _isGroupAccessDenied(DioException e) =>
+      e.response?.statusCode == 403;
+
+  Future<void> _evictInaccessibleGroup(int groupId) async {
+    try {
+      await localStorageService?.removeGroup(groupId);
+    } catch (e) {
+      debugPrint('group#$groupId: evict from local cache failed: $e');
+    }
+  }
+
+  /// Laravel may return `{ "data": [ ... ] }` or wrap resources as `{ "data": { "data": [ ... ] } }`.
+  static List<dynamic> _messageListFromResponse(dynamic raw) {
+    if (raw is List) {
+      return List<dynamic>.from(raw);
+    }
+    if (raw is Map) {
+      final map = Map<String, dynamic>.from(raw);
+      final top = map['data'];
+      if (top is List) {
+        return List<dynamic>.from(top);
+      }
+      if (top is Map) {
+        final inner = Map<String, dynamic>.from(top);
+        if (inner['data'] is List) {
+          return List<dynamic>.from(inner['data'] as List);
+        }
+        if (inner['messages'] is List) {
+          return List<dynamic>.from(inner['messages'] as List);
+        }
+      }
+      if (map['messages'] is List) {
+        return List<dynamic>.from(map['messages'] as List);
+      }
+    }
+    throw FormatException(
+      'Unexpected messages JSON (expected list or data/messages map). type=${raw.runtimeType}',
+    );
+  }
+
+  static Map<String, dynamic> _normalizeMessageJson(dynamic item) {
+    if (item is Map<String, dynamic>) {
+      if (item.length == 1 && item['data'] is Map) {
+        return Map<String, dynamic>.from(item['data'] as Map);
+      }
+      return item;
+    }
+    if (item is Map) {
+      final map = Map<String, dynamic>.from(item);
+      if (map.length == 1 && map['data'] is Map) {
+        return Map<String, dynamic>.from(map['data'] as Map);
+      }
+      return map;
+    }
+    throw FormatException('Message item is not a map: ${item.runtimeType}');
+  }
+
+  static List<Message> _parseMessageList(
+    List<dynamic> data, {
+    required String contextLabel,
+  }) {
+    final messages = <Message>[];
+    for (final item in data) {
+      try {
+        messages.add(Message.fromJson(_normalizeMessageJson(item)));
+      } catch (e, st) {
+        debugPrint('Skipping malformed $contextLabel message from API: $e');
+        debugPrint('$st');
+      }
+    }
+    if (data.isNotEmpty && messages.isEmpty) {
+      debugPrint(
+        '⚠️ $contextLabel: API returned ${data.length} item(s) but none parsed',
+      );
+    }
+    return messages;
+  }
 
   // Conversations
   Future<List<ConversationSummary>> getConversations() async {
@@ -58,8 +412,10 @@ class ChatRepository {
       }
       
       final conversations = data.map((json) => ConversationSummary.fromJson(json)).toList();
+      final mergedConversations =
+          await _mergeConversationsWithLocalPreview(conversations);
       // Sort conversations: pinned first, then by updatedAt
-      conversations.sort((a, b) {
+      mergedConversations.sort((a, b) {
         if (a.isPinned != b.isPinned) {
           return a.isPinned ? -1 : 1;
         }
@@ -70,10 +426,10 @@ class ChatRepository {
       
       // Save to local storage if available
       if (localStorageService != null) {
-        await localStorageService!.saveConversations(conversations);
+        await localStorageService!.saveConversations(mergedConversations);
       }
       
-      return conversations;
+      return mergedConversations;
     } catch (e) {
       // If API fails (including 401), try to load from local storage
       if (localStorageService != null) {
@@ -165,6 +521,12 @@ class ChatRepository {
     }
   }
 
+  /// Persist a newly created group locally so it appears in the sidebar immediately.
+  Future<void> cacheGroupToDatabase(GroupSummary group) async {
+    if (localStorageService == null) return;
+    await localStorageService!.saveGroups([group]);
+  }
+
   Future<ConversationSummary> getConversation(int id) async {
     try {
       final response = await apiService.get('/conversations/$id');
@@ -196,84 +558,128 @@ class ChatRepository {
     int? page,
     DateTime? updatedSince,
   }) async {
-    // If offline, try to load from local storage
-    if (!isOnline && localStorageService != null) {
+    List<Message> cached = const [];
+    if (localStorageService != null) {
       try {
-        return await localStorageService!.loadMessages(id);
-      } catch (e) {
-        // If local storage fails, return empty list
-        return <Message>[];
-      }
+        cached = await localStorageService!.loadMessages(id);
+      } catch (_) {}
     }
-    
+
+    // Serve cache immediately when offline and we have history.
+    if (!isOnline && cached.isNotEmpty) {
+      return cached;
+    }
+
     try {
-      final params = <String, dynamic>{};
+      final params = <String, dynamic>{'limit': _initialMessagesLimit};
       if (updatedSince != null) {
-        params['after'] = updatedSince.toIso8601String();
+        params['after_timestamp'] = updatedSince.toIso8601String();
       }
       if (page != null) {
         params['page'] = page;
       }
       final response = await apiService.get(
         '/conversations/$id/messages',
-        queryParameters: params.isEmpty ? null : params,
+        queryParameters: params,
       );
       final raw = response.data;
-      List<dynamic> data;
-      
-      // Handle different response formats
-      if (raw is Map) {
-        if (raw['data'] is List) {
-          data = raw['data'] as List<dynamic>;
-        } else if (raw['messages'] is List) {
-          data = raw['messages'] as List<dynamic>;
-        } else {
-          throw Exception('Unexpected response format: expected "data" or "messages" key. Got: ${raw.keys}');
+      final List<dynamic> data = _messageListFromResponse(raw);
+      final messages = _parseMessageList(data, contextLabel: 'DM#$id');
+
+      if (messages.isNotEmpty && localStorageService != null) {
+        try {
+          final merged = mergeMessageHistory(cached, messages);
+          await localStorageService!.saveMessages(id, merged, page: page);
+        } catch (e) {
+          debugPrint('DM#$id: cache save failed (non-fatal): $e');
         }
-      } else if (raw is List) {
-        data = raw;
-      } else {
-        throw Exception('Unexpected response format: ${raw.runtimeType}. Response: $raw');
       }
-      
-      final messages = data
-          .map((json) {
-            try {
-              return Message.fromJson(
-                json is Map<String, dynamic>
-                    ? json
-                    : Map<String, dynamic>.from(json as Map),
-              );
-            } catch (e) {
-              throw Exception('Failed to parse message: $e. Message data: $json');
-            }
-          })
-          .toList();
-      
-      // Save to local storage if available
-      if (localStorageService != null) {
-        await localStorageService!.saveMessages(id, messages);
+
+      if (messages.isNotEmpty) {
+        return mergeMessageHistory(cached, messages);
       }
-      
+      // API returned nothing parseable — keep showing cache if we have it.
+      if (cached.isNotEmpty) {
+        return cached;
+      }
       return messages;
     } catch (e) {
-      // If API fails and we have local storage, try to load from there
-      if (localStorageService != null) {
-        try {
-          return await localStorageService!.loadMessages(id);
-        } catch (localError) {
-          // Ignore local storage errors
-        }
+      if (cached.isNotEmpty) {
+        debugPrint('DM#$id messages API failed, using cache: $e');
+        return cached;
       }
-      
+
       if (e is DioException) {
         final statusCode = e.response?.statusCode;
-        final message = e.response?.data is Map 
+        final message = e.response?.data is Map
             ? e.response?.data['message'] ?? e.message
             : e.message;
         throw Exception('Failed to load messages (HTTP $statusCode): $message');
       }
       throw Exception('Failed to load messages: $e');
+    }
+  }
+
+  Future<({List<Message> messages, bool hasMore})> getOlderConversationMessages(
+    int conversationId,
+    int beforeMessageId,
+  ) async {
+    try {
+      final response = await apiService.get(
+        '/conversations/$conversationId/messages',
+        queryParameters: {
+          'before': beforeMessageId,
+          'limit': _olderMessagesLimit,
+        },
+      );
+      final raw = response.data;
+      final List<dynamic> data = _messageListFromResponse(raw);
+      final messages = _parseMessageList(
+        data,
+        contextLabel: 'DM#$conversationId older',
+      );
+      final hasMore = raw is Map && raw['meta'] is Map
+          ? (raw['meta'] as Map)['has_more'] as bool? ??
+              (messages.length >= _olderMessagesLimit)
+          : messages.length >= _olderMessagesLimit;
+
+      if (messages.isNotEmpty) {
+        await persistConversationMessages(conversationId, messages);
+      }
+      return (messages: messages, hasMore: hasMore);
+    } catch (e) {
+      debugPrint('getOlderConversationMessages failed: $e');
+      return (messages: <Message>[], hasMore: false);
+    }
+  }
+
+  Future<({List<Message> messages, bool hasMore})> getOlderGroupMessages(
+    int groupId,
+    DateTime beforeCreatedAt,
+  ) async {
+    try {
+      final response = await apiService.get(
+        '/groups/$groupId/messages',
+        queryParameters: {
+          'before': beforeCreatedAt.toUtc().toIso8601String(),
+          'limit': _olderMessagesLimit,
+        },
+      );
+      final raw = response.data;
+      final List<dynamic> data = _messageListFromResponse(raw);
+      final messages = _parseMessageList(
+        data,
+        contextLabel: 'group#$groupId older',
+      );
+      final hasMore = messages.length >= _olderMessagesLimit;
+
+      if (messages.isNotEmpty) {
+        await persistGroupMessages(groupId, messages);
+      }
+      return (messages: messages, hasMore: hasMore);
+    } catch (e) {
+      debugPrint('getOlderGroupMessages failed: $e');
+      return (messages: <Message>[], hasMore: false);
     }
   }
 
@@ -285,14 +691,32 @@ class ChatRepository {
     List<File>? attachments,
     bool skipCompression = false,
     void Function(double progress)? onProgress,
-    String? clientUuid, // Add client_uuid parameter for offline-first support
+    String? clientUuid,
+    int? referencedStatusId,
+    int? referencedGroupId,
+    int? referencedGroupMessageId,
+    String? messageType,
+    bool viewOnce = false,
+    /// When true (typically one audio file, no body), mark upload as voice note on the server.
+    bool voiceNote = false,
+    DateTime? scheduledAt,
+    int? expiresInHours,
   }) async {
     try {
       final data = <String, dynamic>{
+        'type': messageType ?? 'text',
         if (body != null) 'body': body,
         if (replyTo != null) 'reply_to': replyTo,
-        if (forwardFrom != null) 'forward_from_id': forwardFrom,
-        if (clientUuid != null) 'client_uuid': clientUuid, // Include client_uuid
+        if (replyTo != null) 'reply_to_id': replyTo,
+        if (forwardFrom != null) 'forward_from': forwardFrom,
+        if (clientUuid != null) 'client_uuid': clientUuid,
+        if (referencedStatusId != null) 'referenced_status_id': referencedStatusId,
+        if (referencedGroupId != null) 'referenced_group_id': referencedGroupId,
+        if (referencedGroupMessageId != null)
+          'referenced_group_message_id': referencedGroupMessageId,
+        if (viewOnce) 'view_once': true,
+        if (scheduledAt != null) 'scheduled_at': scheduledAt.toUtc().toIso8601String(),
+        if (expiresInHours != null && expiresInHours > 0) 'expires_in': expiresInHours,
       };
 
       // Upload attachments first and get their IDs
@@ -354,6 +778,7 @@ class ChatRepository {
             final uploadResponse = await apiService.uploadAttachment(
               file,
               compressionLevel: compressionLevel,
+              isVoicenote: voiceNote && totalFiles == 1,
               onSendProgress: onProgress != null
                   ? (sent, total) {
                       // Map file progress to overall progress
@@ -446,8 +871,9 @@ class ChatRepository {
       }
       
       final groups = data.map((json) => GroupSummary.fromJson(json)).toList();
+      final mergedGroups = await _mergeGroupsWithLocalPreview(groups);
       // Sort groups: pinned first, then by updatedAt
-      groups.sort((a, b) {
+      mergedGroups.sort((a, b) {
         if (a.isPinned != b.isPinned) {
           return a.isPinned ? -1 : 1;
         }
@@ -458,10 +884,10 @@ class ChatRepository {
       
       // Save to local storage if available
       if (localStorageService != null) {
-        await localStorageService!.saveGroups(groups);
+        await localStorageService!.saveGroups(mergedGroups);
       }
       
-      return groups;
+      return mergedGroups;
     } catch (e) {
       // If API fails and we have local storage, try to load from there
       if (localStorageService != null) {
@@ -498,52 +924,64 @@ class ChatRepository {
 
   Future<List<Message>> getGroupMessages(int id,
       {int? page, DateTime? updatedSince}) async {
+    List<Message> cached = const [];
+    if (localStorageService != null) {
+      try {
+        cached = await localStorageService!.loadGroupMessages(id);
+      } catch (_) {}
+    }
+
+    if (!isOnline && cached.isNotEmpty) {
+      return cached;
+    }
+
     try {
-      final params = {
-        if (page != null) 'page': page,
-        if (updatedSince != null) 'updated_since': updatedSince.toIso8601String(),
-      };
-      
+      final params = <String, dynamic>{'limit': _initialMessagesLimit};
+      if (page != null) params['page'] = page;
+      if (updatedSince != null) {
+        params['after'] = updatedSince.toIso8601String();
+      }
+
       final response = await apiService.get(
         '/groups/$id/messages',
         queryParameters: params,
       );
-      
+
       final raw = response.data;
-      List<dynamic> data;
-      
-      // Handle different response formats
-      if (raw is Map) {
-        if (raw['data'] is List) {
-          data = raw['data'] as List<dynamic>;
-        } else if (raw['messages'] is List) {
-          data = raw['messages'] as List<dynamic>;
-        } else {
-          throw Exception('Unexpected response format: expected "data" or "messages" key. Got: ${raw.keys}');
+      final List<dynamic> data = _messageListFromResponse(raw);
+      final messages = _parseMessageList(data, contextLabel: 'group#$id');
+
+      if (messages.isNotEmpty && localStorageService != null) {
+        try {
+          final merged = mergeMessageHistory(cached, messages);
+          await localStorageService!.saveGroupMessages(id, merged, page: page);
+        } catch (e) {
+          debugPrint('group#$id: cache save failed (non-fatal): $e');
         }
-      } else if (raw is List) {
-        data = raw;
-      } else {
-        throw Exception('Unexpected response format: ${raw.runtimeType}. Response: $raw');
       }
-      
-      return data
-          .map((json) {
-            try {
-              return Message.fromJson(
-                json is Map<String, dynamic>
-                    ? json
-                    : Map<String, dynamic>.from(json as Map),
-              );
-            } catch (e) {
-              throw Exception('Failed to parse message: $e. Message data: $json');
-            }
-          })
-          .toList();
+
+      if (messages.isNotEmpty) {
+        return mergeMessageHistory(cached, messages);
+      }
+      if (cached.isNotEmpty) {
+        return cached;
+      }
+      return messages;
     } catch (e) {
+      if (e is DioException && _isGroupAccessDenied(e)) {
+        await _evictInaccessibleGroup(id);
+        if (cached.isNotEmpty) return cached;
+        return const [];
+      }
+
+      if (cached.isNotEmpty) {
+        debugPrint('group#$id messages API failed, using cache: $e');
+        return cached;
+      }
+
       if (e is DioException) {
         final statusCode = e.response?.statusCode;
-        final message = e.response?.data is Map 
+        final message = e.response?.data is Map
             ? e.response?.data['message'] ?? e.message
             : e.message;
         throw Exception('Failed to load group messages (HTTP $statusCode): $message');
@@ -560,14 +998,30 @@ class ChatRepository {
     List<File>? attachments,
     bool skipCompression = false,
     void Function(double progress)? onProgress,
-    String? clientUuid, // Add client_uuid parameter for offline-first support
+    String? clientUuid,
+    String? messageType,
+    bool viewOnce = false,
+    bool voiceNote = false,
+    DateTime? scheduledAt,
+    int? expiresInHours,
+    int? referencedStatusId,
+    int? referencedGroupId,
+    int? referencedGroupMessageId,
   }) async {
     try {
       final data = <String, dynamic>{
+        'type': messageType ?? 'text',
         if (body != null) 'body': body,
-        if (replyToId != null) 'reply_to': replyToId,
+        if (replyToId != null) 'reply_to_id': replyToId,
         if (forwardFrom != null) 'forward_from_id': forwardFrom,
-        if (clientUuid != null) 'client_uuid': clientUuid, // Include client_uuid
+        if (clientUuid != null) 'client_uuid': clientUuid,
+        if (viewOnce) 'view_once': true,
+        if (scheduledAt != null) 'scheduled_at': scheduledAt.toUtc().toIso8601String(),
+        if (expiresInHours != null && expiresInHours > 0) 'expires_in': expiresInHours,
+        if (referencedStatusId != null) 'referenced_status_id': referencedStatusId,
+        if (referencedGroupId != null) 'referenced_group_id': referencedGroupId,
+        if (referencedGroupMessageId != null)
+          'referenced_group_message_id': referencedGroupMessageId,
       };
 
       // Upload attachments first and get their IDs
@@ -606,6 +1060,7 @@ class ChatRepository {
             final uploadResponse = await apiService.uploadAttachment(
               file,
               compressionLevel: compressionLevel,
+              isVoicenote: voiceNote && totalFiles == 1,
               onSendProgress: onProgress != null
                   ? (sent, total) {
                       // Map file progress to overall progress
@@ -657,11 +1112,59 @@ class ChatRepository {
   }
 
   // PHASE 1: Delete message with optional "delete for everyone"
-  Future<void> deleteMessage(int messageId, {bool deleteForEveryone = false}) async {
+  Future<void> deleteMessage(
+    int messageId, {
+    bool deleteForEveryone = false,
+    int? groupId,
+  }) async {
     try {
-      await apiService.deleteMessage(messageId, deleteForEveryone: deleteForEveryone);
+      if (groupId != null) {
+        await apiService.deleteGroupMessage(
+          messageId,
+          deleteForEveryone: deleteForEveryone,
+        );
+      } else {
+        await apiService.deleteMessage(
+          messageId,
+          deleteForEveryone: deleteForEveryone,
+        );
+      }
+      final local = localStorageService;
+      if (local != null) {
+        await local.applyMessageDeletion(
+          messageId,
+          deleteForEveryone: deleteForEveryone,
+        );
+      }
     } catch (e) {
       throw Exception('Failed to delete message: $e');
+    }
+  }
+
+  /// Pusher: another participant edited a message — align SQLite cache.
+  Future<void> applyRemoteMessageEdit({
+    required int messageId,
+    required String body,
+    DateTime? editedAt,
+  }) async {
+    final local = localStorageService;
+    if (local != null) {
+      await local.applyMessageEdit(
+        messageId: messageId,
+        body: body,
+        editedAt: editedAt,
+      );
+    }
+  }
+
+  /// Pusher: another participant revoked the message — align SQLite cache.
+  Future<void> applyRemoteDeleteForEveryone(int messageId) async {
+    final local = localStorageService;
+    if (local != null) {
+      await local.applyMessageDeletion(
+        messageId,
+        deleteForEveryone: true,
+      );
     }
   }
 
@@ -669,12 +1172,21 @@ class ChatRepository {
     try {
       final response = await apiService.editMessage(messageId, newBody);
       final raw = response.data;
-      final map = (raw is Map && raw['data'] is Map)
-          ? raw['data']
-          : raw;
+      final map = (raw is Map && raw['data'] is Map) ? raw['data'] : raw;
       return Message.fromJson(Map<String, dynamic>.from(map));
     } catch (e) {
       throw Exception('Failed to edit message: $e');
+    }
+  }
+
+  Future<Message> editGroupMessage(int messageId, String newBody) async {
+    try {
+      final response = await apiService.editGroupMessage(messageId, newBody);
+      final raw = response.data;
+      final map = (raw is Map && raw['data'] is Map) ? raw['data'] : raw;
+      return Message.fromJson(Map<String, dynamic>.from(map));
+    } catch (e) {
+      throw Exception('Failed to edit group message: $e');
     }
   }
 
@@ -686,6 +1198,20 @@ class ChatRepository {
       await apiService.post(endpoint, data: {'emoji': emoji});
     } catch (e) {
       throw Exception('Failed to react to message: $e');
+    }
+  }
+
+  Future<void> forwardMessage(
+    int messageId,
+    List<Map<String, dynamic>> targets,
+  ) async {
+    try {
+      await apiService.post(
+        '/messages/$messageId/forward',
+        data: {'targets': targets},
+      );
+    } catch (e) {
+      throw Exception('Failed to forward message: $e');
     }
   }
 
@@ -735,12 +1261,52 @@ class ChatRepository {
     }
   }
 
-  /// Mark all unread messages in a conversation as read
+  /// Mark all unread messages in a conversation as read (API). Call [markConversationAsReadLocally] first when offline so UI updates.
   Future<void> markConversationAsRead(int conversationId) async {
     try {
       await apiService.markConversationRead(conversationId);
     } catch (e) {
       throw Exception('Failed to mark conversation as read: $e');
+    }
+  }
+
+  /// Mark a view-once message as opened on the server.
+  Future<bool> markViewOnceOpened(int messageId) async {
+    try {
+      await apiService.post('/messages/$messageId/view-once', data: {});
+      return true;
+    } catch (e) {
+      debugPrint('Failed to mark view-once as opened: $e');
+      return false;
+    }
+  }
+
+  /// Mark a conversation as read in local storage only (unread count → 0). Use when opening a chat so list and badge update even when offline.
+  Future<void> markConversationAsReadLocally(int conversationId) async {
+    if (localStorageService == null) return;
+    try {
+      await localStorageService!.markConversationAsReadLocally(conversationId);
+    } catch (e) {
+      debugPrint('markConversationAsReadLocally: $e');
+    }
+  }
+
+  /// Mark a group as read in local storage only (unread count → 0). Use when opening a group chat so list and badge update even when offline.
+  Future<void> markGroupAsReadLocally(int groupId) async {
+    if (localStorageService == null) return;
+    try {
+      await localStorageService!.markGroupAsReadLocally(groupId);
+    } catch (e) {
+      debugPrint('markGroupAsReadLocally: $e');
+    }
+  }
+
+  /// Mark all group messages read on server (sidebar sync).
+  Future<void> markGroupAsRead(int groupId) async {
+    try {
+      await apiService.post('/groups/$groupId/read');
+    } catch (e) {
+      throw Exception('Failed to mark group as read: $e');
     }
   }
 
@@ -768,6 +1334,29 @@ class ChatRepository {
     }
   }
 
+  Future<void> sendGroupTypingIndicator(int groupId, bool isTyping) async {
+    try {
+      await apiService.post(
+        '/groups/$groupId/typing',
+        data: {'is_typing': isTyping},
+      );
+    } catch (e) {
+      throw Exception('Failed to send group typing indicator: $e');
+    }
+  }
+
+  Future<void> sendGroupRecordingIndicator(int groupId, bool isRecording) async {
+    try {
+      if (isRecording) {
+        await apiService.post('/groups/$groupId/recording');
+      } else {
+        await apiService.delete('/groups/$groupId/recording');
+      }
+    } catch (e) {
+      throw Exception('Failed to send group recording indicator: $e');
+    }
+  }
+
   Future<void> pinConversation(int conversationId) async {
     try {
       await apiService.pinConversation(conversationId);
@@ -789,6 +1378,14 @@ class ChatRepository {
       await apiService.markConversationUnread(conversationId);
     } catch (e) {
       throw Exception('Failed to mark conversation as unread: $e');
+    }
+  }
+
+  Future<void> markGroupUnread(int groupId) async {
+    try {
+      await apiService.markGroupUnread(groupId);
+    } catch (e) {
+      throw Exception('Failed to mark group as unread: $e');
     }
   }
 
@@ -1095,5 +1692,45 @@ class ChatRepository {
     } catch (e) {
       throw Exception('Failed to reply privately: $e');
     }
+  }
+
+  Future<Message?> sendPoll(
+    int conversationId,
+    Map<String, dynamic> pollData,
+  ) async {
+    final response = await apiService.post(
+      '/conversations/$conversationId/polls',
+      data: pollData,
+    );
+    final raw = response.data;
+    final map = (raw is Map && raw['data'] != null)
+        ? (raw['data'] is Map
+            ? Map<String, dynamic>.from(raw['data'] as Map)
+            : null)
+        : null;
+    if (map == null) return null;
+    return Message.fromJson(map);
+  }
+
+  Future<Message?> sendPollToGroup(
+    int groupId,
+    Map<String, dynamic> pollData, {
+    String? clientId,
+  }) async {
+    final response = await apiService.post(
+      '/groups/$groupId/polls',
+      data: {
+        ...pollData,
+        if (clientId != null && clientId.isNotEmpty) 'client_id': clientId,
+      },
+    );
+    final raw = response.data;
+    final map = (raw is Map && raw['data'] != null)
+        ? (raw['data'] is Map
+            ? Map<String, dynamic>.from(raw['data'] as Map)
+            : null)
+        : null;
+    if (map == null) return null;
+    return Message.fromJson(map);
   }
 }

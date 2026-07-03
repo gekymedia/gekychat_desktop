@@ -1,8 +1,10 @@
 import 'dart:collection';
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers.dart';
 import '../../core/api_service.dart';
 import '../chats/models.dart';
+import '../../utils/phone_matcher.dart';
 
 typedef Json = Map<String, dynamic>;
 
@@ -117,6 +119,61 @@ class ContactsRepository {
     }
   }
 
+  /// Fresh profile with online/last-seen and whether they are in your contacts.
+  Future<({User user, bool isContact})> getUserProfile(int userId) async {
+    try {
+      final r = await api.get('/contacts/user/$userId/profile');
+      final data = r.data;
+      if (data is! Map) {
+        throw ContactsException('Unexpected profile response');
+      }
+      final map = Map<String, dynamic>.from(data);
+      final userRaw = map['user'] ?? map['data'];
+      if (userRaw is! Map) {
+        throw ContactsException('Profile missing user payload');
+      }
+      final userMap = Map<String, dynamic>.from(userRaw);
+      final user = User.fromJson(userMap);
+      final isContact = userMap['is_contact'] == true || map['is_contact'] == true;
+      return (user: user, isContact: isContact);
+    } catch (e) {
+      throw ContactsException('Failed to load user profile: $e');
+    }
+  }
+
+  Future<bool> isUserInContacts({int? userId, String? phone}) async {
+    if (userId != null && userId > 0) {
+      try {
+        final profile = await getUserProfile(userId);
+        if (profile.isContact) return true;
+      } catch (_) {}
+    }
+
+    try {
+      var page = 1;
+      while (page <= 5) {
+        final batch = await listContacts(page: page, perPage: 100);
+        if (batch.isEmpty) break;
+        for (final c in batch) {
+          if (userId != null &&
+              userId > 0 &&
+              c.contactUserId != null &&
+              c.contactUserId == userId) {
+            return true;
+          }
+          if (phone != null &&
+              phone.trim().isNotEmpty &&
+              PhoneMatcher.matchesLoose(c.phone, phone)) {
+            return true;
+          }
+        }
+        if (batch.length < 100) break;
+        page++;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   Future<GekyContact> saveContact({
     required String displayName,
     required String phone,
@@ -135,7 +192,15 @@ class ContactsRepository {
       final data = r.data;
       final contactData = data is Map && data['data'] != null ? data['data'] : data;
       return GekyContact.fromJson(_ensureMap(contactData));
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 409) {
+        throw ContactAlreadyExistsException(
+          'Contact with this phone number already exists',
+        );
+      }
+      throw ContactsException('Failed to save contact: $e');
     } catch (e) {
+      if (e is ContactAlreadyExistsException) rethrow;
       throw ContactsException('Failed to save contact: $e');
     }
   }
@@ -162,6 +227,13 @@ class ContactsException implements Exception {
   ContactsException(this.message);
   @override
   String toString() => 'ContactsException: $message';
+}
+
+class ContactAlreadyExistsException implements Exception {
+  final String message;
+  ContactAlreadyExistsException(this.message);
+  @override
+  String toString() => message;
 }
 
 

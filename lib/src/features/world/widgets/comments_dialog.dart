@@ -3,16 +3,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
 import '../world_feed_repository.dart';
-import '../../../core/providers.dart';
+import '../../search/search_screen.dart';
 
 class CommentsDialog extends ConsumerStatefulWidget {
   final int postId;
   final int initialCommentsCount;
+  final String? suggestedSearchQuery;
 
   const CommentsDialog({
     super.key,
     required this.postId,
     required this.initialCommentsCount,
+    this.suggestedSearchQuery,
   });
 
   @override
@@ -127,7 +129,7 @@ class _CommentsDialogState extends ConsumerState<CommentsDialog> {
 
     return Dialog(
       backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
-      child: Container(
+      child: SizedBox(
         width: 500,
         height: 600,
         child: Column(
@@ -135,20 +137,90 @@ class _CommentsDialogState extends ConsumerState<CommentsDialog> {
             // Header
             Padding(
               padding: const EdgeInsets.all(16),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
-                    'Comments',
-                    style: TextStyle(
-                      color: isDark ? Colors.white : Colors.black,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
+                  if (widget.suggestedSearchQuery != null &&
+                      widget.suggestedSearchQuery!.trim().isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () {
+                              final q = widget.suggestedSearchQuery!.trim();
+                              Navigator.push<void>(
+                                context,
+                                MaterialPageRoute<void>(
+                                  builder: (_) => SearchScreen(initialQuery: q),
+                                ),
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(20),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: isDark
+                                    ? Colors.white.withOpacity(0.08)
+                                    : const Color(0xFF00A884).withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: isDark
+                                      ? Colors.white24
+                                      : const Color(0xFF00A884).withOpacity(0.35),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.search_rounded,
+                                    size: 18,
+                                    color: isDark
+                                        ? const Color(0xFF00A884)
+                                        : const Color(0xFF00A884),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Flexible(
+                                    child: Text(
+                                      widget.suggestedSearchQuery!.trim(),
+                                      style: TextStyle(
+                                        color: isDark
+                                            ? Colors.white
+                                            : Colors.black87,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 14,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    icon: Icon(Icons.close, color: isDark ? Colors.white : Colors.black),
-                    onPressed: () => Navigator.pop(context, _commentsCount),
+                  Row(
+                    children: [
+                      Text(
+                        'Comments',
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: Icon(Icons.close,
+                            color: isDark ? Colors.white : Colors.black),
+                        onPressed: () => Navigator.pop(context, _commentsCount),
+                      ),
+                    ],
                   ),
                 ],
               ),

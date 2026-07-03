@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'display_text.dart';
+
 /// WhatsApp-style text formatting parser
 /// Supports:
 /// - *bold* or **bold** for bold text
@@ -13,7 +15,8 @@ class TextFormatting {
     TextStyle? baseStyle,
     Color? defaultColor,
   }) {
-    if (text.isEmpty) {
+    final safeText = sanitizeDisplayText(text);
+    if (safeText.isEmpty) {
       return TextSpan(text: '', style: baseStyle);
     }
 
@@ -23,7 +26,7 @@ class TextFormatting {
           fontSize: 15,
         );
 
-    final segments = _parseText(text);
+    final segments = _parseText(safeText);
     final spans = <TextSpan>[];
 
     for (final segment in segments) {

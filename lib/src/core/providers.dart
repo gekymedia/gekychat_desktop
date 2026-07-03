@@ -3,11 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api_service.dart';
 import '../features/realtime/pusher_service.dart';
-import 'providers/connectivity_provider.dart';
-import 'database/local_storage_service.dart';
-import 'database/app_database.dart';
-import 'database/message_queue_service.dart';
-import 'services/taskbar_badge_service.dart';
+import '../features/chats/models.dart';
+import '../services/delivery_confirmation_service.dart';
 
 // Re-export database providers for convenience
 export 'database/local_storage_service.dart' show localStorageServiceProvider, appDatabaseProvider;
@@ -21,6 +18,10 @@ final sharedPreferencesProvider = Provider<Future<SharedPreferences>>(
 );
 
 final pusherServiceProvider = Provider<PusherService>((ref) => PusherService());
+
+final deliveryConfirmationServiceProvider = Provider<DeliveryConfirmationService>((ref) {
+  return DeliveryConfirmationService(ref.read(apiServiceProvider));
+});
 
 // Theme Provider
 class ThemeNotifier extends StateNotifier<ThemeMode> {
@@ -72,10 +73,35 @@ class SelectedConversationNotifier extends StateNotifier<int?> {
 
 final selectedConversationProvider = StateNotifierProvider<SelectedConversationNotifier, int?>((ref) => SelectedConversationNotifier());
 
+/// Currently open group in the desktop chat pane (for mark-read + notification suppression).
+final selectedGroupIdProvider = StateProvider<int?>((ref) => null);
+
 // Provider for sounds preference
 final soundsEnabledProvider = StateNotifierProvider<SoundsNotifier, bool>((ref) {
   return SoundsNotifier();
 });
+
+final showForwardedMarkProvider =
+    StateNotifierProvider<ShowForwardedMarkNotifier, bool>((ref) {
+  return ShowForwardedMarkNotifier();
+});
+
+class ShowForwardedMarkNotifier extends StateNotifier<bool> {
+  ShowForwardedMarkNotifier() : super(true) {
+    _load();
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    state = prefs.getBool('show_forwarded_mark') ?? true;
+  }
+
+  Future<void> set(bool value) async {
+    state = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('show_forwarded_mark', value);
+  }
+}
 
 class SoundsNotifier extends StateNotifier<bool> {
   SoundsNotifier() : super(true) {
@@ -93,3 +119,28 @@ class SoundsNotifier extends StateNotifier<bool> {
     await prefs.setBool('sounds_enabled', enabled);
   }
 }
+
+// World feed: open a specific post from chat links or deep links (same URLs as mobile).
+final worldFeedNavigateToPostProvider = StateProvider<int?>((ref) => null);
+final worldFeedNavigateToPostSlugProvider = StateProvider<String?>((ref) => null);
+final worldFeedInitialPostProvider =
+    StateProvider<Map<String, dynamic>?>((ref) => null);
+
+/// Open a DM from status viewer with a pending status reference on the next send.
+final pendingDesktopStatusChatOpenProvider =
+    StateProvider<DesktopPendingStatusChatOpen?>((ref) => null);
+
+/// Open a DM from group "Reply privately" with a pending group message reference.
+final pendingDesktopGroupPrivateOpenProvider =
+    StateProvider<DesktopPendingGroupPrivateOpen?>((ref) => null);
+
+/// Tap on a group-referenced strip in a DM: jump to this group and message.
+typedef DesktopGroupDeepLink = ({int groupId, int messageId});
+final pendingDesktopGroupDeepLinkProvider =
+    StateProvider<DesktopGroupDeepLink?>((ref) => null);
+
+/// Select a group chat from imperative navigation (e.g. minimized call overlay).
+final pendingDesktopGroupSelectProvider = StateProvider<int?>((ref) => null);
+
+/// Open a group chat immediately after creation (before `/groups` sync completes).
+final pendingDesktopGroupOpenProvider = StateProvider<GroupSummary?>((ref) => null);

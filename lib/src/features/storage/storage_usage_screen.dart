@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'storage_repository.dart';
-import '../../core/providers.dart';
-import '../../theme/app_theme.dart';
 
 final storageUsageProvider = FutureProvider<Map<String, dynamic>>((ref) async {
   final repo = ref.read(storageRepositoryProvider);

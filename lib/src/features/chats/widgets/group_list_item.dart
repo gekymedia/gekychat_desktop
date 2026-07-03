@@ -1,25 +1,46 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../utils/text_sanitize.dart';
 import '../models.dart';
+import '../providers/group_typing_status_provider.dart';
 import '../../../theme/app_theme.dart';
+import 'chat_list_last_message_preview.dart';
 
-class GroupListItem extends StatelessWidget {
+class GroupListItem extends ConsumerWidget {
   final GroupSummary group;
   final bool isSelected;
   final VoidCallback onTap;
+  final bool forceUnreadBadge;
 
   const GroupListItem({
     super.key,
     required this.group,
     required this.isSelected,
     required this.onTap,
+    this.forceUnreadBadge = false,
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final hasUnread = group.unreadCount > 0;
+    final hasUnread = group.unreadCount > 0 || forceUnreadBadge;
+    final displayName = sanitizeDisplayText(group.name, fallback: 'Group');
+
+    final groupTypingStatus = ref.watch(groupTypingStatusProvider);
+    final groupRecordingStatus = ref.watch(groupRecordingStatusProvider);
+    final groupTypingNotifier = ref.read(groupTypingStatusProvider.notifier);
+    final groupRecordingNotifier =
+        ref.read(groupRecordingStatusProvider.notifier);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      groupTypingNotifier.subscribeToGroup(group.id);
+      groupRecordingNotifier.subscribeToGroup(group.id);
+    });
+
+    final isTyping = groupTypingStatus[group.id] ?? false;
+    final isRecording = groupRecordingStatus[group.id] ?? false;
 
     return Material(
       color: isSelected
@@ -73,7 +94,7 @@ class GroupListItem extends StatelessWidget {
                         if (group.isPinned) const SizedBox(width: 4),
                         Expanded(
                           child: Text(
-                            group.name,
+                            displayName,
                             style: TextStyle(
                               color: isDark
                                   ? AppTheme.textPrimaryDark
@@ -105,18 +126,35 @@ class GroupListItem extends StatelessWidget {
                     Row(
                       children: [
                         Expanded(
-                          child: Text(
-                            group.lastMessage ?? 'No messages yet',
-                            style: TextStyle(
-                              color: isDark
-                                  ? AppTheme.textSecondaryDark
-                                  : AppTheme.textSecondaryLight,
-                              fontSize: 14,
-                              fontWeight: hasUnread ? FontWeight.w500 : FontWeight.w400,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                          child: isRecording
+                              ? Text(
+                                  'recording audio...',
+                                  style: TextStyle(
+                                    color: AppTheme.primaryGreen,
+                                    fontSize: 14,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                )
+                              : isTyping
+                                  ? Text(
+                                      'typing...',
+                                      style: TextStyle(
+                                        color: AppTheme.primaryGreen,
+                                        fontSize: 14,
+                                        fontStyle: FontStyle.italic,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    )
+                                  : ChatListLastMessagePreview(
+                                      text: group.lastMessage ?? 'No messages yet',
+                                      isDark: isDark,
+                                      hasUnread: hasUnread,
+                                      fromMe: group.lastMessageFromMe,
+                                      outgoingStatus: group.lastMessageOutgoingStatus,
+                                    ),
                         ),
                         if (hasUnread) ...[
                           const SizedBox(width: 8),
@@ -176,5 +214,3 @@ class GroupListItem extends StatelessWidget {
     }
   }
 }
-
-

@@ -4,8 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:file_picker/file_picker.dart';
-import 'chat_repo.dart';
+import '../../core/providers.dart';
+import '../../widgets/colored_avatar.dart';
+import 'chat_providers.dart';
 import 'models.dart';
+import 'sidebar_inbox_bump.dart';
 
 class CreateGroupScreen extends ConsumerStatefulWidget {
   const CreateGroupScreen({super.key});
@@ -89,7 +92,8 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
 
     setState(() => _isLoading = true);
     try {
-      final group = await ref.read(chatRepositoryProvider).createGroup(
+      final chatRepo = ref.read(chatRepositoryProvider);
+      final group = await chatRepo.createGroup(
             name: _nameController.text.trim(),
             description: _descriptionController.text.trim().isEmpty 
                 ? null 
@@ -100,27 +104,33 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
           );
 
       if (!mounted) return;
-      
-      // Show success message
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              _groupType == 'channel'
-                  ? 'Channel "${group.name}" created successfully'
-                  : 'Group "${group.name}" created successfully',
-            ),
+
+      await chatRepo.cacheGroupToDatabase(group);
+      if (!mounted) return;
+
+      ref.read(sidebarPendingGroupsProvider.notifier).update((items) {
+        if (items.any((g) => g.id == group.id)) return items;
+        return [...items, group];
+      });
+      ref.invalidate(optimizedGroupsProvider);
+      ref.read(inboxListRefreshTickProvider.notifier).state++;
+      ref.read(pendingDesktopGroupOpenProvider.notifier).state = group;
+      ref.read(currentSectionProvider.notifier).setSection('/chats');
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _groupType == 'channel'
+                ? 'Channel "${group.name}" created successfully'
+                : 'Group "${group.name}" created successfully',
           ),
-        );
-      }
-      
-      // Navigate back using GoRouter
-      if (mounted) {
-        if (context.canPop()) {
-          context.pop(true);
-        } else {
-          context.go('/chats');
-        }
+        ),
+      );
+
+      if (context.canPop()) {
+        context.pop(true);
+      } else {
+        context.go('/chats');
       }
     } catch (e) {
       if (mounted) {
@@ -355,6 +365,7 @@ class _PeoplePicker extends ConsumerWidget {
         final Map<int, User> users = {};
 
         for (final c in conversations) {
+          if (c.isSavedMessages) continue;
           users[c.otherUser.id] = c.otherUser;
         }
 
@@ -390,8 +401,10 @@ class _PeoplePicker extends ConsumerWidget {
               onChanged: (v) => onToggle(u.id, v == true),
               title: Text(u.name),
               subtitle: u.phone != null ? Text(u.phone!) : null,
-              secondary: CircleAvatar(
-                child: Text(u.name[0].toUpperCase()),
+              secondary: ColoredAvatar(
+                imageUrl: u.avatarUrl,
+                name: u.name,
+                radius: 20,
               ),
             );
           },

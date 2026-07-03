@@ -1,12 +1,13 @@
-import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/providers.dart';
 import '../../core/session.dart';
 import '../auth/auth_provider.dart';
 import '../multi_account/account_repository.dart' show accountRepositoryProvider, accountsProvider;
+import '../multi_account/account_switcher_screen.dart';
 import 'profile_edit_screen.dart';
 import '../quick_replies/quick_replies_screen.dart';
 import '../auto_reply/auto_reply_screen.dart';
@@ -17,8 +18,12 @@ import '../privacy/privacy_settings_screen.dart';
 import '../storage/storage_usage_screen.dart';
 import '../media_auto_download/media_auto_download_screen.dart';
 import '../notifications/notification_settings_screen.dart';
+import '../contacts/contacts_screen.dart';
+import '../settings/language_settings_screen.dart';
+import '../settings/realtime_metrics_screen.dart';
 import '../../core/theme/theme_provider.dart' as custom_theme;
 import '../../core/theme/app_theme_mode.dart';
+import '../../widgets/keyboard_shortcuts_dialog.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -39,6 +44,72 @@ class SettingsScreen extends ConsumerWidget {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              Consumer(
+                builder: (context, ref, _) {
+                  final userAsync = ref.watch(currentUserProvider);
+                  return userAsync.when(
+                    data: (user) => Padding(
+                      padding: const EdgeInsets.only(bottom: 20),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 32,
+                            backgroundImage: user.avatarUrl != null &&
+                                    user.avatarUrl!.isNotEmpty
+                                ? NetworkImage(user.avatarUrl!)
+                                : null,
+                            child: user.avatarUrl == null ||
+                                    user.avatarUrl!.isEmpty
+                                ? Text(
+                                    (user.name.isNotEmpty
+                                            ? user.name[0]
+                                            : '?')
+                                        .toUpperCase(),
+                                    style: TextStyle(
+                                      fontSize: 24,
+                                      color: isDark
+                                          ? Colors.white
+                                          : Colors.black87,
+                                    ),
+                                  )
+                                : null,
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  user.name.isNotEmpty ? user.name : 'Profile',
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w600,
+                                    color: isDark
+                                        ? Colors.white
+                                        : Colors.black,
+                                  ),
+                                ),
+                                if (user.username != null &&
+                                    user.username!.isNotEmpty)
+                                  Text(
+                                    '@${user.username}',
+                                    style: TextStyle(
+                                      color: isDark
+                                          ? Colors.white54
+                                          : Colors.grey[600],
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    loading: () => const SizedBox.shrink(),
+                    error: (_, __) => const SizedBox.shrink(),
+                  );
+                },
+              ),
               _SettingsSection(
                 title: 'Account',
                 children: [
@@ -112,6 +183,25 @@ class SettingsScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 24),
               _SettingsSection(
+                title: 'Contacts',
+                children: [
+                  _SettingsTile(
+                    icon: Icons.contacts,
+                    title: 'Manage Contacts',
+                    subtitle: 'View and manage your contacts',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const ContactsScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              _SettingsSection(
                 title: 'Privacy',
                 children: [
                   _SettingsTile(
@@ -131,7 +221,44 @@ class SettingsScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 24),
               _SettingsSection(
-                title: 'Account',
+                title: 'Help and feedback',
+                children: [
+                  _SettingsTile(
+                    icon: Icons.help_outline,
+                    title: 'Help center',
+                    subtitle: 'FAQs and how-to guides',
+                    onTap: () => _openUrl(context, 'https://gekychat.com/help'),
+                  ),
+                  _SettingsTile(
+                    icon: Icons.mail_outline,
+                    title: 'Contact us',
+                    subtitle: 'Get in touch with support',
+                    onTap: () =>
+                        _openUrl(context, 'https://gekychat.com/contact'),
+                  ),
+                  _SettingsTile(
+                    icon: Icons.policy_outlined,
+                    title: 'Privacy policy',
+                    subtitle: 'How we handle your data',
+                    onTap: () => _openUrl(
+                      context,
+                      'https://gekychat.com/privacy-policy',
+                    ),
+                  ),
+                  _SettingsTile(
+                    icon: Icons.delete_outline,
+                    title: 'Request account deletion',
+                    subtitle: 'Delete your account and data via web',
+                    onTap: () => _openUrl(
+                      context,
+                      'https://gekychat.com/request-account-deletion',
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              _SettingsSection(
+                title: 'Security',
                 children: [
                   _SettingsTile(
                     icon: Icons.security,
@@ -155,6 +282,19 @@ class SettingsScreen extends ConsumerWidget {
                         context,
                         MaterialPageRoute(
                           builder: (context) => const LinkedDevicesScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  _SettingsTile(
+                    icon: Icons.swap_horiz,
+                    title: 'Switch Account',
+                    subtitle: 'Switch between multiple accounts',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const AccountSwitcherScreen(),
                         ),
                       );
                     },
@@ -249,10 +389,53 @@ class SettingsScreen extends ConsumerWidget {
                       return _SettingsTile(
                         icon: Icons.palette,
                         title: 'Theme',
-                        subtitle: customThemeMode.displayName,
+                        subtitle: 'Choose theme color and brightness',
                         onTap: () {
                           _showThemeSelector(context, ref);
                         },
+                      );
+                    },
+                  ),
+                  _SettingsTile(
+                    icon: Icons.keyboard,
+                    title: 'Keyboard Shortcuts',
+                    subtitle: 'View all available shortcuts',
+                    onTap: () {
+                      showDialog(
+                        context: context,
+                        builder: (context) => const KeyboardShortcutsDialog(),
+                      );
+                    },
+                  ),
+                  Consumer(
+                    builder: (context, ref, child) {
+                      final selectedLanguage = ref.watch(appLanguageProvider);
+                      return _SettingsTile(
+                        icon: Icons.language,
+                        title: 'App Language',
+                        subtitle: _languageDisplayName(selectedLanguage),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) =>
+                                  const LanguageSettingsScreen(),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                  _SettingsTile(
+                    icon: Icons.monitor_heart_outlined,
+                    title: 'Realtime Health',
+                    subtitle: 'WebSocket delivery metrics',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const RealtimeMetricsScreen(),
+                        ),
                       );
                     },
                   ),
@@ -271,6 +454,29 @@ class SettingsScreen extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  static String _languageDisplayName(AppLanguage language) {
+    if (language.code == 'system') return 'System default';
+    return language.name;
+  }
+
+  Future<void> _openUrl(BuildContext context, String url) async {
+    final uri = Uri.parse(url);
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open $url')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open link: $e')),
+        );
+      }
+    }
   }
 
   void _showPrivacyDialog(BuildContext context, WidgetRef ref, String type) {
@@ -309,23 +515,27 @@ class SettingsScreen extends ConsumerWidget {
                   : () async {
                       Navigator.pop(context);
                       try {
-                        final apiService = ref.read(apiServiceProvider);
-                        // Map UI option to API key
-                        String apiKey = 'last_seen';
-                        if (selectedOption == 'My Contacts') {
-                          apiKey = 'last_seen';
-                        } else if (selectedOption == 'Nobody') {
-                          apiKey = 'last_seen';
-                        } else if (selectedOption == 'Everyone') {
-                          apiKey = 'last_seen';
+                        final api = ref.read(apiServiceProvider);
+                        // Map UI option to API value (same as mobile)
+                        String apiValue;
+                        switch (selectedOption!) {
+                          case 'Everyone':
+                            apiValue = 'everyone';
+                            break;
+                          case 'My Contacts':
+                            apiValue = 'contacts';
+                            break;
+                          case 'Nobody':
+                            apiValue = 'nobody';
+                            break;
+                          default:
+                            apiValue = 'contacts';
                         }
-                        
-                        await apiService.updatePrivacySettings({apiKey: selectedOption});
-                        
+                        await api.updatePrivacySettings({type: apiValue});
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                              content: Text('Privacy setting updated'),
+                              content: Text('Privacy setting updated successfully'),
                               backgroundColor: Colors.green,
                             ),
                           );
@@ -333,7 +543,10 @@ class SettingsScreen extends ConsumerWidget {
                       } catch (e) {
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Failed to update privacy: $e')),
+                            SnackBar(
+                              content: Text('Failed to update privacy setting: $e'),
+                              backgroundColor: Colors.red,
+                            ),
                           );
                         }
                       }
@@ -665,62 +878,201 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   void _showThemeSelector(BuildContext context, WidgetRef ref) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final currentTheme = ref.read(custom_theme.themeModeProvider);
-    
+    final currentTheme = ref.watch(custom_theme.themeModeProvider);
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
-        title: Text(
-          'Choose Theme',
-          style: TextStyle(color: isDark ? Colors.white : Colors.black),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: AppThemeMode.values.map((theme) {
-            final isSelected = theme == currentTheme;
-            return RadioListTile<AppThemeMode>(
-              title: Text(
-                theme.displayName,
-                style: TextStyle(
-                  color: isDark ? Colors.white : Colors.black,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                ),
-              ),
-              subtitle: Text(
-                theme.isDark ? 'Dark mode' : 'Light mode',
-                style: TextStyle(
-                  color: isDark ? Colors.white70 : Colors.grey[600],
-                  fontSize: 12,
-                ),
-              ),
-              value: theme,
-              groupValue: currentTheme,
-              activeColor: const Color(0xFF008069),
-              onChanged: (value) async {
-                if (value != null) {
-                  await ref.read(custom_theme.themeModeProvider.notifier).setThemeMode(value);
-                  if (context.mounted) {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Theme changed to ${value.displayName}'),
-                        duration: const Duration(seconds: 2),
-                      ),
-                    );
-                  }
-                }
-              },
-            );
-          }).toList(),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: TextStyle(color: isDark ? Colors.white70 : Colors.grey[700])),
+      builder: (context) {
+        final theme = Theme.of(context);
+        final isDark = theme.brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: theme.dialogTheme.backgroundColor ?? theme.colorScheme.surface,
+          title: Text(
+            'Theme Settings',
+            style: theme.textTheme.titleLarge?.copyWith(color: theme.colorScheme.onSurface),
           ),
-        ],
+          contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+          content: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Theme Colors',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  GridView.count(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    crossAxisCount: 3,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    childAspectRatio: 0.85,
+                    children: [
+                      _buildThemeGridOption(context, isDark, 'Classic', Icons.chat_bubble,
+                          const Color(0xFF008069), currentTheme.themeColor == ThemeColor.classic, () {
+                        ref.read(custom_theme.themeModeProvider.notifier).setColorScheme(ThemeColor.classic, context);
+                        Navigator.pop(context);
+                      }),
+                      _buildThemeGridOption(context, isDark, 'Golden', Icons.star,
+                          const Color(0xFFD4AF37), currentTheme.themeColor == ThemeColor.golden, () {
+                        ref.read(custom_theme.themeModeProvider.notifier).setColorScheme(ThemeColor.golden, context);
+                        Navigator.pop(context);
+                      }),
+                      _buildThemeGridOption(context, isDark, 'Telegram', Icons.send,
+                          const Color(0xFF3390EC), currentTheme.themeColor == ThemeColor.telegram, () {
+                        ref.read(custom_theme.themeModeProvider.notifier).setColorScheme(ThemeColor.telegram, context);
+                        Navigator.pop(context);
+                      }),
+                      _buildThemeGridOption(context, isDark, 'Blue', Icons.palette,
+                          const Color(0xFF2196F3), currentTheme.themeColor == ThemeColor.blue, () {
+                        ref.read(custom_theme.themeModeProvider.notifier).setColorScheme(ThemeColor.blue, context);
+                        Navigator.pop(context);
+                      }),
+                      _buildThemeGridOption(context, isDark, 'Pink', Icons.favorite,
+                          const Color(0xFFE91E63), currentTheme.themeColor == ThemeColor.pink, () {
+                        ref.read(custom_theme.themeModeProvider.notifier).setColorScheme(ThemeColor.pink, context);
+                        Navigator.pop(context);
+                      }),
+                      _buildThemeGridOption(context, isDark, 'AMOLED', Icons.brightness_2, Colors.black,
+                          currentTheme.themeColor == ThemeColor.amoled, () {
+                        ref.read(custom_theme.themeModeProvider.notifier).setColorScheme(ThemeColor.amoled, context);
+                        Navigator.pop(context);
+                      }),
+                      _buildThemeGridOption(context, isDark, 'iOS', Icons.phone_iphone,
+                          const Color(0xFF007AFF), currentTheme.themeColor == ThemeColor.ios, () {
+                        ref.read(custom_theme.themeModeProvider.notifier).setColorScheme(ThemeColor.ios, context);
+                        Navigator.pop(context);
+                      }),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Brightness',
+                    style: TextStyle(
+                      color: isDark ? Colors.white70 : Colors.grey[700],
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _buildBrightnessOption(context, isDark, 'Light', Icons.light_mode, !currentTheme.isDark, () {
+                    ref.read(custom_theme.themeModeProvider.notifier).setBrightness(false);
+                    Navigator.pop(context);
+                  }),
+                  const SizedBox(height: 8),
+                  _buildBrightnessOption(context, isDark, 'Dark', Icons.dark_mode, currentTheme.isDark, () {
+                    ref.read(custom_theme.themeModeProvider.notifier).setBrightness(true);
+                    Navigator.pop(context);
+                  }),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Close', style: TextStyle(color: theme.colorScheme.primary)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildThemeGridOption(
+    BuildContext context,
+    bool isDark,
+    String label,
+    IconData icon,
+    Color color,
+    bool isSelected,
+    VoidCallback onTap,
+  ) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isSelected ? color.withOpacity(0.2) : theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: isSelected ? color : Colors.transparent, width: 2),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: color.withOpacity(0.2), shape: BoxShape.circle),
+              child: Icon(icon, color: color, size: 24),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: theme.colorScheme.onSurface,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            if (isSelected)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Icon(Icons.check_circle, color: color, size: 16),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBrightnessOption(
+    BuildContext context,
+    bool isDark,
+    String label,
+    IconData icon,
+    bool isSelected,
+    VoidCallback onTap,
+  ) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected ? theme.colorScheme.surfaceContainerHighest : Colors.transparent,
+          border: Border.all(
+            color: isSelected ? theme.colorScheme.outline : Colors.transparent,
+          ),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: theme.colorScheme.onSurface, size: 24),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                label,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurface,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+            ),
+            if (isSelected) Icon(Icons.check, color: theme.colorScheme.onSurface, size: 20),
+          ],
+        ),
       ),
     );
   }
@@ -818,7 +1170,7 @@ class SettingsScreen extends ConsumerWidget {
                         labelText: 'Month',
                         border: OutlineInputBorder(),
                       ),
-                      value: selectedMonth,
+                      initialValue: selectedMonth,
                       items: [
                         for (var m = 1; m <= 12; m++)
                           DropdownMenuItem(
@@ -836,7 +1188,7 @@ class SettingsScreen extends ConsumerWidget {
                         labelText: 'Day',
                         border: OutlineInputBorder(),
                       ),
-                      value: selectedDay,
+                      initialValue: selectedDay,
                       items: [
                         for (var d = 1; d <= 31; d++)
                           DropdownMenuItem(

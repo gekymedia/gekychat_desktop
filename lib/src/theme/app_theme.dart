@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 class AppTheme {
-  static const primaryGreen = Color(0xFF00A884);
+  static const primaryGreen = Color(0xFF008069);
   static const secondaryGreen = Color(0xFF25D366);
   static const tealDark = Color(0xFF005C4B);
   

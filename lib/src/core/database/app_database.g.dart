@@ -44,6 +44,22 @@ class $ConversationsTable extends Conversations
   late final GeneratedColumn<String> lastMessage = GeneratedColumn<String>(
       'last_message', aliasedName, true,
       type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _lastMessageFromMeMeta =
+      const VerificationMeta('lastMessageFromMe');
+  @override
+  late final GeneratedColumn<bool> lastMessageFromMe = GeneratedColumn<bool>(
+      'last_message_from_me', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'CHECK ("last_message_from_me" IN (0, 1))'),
+      defaultValue: const Constant(false));
+  static const VerificationMeta _lastMessageOutgoingStatusMeta =
+      const VerificationMeta('lastMessageOutgoingStatus');
+  @override
+  late final GeneratedColumn<String> lastMessageOutgoingStatus =
+      GeneratedColumn<String>('last_message_outgoing_status', aliasedName, true,
+          type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _unreadCountMeta =
       const VerificationMeta('unreadCount');
   @override
@@ -90,6 +106,14 @@ class $ConversationsTable extends Conversations
   late final GeneratedColumn<DateTime> lastSyncedAt = GeneratedColumn<DateTime>(
       'last_synced_at', aliasedName, true,
       type: DriftSqlType.dateTime, requiredDuringInsert: false);
+  static const VerificationMeta _labelIdsJsonMeta =
+      const VerificationMeta('labelIdsJson');
+  @override
+  late final GeneratedColumn<String> labelIdsJson = GeneratedColumn<String>(
+      'label_ids_json', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant('[]'));
   @override
   List<GeneratedColumn> get $columns => [
         id,
@@ -98,12 +122,15 @@ class $ConversationsTable extends Conversations
         otherUserPhone,
         otherUserAvatarUrl,
         lastMessage,
+        lastMessageFromMe,
+        lastMessageOutgoingStatus,
         unreadCount,
         updatedAt,
         isPinned,
         isMuted,
         archivedAt,
-        lastSyncedAt
+        lastSyncedAt,
+        labelIdsJson
       ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -148,6 +175,19 @@ class $ConversationsTable extends Conversations
           lastMessage.isAcceptableOrUnknown(
               data['last_message']!, _lastMessageMeta));
     }
+    if (data.containsKey('last_message_from_me')) {
+      context.handle(
+          _lastMessageFromMeMeta,
+          lastMessageFromMe.isAcceptableOrUnknown(
+              data['last_message_from_me']!, _lastMessageFromMeMeta));
+    }
+    if (data.containsKey('last_message_outgoing_status')) {
+      context.handle(
+          _lastMessageOutgoingStatusMeta,
+          lastMessageOutgoingStatus.isAcceptableOrUnknown(
+              data['last_message_outgoing_status']!,
+              _lastMessageOutgoingStatusMeta));
+    }
     if (data.containsKey('unread_count')) {
       context.handle(
           _unreadCountMeta,
@@ -178,6 +218,12 @@ class $ConversationsTable extends Conversations
           lastSyncedAt.isAcceptableOrUnknown(
               data['last_synced_at']!, _lastSyncedAtMeta));
     }
+    if (data.containsKey('label_ids_json')) {
+      context.handle(
+          _labelIdsJsonMeta,
+          labelIdsJson.isAcceptableOrUnknown(
+              data['label_ids_json']!, _labelIdsJsonMeta));
+    }
     return context;
   }
 
@@ -199,6 +245,11 @@ class $ConversationsTable extends Conversations
           DriftSqlType.string, data['${effectivePrefix}other_user_avatar_url']),
       lastMessage: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}last_message']),
+      lastMessageFromMe: attachedDatabase.typeMapping.read(
+          DriftSqlType.bool, data['${effectivePrefix}last_message_from_me'])!,
+      lastMessageOutgoingStatus: attachedDatabase.typeMapping.read(
+          DriftSqlType.string,
+          data['${effectivePrefix}last_message_outgoing_status']),
       unreadCount: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}unread_count'])!,
       updatedAt: attachedDatabase.typeMapping
@@ -211,6 +262,8 @@ class $ConversationsTable extends Conversations
           .read(DriftSqlType.dateTime, data['${effectivePrefix}archived_at']),
       lastSyncedAt: attachedDatabase.typeMapping.read(
           DriftSqlType.dateTime, data['${effectivePrefix}last_synced_at']),
+      labelIdsJson: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}label_ids_json'])!,
     );
   }
 
@@ -227,12 +280,17 @@ class Conversation extends DataClass implements Insertable<Conversation> {
   final String? otherUserPhone;
   final String? otherUserAvatarUrl;
   final String? lastMessage;
+  final bool lastMessageFromMe;
+  final String? lastMessageOutgoingStatus;
   final int unreadCount;
   final DateTime? updatedAt;
   final bool isPinned;
   final bool isMuted;
   final DateTime? archivedAt;
   final DateTime? lastSyncedAt;
+
+  /// JSON array of label IDs (parity with API `labels` / mobile `labelIdsJson`).
+  final String labelIdsJson;
   const Conversation(
       {required this.id,
       this.otherUserId,
@@ -240,12 +298,15 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       this.otherUserPhone,
       this.otherUserAvatarUrl,
       this.lastMessage,
+      required this.lastMessageFromMe,
+      this.lastMessageOutgoingStatus,
       required this.unreadCount,
       this.updatedAt,
       required this.isPinned,
       required this.isMuted,
       this.archivedAt,
-      this.lastSyncedAt});
+      this.lastSyncedAt,
+      required this.labelIdsJson});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -265,6 +326,11 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     if (!nullToAbsent || lastMessage != null) {
       map['last_message'] = Variable<String>(lastMessage);
     }
+    map['last_message_from_me'] = Variable<bool>(lastMessageFromMe);
+    if (!nullToAbsent || lastMessageOutgoingStatus != null) {
+      map['last_message_outgoing_status'] =
+          Variable<String>(lastMessageOutgoingStatus);
+    }
     map['unread_count'] = Variable<int>(unreadCount);
     if (!nullToAbsent || updatedAt != null) {
       map['updated_at'] = Variable<DateTime>(updatedAt);
@@ -277,6 +343,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     if (!nullToAbsent || lastSyncedAt != null) {
       map['last_synced_at'] = Variable<DateTime>(lastSyncedAt);
     }
+    map['label_ids_json'] = Variable<String>(labelIdsJson);
     return map;
   }
 
@@ -298,6 +365,11 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       lastMessage: lastMessage == null && nullToAbsent
           ? const Value.absent()
           : Value(lastMessage),
+      lastMessageFromMe: Value(lastMessageFromMe),
+      lastMessageOutgoingStatus:
+          lastMessageOutgoingStatus == null && nullToAbsent
+              ? const Value.absent()
+              : Value(lastMessageOutgoingStatus),
       unreadCount: Value(unreadCount),
       updatedAt: updatedAt == null && nullToAbsent
           ? const Value.absent()
@@ -310,6 +382,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       lastSyncedAt: lastSyncedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(lastSyncedAt),
+      labelIdsJson: Value(labelIdsJson),
     );
   }
 
@@ -324,12 +397,16 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       otherUserAvatarUrl:
           serializer.fromJson<String?>(json['otherUserAvatarUrl']),
       lastMessage: serializer.fromJson<String?>(json['lastMessage']),
+      lastMessageFromMe: serializer.fromJson<bool>(json['lastMessageFromMe']),
+      lastMessageOutgoingStatus:
+          serializer.fromJson<String?>(json['lastMessageOutgoingStatus']),
       unreadCount: serializer.fromJson<int>(json['unreadCount']),
       updatedAt: serializer.fromJson<DateTime?>(json['updatedAt']),
       isPinned: serializer.fromJson<bool>(json['isPinned']),
       isMuted: serializer.fromJson<bool>(json['isMuted']),
       archivedAt: serializer.fromJson<DateTime?>(json['archivedAt']),
       lastSyncedAt: serializer.fromJson<DateTime?>(json['lastSyncedAt']),
+      labelIdsJson: serializer.fromJson<String>(json['labelIdsJson']),
     );
   }
   @override
@@ -342,12 +419,16 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       'otherUserPhone': serializer.toJson<String?>(otherUserPhone),
       'otherUserAvatarUrl': serializer.toJson<String?>(otherUserAvatarUrl),
       'lastMessage': serializer.toJson<String?>(lastMessage),
+      'lastMessageFromMe': serializer.toJson<bool>(lastMessageFromMe),
+      'lastMessageOutgoingStatus':
+          serializer.toJson<String?>(lastMessageOutgoingStatus),
       'unreadCount': serializer.toJson<int>(unreadCount),
       'updatedAt': serializer.toJson<DateTime?>(updatedAt),
       'isPinned': serializer.toJson<bool>(isPinned),
       'isMuted': serializer.toJson<bool>(isMuted),
       'archivedAt': serializer.toJson<DateTime?>(archivedAt),
       'lastSyncedAt': serializer.toJson<DateTime?>(lastSyncedAt),
+      'labelIdsJson': serializer.toJson<String>(labelIdsJson),
     };
   }
 
@@ -358,12 +439,15 @@ class Conversation extends DataClass implements Insertable<Conversation> {
           Value<String?> otherUserPhone = const Value.absent(),
           Value<String?> otherUserAvatarUrl = const Value.absent(),
           Value<String?> lastMessage = const Value.absent(),
+          bool? lastMessageFromMe,
+          Value<String?> lastMessageOutgoingStatus = const Value.absent(),
           int? unreadCount,
           Value<DateTime?> updatedAt = const Value.absent(),
           bool? isPinned,
           bool? isMuted,
           Value<DateTime?> archivedAt = const Value.absent(),
-          Value<DateTime?> lastSyncedAt = const Value.absent()}) =>
+          Value<DateTime?> lastSyncedAt = const Value.absent(),
+          String? labelIdsJson}) =>
       Conversation(
         id: id ?? this.id,
         otherUserId: otherUserId.present ? otherUserId.value : this.otherUserId,
@@ -375,6 +459,10 @@ class Conversation extends DataClass implements Insertable<Conversation> {
             ? otherUserAvatarUrl.value
             : this.otherUserAvatarUrl,
         lastMessage: lastMessage.present ? lastMessage.value : this.lastMessage,
+        lastMessageFromMe: lastMessageFromMe ?? this.lastMessageFromMe,
+        lastMessageOutgoingStatus: lastMessageOutgoingStatus.present
+            ? lastMessageOutgoingStatus.value
+            : this.lastMessageOutgoingStatus,
         unreadCount: unreadCount ?? this.unreadCount,
         updatedAt: updatedAt.present ? updatedAt.value : this.updatedAt,
         isPinned: isPinned ?? this.isPinned,
@@ -382,6 +470,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
         archivedAt: archivedAt.present ? archivedAt.value : this.archivedAt,
         lastSyncedAt:
             lastSyncedAt.present ? lastSyncedAt.value : this.lastSyncedAt,
+        labelIdsJson: labelIdsJson ?? this.labelIdsJson,
       );
   Conversation copyWithCompanion(ConversationsCompanion data) {
     return Conversation(
@@ -399,6 +488,12 @@ class Conversation extends DataClass implements Insertable<Conversation> {
           : this.otherUserAvatarUrl,
       lastMessage:
           data.lastMessage.present ? data.lastMessage.value : this.lastMessage,
+      lastMessageFromMe: data.lastMessageFromMe.present
+          ? data.lastMessageFromMe.value
+          : this.lastMessageFromMe,
+      lastMessageOutgoingStatus: data.lastMessageOutgoingStatus.present
+          ? data.lastMessageOutgoingStatus.value
+          : this.lastMessageOutgoingStatus,
       unreadCount:
           data.unreadCount.present ? data.unreadCount.value : this.unreadCount,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
@@ -409,6 +504,9 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       lastSyncedAt: data.lastSyncedAt.present
           ? data.lastSyncedAt.value
           : this.lastSyncedAt,
+      labelIdsJson: data.labelIdsJson.present
+          ? data.labelIdsJson.value
+          : this.labelIdsJson,
     );
   }
 
@@ -421,12 +519,15 @@ class Conversation extends DataClass implements Insertable<Conversation> {
           ..write('otherUserPhone: $otherUserPhone, ')
           ..write('otherUserAvatarUrl: $otherUserAvatarUrl, ')
           ..write('lastMessage: $lastMessage, ')
+          ..write('lastMessageFromMe: $lastMessageFromMe, ')
+          ..write('lastMessageOutgoingStatus: $lastMessageOutgoingStatus, ')
           ..write('unreadCount: $unreadCount, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('isPinned: $isPinned, ')
           ..write('isMuted: $isMuted, ')
           ..write('archivedAt: $archivedAt, ')
-          ..write('lastSyncedAt: $lastSyncedAt')
+          ..write('lastSyncedAt: $lastSyncedAt, ')
+          ..write('labelIdsJson: $labelIdsJson')
           ..write(')'))
         .toString();
   }
@@ -439,12 +540,15 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       otherUserPhone,
       otherUserAvatarUrl,
       lastMessage,
+      lastMessageFromMe,
+      lastMessageOutgoingStatus,
       unreadCount,
       updatedAt,
       isPinned,
       isMuted,
       archivedAt,
-      lastSyncedAt);
+      lastSyncedAt,
+      labelIdsJson);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -455,12 +559,15 @@ class Conversation extends DataClass implements Insertable<Conversation> {
           other.otherUserPhone == this.otherUserPhone &&
           other.otherUserAvatarUrl == this.otherUserAvatarUrl &&
           other.lastMessage == this.lastMessage &&
+          other.lastMessageFromMe == this.lastMessageFromMe &&
+          other.lastMessageOutgoingStatus == this.lastMessageOutgoingStatus &&
           other.unreadCount == this.unreadCount &&
           other.updatedAt == this.updatedAt &&
           other.isPinned == this.isPinned &&
           other.isMuted == this.isMuted &&
           other.archivedAt == this.archivedAt &&
-          other.lastSyncedAt == this.lastSyncedAt);
+          other.lastSyncedAt == this.lastSyncedAt &&
+          other.labelIdsJson == this.labelIdsJson);
 }
 
 class ConversationsCompanion extends UpdateCompanion<Conversation> {
@@ -470,12 +577,15 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
   final Value<String?> otherUserPhone;
   final Value<String?> otherUserAvatarUrl;
   final Value<String?> lastMessage;
+  final Value<bool> lastMessageFromMe;
+  final Value<String?> lastMessageOutgoingStatus;
   final Value<int> unreadCount;
   final Value<DateTime?> updatedAt;
   final Value<bool> isPinned;
   final Value<bool> isMuted;
   final Value<DateTime?> archivedAt;
   final Value<DateTime?> lastSyncedAt;
+  final Value<String> labelIdsJson;
   const ConversationsCompanion({
     this.id = const Value.absent(),
     this.otherUserId = const Value.absent(),
@@ -483,12 +593,15 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     this.otherUserPhone = const Value.absent(),
     this.otherUserAvatarUrl = const Value.absent(),
     this.lastMessage = const Value.absent(),
+    this.lastMessageFromMe = const Value.absent(),
+    this.lastMessageOutgoingStatus = const Value.absent(),
     this.unreadCount = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.isPinned = const Value.absent(),
     this.isMuted = const Value.absent(),
     this.archivedAt = const Value.absent(),
     this.lastSyncedAt = const Value.absent(),
+    this.labelIdsJson = const Value.absent(),
   });
   ConversationsCompanion.insert({
     this.id = const Value.absent(),
@@ -497,12 +610,15 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     this.otherUserPhone = const Value.absent(),
     this.otherUserAvatarUrl = const Value.absent(),
     this.lastMessage = const Value.absent(),
+    this.lastMessageFromMe = const Value.absent(),
+    this.lastMessageOutgoingStatus = const Value.absent(),
     this.unreadCount = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.isPinned = const Value.absent(),
     this.isMuted = const Value.absent(),
     this.archivedAt = const Value.absent(),
     this.lastSyncedAt = const Value.absent(),
+    this.labelIdsJson = const Value.absent(),
   });
   static Insertable<Conversation> custom({
     Expression<int>? id,
@@ -511,12 +627,15 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     Expression<String>? otherUserPhone,
     Expression<String>? otherUserAvatarUrl,
     Expression<String>? lastMessage,
+    Expression<bool>? lastMessageFromMe,
+    Expression<String>? lastMessageOutgoingStatus,
     Expression<int>? unreadCount,
     Expression<DateTime>? updatedAt,
     Expression<bool>? isPinned,
     Expression<bool>? isMuted,
     Expression<DateTime>? archivedAt,
     Expression<DateTime>? lastSyncedAt,
+    Expression<String>? labelIdsJson,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -526,12 +645,16 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
       if (otherUserAvatarUrl != null)
         'other_user_avatar_url': otherUserAvatarUrl,
       if (lastMessage != null) 'last_message': lastMessage,
+      if (lastMessageFromMe != null) 'last_message_from_me': lastMessageFromMe,
+      if (lastMessageOutgoingStatus != null)
+        'last_message_outgoing_status': lastMessageOutgoingStatus,
       if (unreadCount != null) 'unread_count': unreadCount,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (isPinned != null) 'is_pinned': isPinned,
       if (isMuted != null) 'is_muted': isMuted,
       if (archivedAt != null) 'archived_at': archivedAt,
       if (lastSyncedAt != null) 'last_synced_at': lastSyncedAt,
+      if (labelIdsJson != null) 'label_ids_json': labelIdsJson,
     });
   }
 
@@ -542,12 +665,15 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
       Value<String?>? otherUserPhone,
       Value<String?>? otherUserAvatarUrl,
       Value<String?>? lastMessage,
+      Value<bool>? lastMessageFromMe,
+      Value<String?>? lastMessageOutgoingStatus,
       Value<int>? unreadCount,
       Value<DateTime?>? updatedAt,
       Value<bool>? isPinned,
       Value<bool>? isMuted,
       Value<DateTime?>? archivedAt,
-      Value<DateTime?>? lastSyncedAt}) {
+      Value<DateTime?>? lastSyncedAt,
+      Value<String>? labelIdsJson}) {
     return ConversationsCompanion(
       id: id ?? this.id,
       otherUserId: otherUserId ?? this.otherUserId,
@@ -555,12 +681,16 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
       otherUserPhone: otherUserPhone ?? this.otherUserPhone,
       otherUserAvatarUrl: otherUserAvatarUrl ?? this.otherUserAvatarUrl,
       lastMessage: lastMessage ?? this.lastMessage,
+      lastMessageFromMe: lastMessageFromMe ?? this.lastMessageFromMe,
+      lastMessageOutgoingStatus:
+          lastMessageOutgoingStatus ?? this.lastMessageOutgoingStatus,
       unreadCount: unreadCount ?? this.unreadCount,
       updatedAt: updatedAt ?? this.updatedAt,
       isPinned: isPinned ?? this.isPinned,
       isMuted: isMuted ?? this.isMuted,
       archivedAt: archivedAt ?? this.archivedAt,
       lastSyncedAt: lastSyncedAt ?? this.lastSyncedAt,
+      labelIdsJson: labelIdsJson ?? this.labelIdsJson,
     );
   }
 
@@ -585,6 +715,13 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     if (lastMessage.present) {
       map['last_message'] = Variable<String>(lastMessage.value);
     }
+    if (lastMessageFromMe.present) {
+      map['last_message_from_me'] = Variable<bool>(lastMessageFromMe.value);
+    }
+    if (lastMessageOutgoingStatus.present) {
+      map['last_message_outgoing_status'] =
+          Variable<String>(lastMessageOutgoingStatus.value);
+    }
     if (unreadCount.present) {
       map['unread_count'] = Variable<int>(unreadCount.value);
     }
@@ -603,6 +740,9 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     if (lastSyncedAt.present) {
       map['last_synced_at'] = Variable<DateTime>(lastSyncedAt.value);
     }
+    if (labelIdsJson.present) {
+      map['label_ids_json'] = Variable<String>(labelIdsJson.value);
+    }
     return map;
   }
 
@@ -615,12 +755,15 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
           ..write('otherUserPhone: $otherUserPhone, ')
           ..write('otherUserAvatarUrl: $otherUserAvatarUrl, ')
           ..write('lastMessage: $lastMessage, ')
+          ..write('lastMessageFromMe: $lastMessageFromMe, ')
+          ..write('lastMessageOutgoingStatus: $lastMessageOutgoingStatus, ')
           ..write('unreadCount: $unreadCount, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('isPinned: $isPinned, ')
           ..write('isMuted: $isMuted, ')
           ..write('archivedAt: $archivedAt, ')
-          ..write('lastSyncedAt: $lastSyncedAt')
+          ..write('lastSyncedAt: $lastSyncedAt, ')
+          ..write('labelIdsJson: $labelIdsJson')
           ..write(')'))
         .toString();
   }
@@ -634,8 +777,14 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
   static const VerificationMeta _idMeta = const VerificationMeta('id');
   @override
   late final GeneratedColumn<int> id = GeneratedColumn<int>(
-      'id', aliasedName, false,
+      'id', aliasedName, true,
       type: DriftSqlType.int, requiredDuringInsert: false);
+  static const VerificationMeta _clientUuidMeta =
+      const VerificationMeta('clientUuid');
+  @override
+  late final GeneratedColumn<String> clientUuid = GeneratedColumn<String>(
+      'client_uuid', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
   static const VerificationMeta _conversationIdMeta =
       const VerificationMeta('conversationId');
   @override
@@ -671,12 +820,25 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
   late final GeneratedColumn<String> body = GeneratedColumn<String>(
       'body', aliasedName, false,
       type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+      'status', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant('pending'));
   static const VerificationMeta _createdAtMeta =
       const VerificationMeta('createdAt');
   @override
   late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
       'created_at', aliasedName, false,
       type: DriftSqlType.dateTime, requiredDuringInsert: true);
+  static const VerificationMeta _serverCreatedAtMeta =
+      const VerificationMeta('serverCreatedAt');
+  @override
+  late final GeneratedColumn<DateTime> serverCreatedAt =
+      GeneratedColumn<DateTime>('server_created_at', aliasedName, true,
+          type: DriftSqlType.dateTime, requiredDuringInsert: false);
   static const VerificationMeta _replyToIdMeta =
       const VerificationMeta('replyToId');
   @override
@@ -756,6 +918,22 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
       defaultConstraints: GeneratedColumn.constraintIsAlways(
           'CHECK ("deleted_for_me" IN (0, 1))'),
       defaultValue: const Constant(false));
+  static const VerificationMeta _isSystemMeta =
+      const VerificationMeta('isSystem');
+  @override
+  late final GeneratedColumn<bool> isSystem = GeneratedColumn<bool>(
+      'is_system', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('CHECK ("is_system" IN (0, 1))'),
+      defaultValue: const Constant(false));
+  static const VerificationMeta _systemActionMeta =
+      const VerificationMeta('systemAction');
+  @override
+  late final GeneratedColumn<String> systemAction = GeneratedColumn<String>(
+      'system_action', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _lastSyncedAtMeta =
       const VerificationMeta('lastSyncedAt');
   @override
@@ -765,13 +943,16 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
   @override
   List<GeneratedColumn> get $columns => [
         id,
+        clientUuid,
         conversationId,
         groupId,
         senderId,
         senderName,
         senderAvatarUrl,
         body,
+        status,
         createdAt,
+        serverCreatedAt,
         replyToId,
         forwardedFromId,
         attachmentsJson,
@@ -784,6 +965,8 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
         linkPreviewsJson,
         isDeleted,
         deletedForMe,
+        isSystem,
+        systemAction,
         lastSyncedAt
       ];
   @override
@@ -798,6 +981,14 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     final data = instance.toColumns(true);
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('client_uuid')) {
+      context.handle(
+          _clientUuidMeta,
+          clientUuid.isAcceptableOrUnknown(
+              data['client_uuid']!, _clientUuidMeta));
+    } else if (isInserting) {
+      context.missing(_clientUuidMeta);
     }
     if (data.containsKey('conversation_id')) {
       context.handle(
@@ -833,11 +1024,21 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     } else if (isInserting) {
       context.missing(_bodyMeta);
     }
+    if (data.containsKey('status')) {
+      context.handle(_statusMeta,
+          status.isAcceptableOrUnknown(data['status']!, _statusMeta));
+    }
     if (data.containsKey('created_at')) {
       context.handle(_createdAtMeta,
           createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta));
     } else if (isInserting) {
       context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('server_created_at')) {
+      context.handle(
+          _serverCreatedAtMeta,
+          serverCreatedAt.isAcceptableOrUnknown(
+              data['server_created_at']!, _serverCreatedAtMeta));
     }
     if (data.containsKey('reply_to_id')) {
       context.handle(
@@ -907,6 +1108,16 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
           deletedForMe.isAcceptableOrUnknown(
               data['deleted_for_me']!, _deletedForMeMeta));
     }
+    if (data.containsKey('is_system')) {
+      context.handle(_isSystemMeta,
+          isSystem.isAcceptableOrUnknown(data['is_system']!, _isSystemMeta));
+    }
+    if (data.containsKey('system_action')) {
+      context.handle(
+          _systemActionMeta,
+          systemAction.isAcceptableOrUnknown(
+              data['system_action']!, _systemActionMeta));
+    }
     if (data.containsKey('last_synced_at')) {
       context.handle(
           _lastSyncedAtMeta,
@@ -917,13 +1128,15 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
   }
 
   @override
-  Set<GeneratedColumn> get $primaryKey => {id};
+  Set<GeneratedColumn> get $primaryKey => {clientUuid};
   @override
   Message map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return Message(
       id: attachedDatabase.typeMapping
-          .read(DriftSqlType.int, data['${effectivePrefix}id'])!,
+          .read(DriftSqlType.int, data['${effectivePrefix}id']),
+      clientUuid: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}client_uuid'])!,
       conversationId: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}conversation_id']),
       groupId: attachedDatabase.typeMapping
@@ -936,8 +1149,12 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
           DriftSqlType.string, data['${effectivePrefix}sender_avatar_url']),
       body: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}body'])!,
+      status: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}status'])!,
       createdAt: attachedDatabase.typeMapping
           .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
+      serverCreatedAt: attachedDatabase.typeMapping.read(
+          DriftSqlType.dateTime, data['${effectivePrefix}server_created_at']),
       replyToId: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}reply_to_id']),
       forwardedFromId: attachedDatabase.typeMapping
@@ -962,6 +1179,10 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
           .read(DriftSqlType.bool, data['${effectivePrefix}is_deleted'])!,
       deletedForMe: attachedDatabase.typeMapping
           .read(DriftSqlType.bool, data['${effectivePrefix}deleted_for_me'])!,
+      isSystem: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}is_system'])!,
+      systemAction: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}system_action']),
       lastSyncedAt: attachedDatabase.typeMapping.read(
           DriftSqlType.dateTime, data['${effectivePrefix}last_synced_at']),
     );
@@ -974,14 +1195,17 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
 }
 
 class Message extends DataClass implements Insertable<Message> {
-  final int id;
+  final int? id;
+  final String clientUuid;
   final int? conversationId;
   final int? groupId;
   final int senderId;
   final String? senderName;
   final String? senderAvatarUrl;
   final String body;
+  final String status;
   final DateTime createdAt;
+  final DateTime? serverCreatedAt;
   final int? replyToId;
   final int? forwardedFromId;
   final String? attachmentsJson;
@@ -994,16 +1218,21 @@ class Message extends DataClass implements Insertable<Message> {
   final String? linkPreviewsJson;
   final bool isDeleted;
   final bool deletedForMe;
+  final bool isSystem;
+  final String? systemAction;
   final DateTime? lastSyncedAt;
   const Message(
-      {required this.id,
+      {this.id,
+      required this.clientUuid,
       this.conversationId,
       this.groupId,
       required this.senderId,
       this.senderName,
       this.senderAvatarUrl,
       required this.body,
+      required this.status,
       required this.createdAt,
+      this.serverCreatedAt,
       this.replyToId,
       this.forwardedFromId,
       this.attachmentsJson,
@@ -1016,11 +1245,16 @@ class Message extends DataClass implements Insertable<Message> {
       this.linkPreviewsJson,
       required this.isDeleted,
       required this.deletedForMe,
+      required this.isSystem,
+      this.systemAction,
       this.lastSyncedAt});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
-    map['id'] = Variable<int>(id);
+    if (!nullToAbsent || id != null) {
+      map['id'] = Variable<int>(id);
+    }
+    map['client_uuid'] = Variable<String>(clientUuid);
     if (!nullToAbsent || conversationId != null) {
       map['conversation_id'] = Variable<int>(conversationId);
     }
@@ -1035,7 +1269,11 @@ class Message extends DataClass implements Insertable<Message> {
       map['sender_avatar_url'] = Variable<String>(senderAvatarUrl);
     }
     map['body'] = Variable<String>(body);
+    map['status'] = Variable<String>(status);
     map['created_at'] = Variable<DateTime>(createdAt);
+    if (!nullToAbsent || serverCreatedAt != null) {
+      map['server_created_at'] = Variable<DateTime>(serverCreatedAt);
+    }
     if (!nullToAbsent || replyToId != null) {
       map['reply_to_id'] = Variable<int>(replyToId);
     }
@@ -1068,6 +1306,10 @@ class Message extends DataClass implements Insertable<Message> {
     }
     map['is_deleted'] = Variable<bool>(isDeleted);
     map['deleted_for_me'] = Variable<bool>(deletedForMe);
+    map['is_system'] = Variable<bool>(isSystem);
+    if (!nullToAbsent || systemAction != null) {
+      map['system_action'] = Variable<String>(systemAction);
+    }
     if (!nullToAbsent || lastSyncedAt != null) {
       map['last_synced_at'] = Variable<DateTime>(lastSyncedAt);
     }
@@ -1076,7 +1318,8 @@ class Message extends DataClass implements Insertable<Message> {
 
   MessagesCompanion toCompanion(bool nullToAbsent) {
     return MessagesCompanion(
-      id: Value(id),
+      id: id == null && nullToAbsent ? const Value.absent() : Value(id),
+      clientUuid: Value(clientUuid),
       conversationId: conversationId == null && nullToAbsent
           ? const Value.absent()
           : Value(conversationId),
@@ -1091,7 +1334,11 @@ class Message extends DataClass implements Insertable<Message> {
           ? const Value.absent()
           : Value(senderAvatarUrl),
       body: Value(body),
+      status: Value(status),
       createdAt: Value(createdAt),
+      serverCreatedAt: serverCreatedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(serverCreatedAt),
       replyToId: replyToId == null && nullToAbsent
           ? const Value.absent()
           : Value(replyToId),
@@ -1123,6 +1370,10 @@ class Message extends DataClass implements Insertable<Message> {
           : Value(linkPreviewsJson),
       isDeleted: Value(isDeleted),
       deletedForMe: Value(deletedForMe),
+      isSystem: Value(isSystem),
+      systemAction: systemAction == null && nullToAbsent
+          ? const Value.absent()
+          : Value(systemAction),
       lastSyncedAt: lastSyncedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(lastSyncedAt),
@@ -1133,14 +1384,17 @@ class Message extends DataClass implements Insertable<Message> {
       {ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return Message(
-      id: serializer.fromJson<int>(json['id']),
+      id: serializer.fromJson<int?>(json['id']),
+      clientUuid: serializer.fromJson<String>(json['clientUuid']),
       conversationId: serializer.fromJson<int?>(json['conversationId']),
       groupId: serializer.fromJson<int?>(json['groupId']),
       senderId: serializer.fromJson<int>(json['senderId']),
       senderName: serializer.fromJson<String?>(json['senderName']),
       senderAvatarUrl: serializer.fromJson<String?>(json['senderAvatarUrl']),
       body: serializer.fromJson<String>(json['body']),
+      status: serializer.fromJson<String>(json['status']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      serverCreatedAt: serializer.fromJson<DateTime?>(json['serverCreatedAt']),
       replyToId: serializer.fromJson<int?>(json['replyToId']),
       forwardedFromId: serializer.fromJson<int?>(json['forwardedFromId']),
       attachmentsJson: serializer.fromJson<String?>(json['attachmentsJson']),
@@ -1153,6 +1407,8 @@ class Message extends DataClass implements Insertable<Message> {
       linkPreviewsJson: serializer.fromJson<String?>(json['linkPreviewsJson']),
       isDeleted: serializer.fromJson<bool>(json['isDeleted']),
       deletedForMe: serializer.fromJson<bool>(json['deletedForMe']),
+      isSystem: serializer.fromJson<bool>(json['isSystem']),
+      systemAction: serializer.fromJson<String?>(json['systemAction']),
       lastSyncedAt: serializer.fromJson<DateTime?>(json['lastSyncedAt']),
     );
   }
@@ -1160,14 +1416,17 @@ class Message extends DataClass implements Insertable<Message> {
   Map<String, dynamic> toJson({ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
-      'id': serializer.toJson<int>(id),
+      'id': serializer.toJson<int?>(id),
+      'clientUuid': serializer.toJson<String>(clientUuid),
       'conversationId': serializer.toJson<int?>(conversationId),
       'groupId': serializer.toJson<int?>(groupId),
       'senderId': serializer.toJson<int>(senderId),
       'senderName': serializer.toJson<String?>(senderName),
       'senderAvatarUrl': serializer.toJson<String?>(senderAvatarUrl),
       'body': serializer.toJson<String>(body),
+      'status': serializer.toJson<String>(status),
       'createdAt': serializer.toJson<DateTime>(createdAt),
+      'serverCreatedAt': serializer.toJson<DateTime?>(serverCreatedAt),
       'replyToId': serializer.toJson<int?>(replyToId),
       'forwardedFromId': serializer.toJson<int?>(forwardedFromId),
       'attachmentsJson': serializer.toJson<String?>(attachmentsJson),
@@ -1180,19 +1439,24 @@ class Message extends DataClass implements Insertable<Message> {
       'linkPreviewsJson': serializer.toJson<String?>(linkPreviewsJson),
       'isDeleted': serializer.toJson<bool>(isDeleted),
       'deletedForMe': serializer.toJson<bool>(deletedForMe),
+      'isSystem': serializer.toJson<bool>(isSystem),
+      'systemAction': serializer.toJson<String?>(systemAction),
       'lastSyncedAt': serializer.toJson<DateTime?>(lastSyncedAt),
     };
   }
 
   Message copyWith(
-          {int? id,
+          {Value<int?> id = const Value.absent(),
+          String? clientUuid,
           Value<int?> conversationId = const Value.absent(),
           Value<int?> groupId = const Value.absent(),
           int? senderId,
           Value<String?> senderName = const Value.absent(),
           Value<String?> senderAvatarUrl = const Value.absent(),
           String? body,
+          String? status,
           DateTime? createdAt,
+          Value<DateTime?> serverCreatedAt = const Value.absent(),
           Value<int?> replyToId = const Value.absent(),
           Value<int?> forwardedFromId = const Value.absent(),
           Value<String?> attachmentsJson = const Value.absent(),
@@ -1205,9 +1469,12 @@ class Message extends DataClass implements Insertable<Message> {
           Value<String?> linkPreviewsJson = const Value.absent(),
           bool? isDeleted,
           bool? deletedForMe,
+          bool? isSystem,
+          Value<String?> systemAction = const Value.absent(),
           Value<DateTime?> lastSyncedAt = const Value.absent()}) =>
       Message(
-        id: id ?? this.id,
+        id: id.present ? id.value : this.id,
+        clientUuid: clientUuid ?? this.clientUuid,
         conversationId:
             conversationId.present ? conversationId.value : this.conversationId,
         groupId: groupId.present ? groupId.value : this.groupId,
@@ -1217,7 +1484,11 @@ class Message extends DataClass implements Insertable<Message> {
             ? senderAvatarUrl.value
             : this.senderAvatarUrl,
         body: body ?? this.body,
+        status: status ?? this.status,
         createdAt: createdAt ?? this.createdAt,
+        serverCreatedAt: serverCreatedAt.present
+            ? serverCreatedAt.value
+            : this.serverCreatedAt,
         replyToId: replyToId.present ? replyToId.value : this.replyToId,
         forwardedFromId: forwardedFromId.present
             ? forwardedFromId.value
@@ -1242,12 +1513,17 @@ class Message extends DataClass implements Insertable<Message> {
             : this.linkPreviewsJson,
         isDeleted: isDeleted ?? this.isDeleted,
         deletedForMe: deletedForMe ?? this.deletedForMe,
+        isSystem: isSystem ?? this.isSystem,
+        systemAction:
+            systemAction.present ? systemAction.value : this.systemAction,
         lastSyncedAt:
             lastSyncedAt.present ? lastSyncedAt.value : this.lastSyncedAt,
       );
   Message copyWithCompanion(MessagesCompanion data) {
     return Message(
       id: data.id.present ? data.id.value : this.id,
+      clientUuid:
+          data.clientUuid.present ? data.clientUuid.value : this.clientUuid,
       conversationId: data.conversationId.present
           ? data.conversationId.value
           : this.conversationId,
@@ -1259,7 +1535,11 @@ class Message extends DataClass implements Insertable<Message> {
           ? data.senderAvatarUrl.value
           : this.senderAvatarUrl,
       body: data.body.present ? data.body.value : this.body,
+      status: data.status.present ? data.status.value : this.status,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      serverCreatedAt: data.serverCreatedAt.present
+          ? data.serverCreatedAt.value
+          : this.serverCreatedAt,
       replyToId: data.replyToId.present ? data.replyToId.value : this.replyToId,
       forwardedFromId: data.forwardedFromId.present
           ? data.forwardedFromId.value
@@ -1289,6 +1569,10 @@ class Message extends DataClass implements Insertable<Message> {
       deletedForMe: data.deletedForMe.present
           ? data.deletedForMe.value
           : this.deletedForMe,
+      isSystem: data.isSystem.present ? data.isSystem.value : this.isSystem,
+      systemAction: data.systemAction.present
+          ? data.systemAction.value
+          : this.systemAction,
       lastSyncedAt: data.lastSyncedAt.present
           ? data.lastSyncedAt.value
           : this.lastSyncedAt,
@@ -1299,13 +1583,16 @@ class Message extends DataClass implements Insertable<Message> {
   String toString() {
     return (StringBuffer('Message(')
           ..write('id: $id, ')
+          ..write('clientUuid: $clientUuid, ')
           ..write('conversationId: $conversationId, ')
           ..write('groupId: $groupId, ')
           ..write('senderId: $senderId, ')
           ..write('senderName: $senderName, ')
           ..write('senderAvatarUrl: $senderAvatarUrl, ')
           ..write('body: $body, ')
+          ..write('status: $status, ')
           ..write('createdAt: $createdAt, ')
+          ..write('serverCreatedAt: $serverCreatedAt, ')
           ..write('replyToId: $replyToId, ')
           ..write('forwardedFromId: $forwardedFromId, ')
           ..write('attachmentsJson: $attachmentsJson, ')
@@ -1318,6 +1605,8 @@ class Message extends DataClass implements Insertable<Message> {
           ..write('linkPreviewsJson: $linkPreviewsJson, ')
           ..write('isDeleted: $isDeleted, ')
           ..write('deletedForMe: $deletedForMe, ')
+          ..write('isSystem: $isSystem, ')
+          ..write('systemAction: $systemAction, ')
           ..write('lastSyncedAt: $lastSyncedAt')
           ..write(')'))
         .toString();
@@ -1326,13 +1615,16 @@ class Message extends DataClass implements Insertable<Message> {
   @override
   int get hashCode => Object.hashAll([
         id,
+        clientUuid,
         conversationId,
         groupId,
         senderId,
         senderName,
         senderAvatarUrl,
         body,
+        status,
         createdAt,
+        serverCreatedAt,
         replyToId,
         forwardedFromId,
         attachmentsJson,
@@ -1345,6 +1637,8 @@ class Message extends DataClass implements Insertable<Message> {
         linkPreviewsJson,
         isDeleted,
         deletedForMe,
+        isSystem,
+        systemAction,
         lastSyncedAt
       ]);
   @override
@@ -1352,13 +1646,16 @@ class Message extends DataClass implements Insertable<Message> {
       identical(this, other) ||
       (other is Message &&
           other.id == this.id &&
+          other.clientUuid == this.clientUuid &&
           other.conversationId == this.conversationId &&
           other.groupId == this.groupId &&
           other.senderId == this.senderId &&
           other.senderName == this.senderName &&
           other.senderAvatarUrl == this.senderAvatarUrl &&
           other.body == this.body &&
+          other.status == this.status &&
           other.createdAt == this.createdAt &&
+          other.serverCreatedAt == this.serverCreatedAt &&
           other.replyToId == this.replyToId &&
           other.forwardedFromId == this.forwardedFromId &&
           other.attachmentsJson == this.attachmentsJson &&
@@ -1371,18 +1668,23 @@ class Message extends DataClass implements Insertable<Message> {
           other.linkPreviewsJson == this.linkPreviewsJson &&
           other.isDeleted == this.isDeleted &&
           other.deletedForMe == this.deletedForMe &&
+          other.isSystem == this.isSystem &&
+          other.systemAction == this.systemAction &&
           other.lastSyncedAt == this.lastSyncedAt);
 }
 
 class MessagesCompanion extends UpdateCompanion<Message> {
-  final Value<int> id;
+  final Value<int?> id;
+  final Value<String> clientUuid;
   final Value<int?> conversationId;
   final Value<int?> groupId;
   final Value<int> senderId;
   final Value<String?> senderName;
   final Value<String?> senderAvatarUrl;
   final Value<String> body;
+  final Value<String> status;
   final Value<DateTime> createdAt;
+  final Value<DateTime?> serverCreatedAt;
   final Value<int?> replyToId;
   final Value<int?> forwardedFromId;
   final Value<String?> attachmentsJson;
@@ -1395,16 +1697,22 @@ class MessagesCompanion extends UpdateCompanion<Message> {
   final Value<String?> linkPreviewsJson;
   final Value<bool> isDeleted;
   final Value<bool> deletedForMe;
+  final Value<bool> isSystem;
+  final Value<String?> systemAction;
   final Value<DateTime?> lastSyncedAt;
+  final Value<int> rowid;
   const MessagesCompanion({
     this.id = const Value.absent(),
+    this.clientUuid = const Value.absent(),
     this.conversationId = const Value.absent(),
     this.groupId = const Value.absent(),
     this.senderId = const Value.absent(),
     this.senderName = const Value.absent(),
     this.senderAvatarUrl = const Value.absent(),
     this.body = const Value.absent(),
+    this.status = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.serverCreatedAt = const Value.absent(),
     this.replyToId = const Value.absent(),
     this.forwardedFromId = const Value.absent(),
     this.attachmentsJson = const Value.absent(),
@@ -1417,17 +1725,23 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     this.linkPreviewsJson = const Value.absent(),
     this.isDeleted = const Value.absent(),
     this.deletedForMe = const Value.absent(),
+    this.isSystem = const Value.absent(),
+    this.systemAction = const Value.absent(),
     this.lastSyncedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
   });
   MessagesCompanion.insert({
     this.id = const Value.absent(),
+    required String clientUuid,
     this.conversationId = const Value.absent(),
     this.groupId = const Value.absent(),
     required int senderId,
     this.senderName = const Value.absent(),
     this.senderAvatarUrl = const Value.absent(),
     required String body,
+    this.status = const Value.absent(),
     required DateTime createdAt,
+    this.serverCreatedAt = const Value.absent(),
     this.replyToId = const Value.absent(),
     this.forwardedFromId = const Value.absent(),
     this.attachmentsJson = const Value.absent(),
@@ -1440,19 +1754,26 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     this.linkPreviewsJson = const Value.absent(),
     this.isDeleted = const Value.absent(),
     this.deletedForMe = const Value.absent(),
+    this.isSystem = const Value.absent(),
+    this.systemAction = const Value.absent(),
     this.lastSyncedAt = const Value.absent(),
-  })  : senderId = Value(senderId),
+    this.rowid = const Value.absent(),
+  })  : clientUuid = Value(clientUuid),
+        senderId = Value(senderId),
         body = Value(body),
         createdAt = Value(createdAt);
   static Insertable<Message> custom({
     Expression<int>? id,
+    Expression<String>? clientUuid,
     Expression<int>? conversationId,
     Expression<int>? groupId,
     Expression<int>? senderId,
     Expression<String>? senderName,
     Expression<String>? senderAvatarUrl,
     Expression<String>? body,
+    Expression<String>? status,
     Expression<DateTime>? createdAt,
+    Expression<DateTime>? serverCreatedAt,
     Expression<int>? replyToId,
     Expression<int>? forwardedFromId,
     Expression<String>? attachmentsJson,
@@ -1465,17 +1786,23 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Expression<String>? linkPreviewsJson,
     Expression<bool>? isDeleted,
     Expression<bool>? deletedForMe,
+    Expression<bool>? isSystem,
+    Expression<String>? systemAction,
     Expression<DateTime>? lastSyncedAt,
+    Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
+      if (clientUuid != null) 'client_uuid': clientUuid,
       if (conversationId != null) 'conversation_id': conversationId,
       if (groupId != null) 'group_id': groupId,
       if (senderId != null) 'sender_id': senderId,
       if (senderName != null) 'sender_name': senderName,
       if (senderAvatarUrl != null) 'sender_avatar_url': senderAvatarUrl,
       if (body != null) 'body': body,
+      if (status != null) 'status': status,
       if (createdAt != null) 'created_at': createdAt,
+      if (serverCreatedAt != null) 'server_created_at': serverCreatedAt,
       if (replyToId != null) 'reply_to_id': replyToId,
       if (forwardedFromId != null) 'forwarded_from_id': forwardedFromId,
       if (attachmentsJson != null) 'attachments_json': attachmentsJson,
@@ -1488,19 +1815,25 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       if (linkPreviewsJson != null) 'link_previews_json': linkPreviewsJson,
       if (isDeleted != null) 'is_deleted': isDeleted,
       if (deletedForMe != null) 'deleted_for_me': deletedForMe,
+      if (isSystem != null) 'is_system': isSystem,
+      if (systemAction != null) 'system_action': systemAction,
       if (lastSyncedAt != null) 'last_synced_at': lastSyncedAt,
+      if (rowid != null) 'rowid': rowid,
     });
   }
 
   MessagesCompanion copyWith(
-      {Value<int>? id,
+      {Value<int?>? id,
+      Value<String>? clientUuid,
       Value<int?>? conversationId,
       Value<int?>? groupId,
       Value<int>? senderId,
       Value<String?>? senderName,
       Value<String?>? senderAvatarUrl,
       Value<String>? body,
+      Value<String>? status,
       Value<DateTime>? createdAt,
+      Value<DateTime?>? serverCreatedAt,
       Value<int?>? replyToId,
       Value<int?>? forwardedFromId,
       Value<String?>? attachmentsJson,
@@ -1513,16 +1846,22 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       Value<String?>? linkPreviewsJson,
       Value<bool>? isDeleted,
       Value<bool>? deletedForMe,
-      Value<DateTime?>? lastSyncedAt}) {
+      Value<bool>? isSystem,
+      Value<String?>? systemAction,
+      Value<DateTime?>? lastSyncedAt,
+      Value<int>? rowid}) {
     return MessagesCompanion(
       id: id ?? this.id,
+      clientUuid: clientUuid ?? this.clientUuid,
       conversationId: conversationId ?? this.conversationId,
       groupId: groupId ?? this.groupId,
       senderId: senderId ?? this.senderId,
       senderName: senderName ?? this.senderName,
       senderAvatarUrl: senderAvatarUrl ?? this.senderAvatarUrl,
       body: body ?? this.body,
+      status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
+      serverCreatedAt: serverCreatedAt ?? this.serverCreatedAt,
       replyToId: replyToId ?? this.replyToId,
       forwardedFromId: forwardedFromId ?? this.forwardedFromId,
       attachmentsJson: attachmentsJson ?? this.attachmentsJson,
@@ -1535,7 +1874,10 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       linkPreviewsJson: linkPreviewsJson ?? this.linkPreviewsJson,
       isDeleted: isDeleted ?? this.isDeleted,
       deletedForMe: deletedForMe ?? this.deletedForMe,
+      isSystem: isSystem ?? this.isSystem,
+      systemAction: systemAction ?? this.systemAction,
       lastSyncedAt: lastSyncedAt ?? this.lastSyncedAt,
+      rowid: rowid ?? this.rowid,
     );
   }
 
@@ -1544,6 +1886,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     final map = <String, Expression>{};
     if (id.present) {
       map['id'] = Variable<int>(id.value);
+    }
+    if (clientUuid.present) {
+      map['client_uuid'] = Variable<String>(clientUuid.value);
     }
     if (conversationId.present) {
       map['conversation_id'] = Variable<int>(conversationId.value);
@@ -1563,8 +1908,14 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     if (body.present) {
       map['body'] = Variable<String>(body.value);
     }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (serverCreatedAt.present) {
+      map['server_created_at'] = Variable<DateTime>(serverCreatedAt.value);
     }
     if (replyToId.present) {
       map['reply_to_id'] = Variable<int>(replyToId.value);
@@ -1602,8 +1953,17 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     if (deletedForMe.present) {
       map['deleted_for_me'] = Variable<bool>(deletedForMe.value);
     }
+    if (isSystem.present) {
+      map['is_system'] = Variable<bool>(isSystem.value);
+    }
+    if (systemAction.present) {
+      map['system_action'] = Variable<String>(systemAction.value);
+    }
     if (lastSyncedAt.present) {
       map['last_synced_at'] = Variable<DateTime>(lastSyncedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
     }
     return map;
   }
@@ -1612,13 +1972,16 @@ class MessagesCompanion extends UpdateCompanion<Message> {
   String toString() {
     return (StringBuffer('MessagesCompanion(')
           ..write('id: $id, ')
+          ..write('clientUuid: $clientUuid, ')
           ..write('conversationId: $conversationId, ')
           ..write('groupId: $groupId, ')
           ..write('senderId: $senderId, ')
           ..write('senderName: $senderName, ')
           ..write('senderAvatarUrl: $senderAvatarUrl, ')
           ..write('body: $body, ')
+          ..write('status: $status, ')
           ..write('createdAt: $createdAt, ')
+          ..write('serverCreatedAt: $serverCreatedAt, ')
           ..write('replyToId: $replyToId, ')
           ..write('forwardedFromId: $forwardedFromId, ')
           ..write('attachmentsJson: $attachmentsJson, ')
@@ -1631,7 +1994,10 @@ class MessagesCompanion extends UpdateCompanion<Message> {
           ..write('linkPreviewsJson: $linkPreviewsJson, ')
           ..write('isDeleted: $isDeleted, ')
           ..write('deletedForMe: $deletedForMe, ')
-          ..write('lastSyncedAt: $lastSyncedAt')
+          ..write('isSystem: $isSystem, ')
+          ..write('systemAction: $systemAction, ')
+          ..write('lastSyncedAt: $lastSyncedAt, ')
+          ..write('rowid: $rowid')
           ..write(')'))
         .toString();
   }
@@ -1698,6 +2064,22 @@ class $GroupsTable extends Groups with TableInfo<$GroupsTable, Group> {
   late final GeneratedColumn<String> lastMessage = GeneratedColumn<String>(
       'last_message', aliasedName, true,
       type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _lastMessageFromMeMeta =
+      const VerificationMeta('lastMessageFromMe');
+  @override
+  late final GeneratedColumn<bool> lastMessageFromMe = GeneratedColumn<bool>(
+      'last_message_from_me', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'CHECK ("last_message_from_me" IN (0, 1))'),
+      defaultValue: const Constant(false));
+  static const VerificationMeta _lastMessageOutgoingStatusMeta =
+      const VerificationMeta('lastMessageOutgoingStatus');
+  @override
+  late final GeneratedColumn<String> lastMessageOutgoingStatus =
+      GeneratedColumn<String>('last_message_outgoing_status', aliasedName, true,
+          type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _isPinnedMeta =
       const VerificationMeta('isPinned');
   @override
@@ -1724,6 +2106,14 @@ class $GroupsTable extends Groups with TableInfo<$GroupsTable, Group> {
   late final GeneratedColumn<DateTime> lastSyncedAt = GeneratedColumn<DateTime>(
       'last_synced_at', aliasedName, true,
       type: DriftSqlType.dateTime, requiredDuringInsert: false);
+  static const VerificationMeta _labelIdsJsonMeta =
+      const VerificationMeta('labelIdsJson');
+  @override
+  late final GeneratedColumn<String> labelIdsJson = GeneratedColumn<String>(
+      'label_ids_json', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant('[]'));
   @override
   List<GeneratedColumn> get $columns => [
         id,
@@ -1735,9 +2125,12 @@ class $GroupsTable extends Groups with TableInfo<$GroupsTable, Group> {
         type,
         isVerified,
         lastMessage,
+        lastMessageFromMe,
+        lastMessageOutgoingStatus,
         isPinned,
         isMuted,
-        lastSyncedAt
+        lastSyncedAt,
+        labelIdsJson
       ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1794,6 +2187,19 @@ class $GroupsTable extends Groups with TableInfo<$GroupsTable, Group> {
           lastMessage.isAcceptableOrUnknown(
               data['last_message']!, _lastMessageMeta));
     }
+    if (data.containsKey('last_message_from_me')) {
+      context.handle(
+          _lastMessageFromMeMeta,
+          lastMessageFromMe.isAcceptableOrUnknown(
+              data['last_message_from_me']!, _lastMessageFromMeMeta));
+    }
+    if (data.containsKey('last_message_outgoing_status')) {
+      context.handle(
+          _lastMessageOutgoingStatusMeta,
+          lastMessageOutgoingStatus.isAcceptableOrUnknown(
+              data['last_message_outgoing_status']!,
+              _lastMessageOutgoingStatusMeta));
+    }
     if (data.containsKey('is_pinned')) {
       context.handle(_isPinnedMeta,
           isPinned.isAcceptableOrUnknown(data['is_pinned']!, _isPinnedMeta));
@@ -1807,6 +2213,12 @@ class $GroupsTable extends Groups with TableInfo<$GroupsTable, Group> {
           _lastSyncedAtMeta,
           lastSyncedAt.isAcceptableOrUnknown(
               data['last_synced_at']!, _lastSyncedAtMeta));
+    }
+    if (data.containsKey('label_ids_json')) {
+      context.handle(
+          _labelIdsJsonMeta,
+          labelIdsJson.isAcceptableOrUnknown(
+              data['label_ids_json']!, _labelIdsJsonMeta));
     }
     return context;
   }
@@ -1835,12 +2247,19 @@ class $GroupsTable extends Groups with TableInfo<$GroupsTable, Group> {
           .read(DriftSqlType.bool, data['${effectivePrefix}is_verified']),
       lastMessage: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}last_message']),
+      lastMessageFromMe: attachedDatabase.typeMapping.read(
+          DriftSqlType.bool, data['${effectivePrefix}last_message_from_me'])!,
+      lastMessageOutgoingStatus: attachedDatabase.typeMapping.read(
+          DriftSqlType.string,
+          data['${effectivePrefix}last_message_outgoing_status']),
       isPinned: attachedDatabase.typeMapping
           .read(DriftSqlType.bool, data['${effectivePrefix}is_pinned'])!,
       isMuted: attachedDatabase.typeMapping
           .read(DriftSqlType.bool, data['${effectivePrefix}is_muted'])!,
       lastSyncedAt: attachedDatabase.typeMapping.read(
           DriftSqlType.dateTime, data['${effectivePrefix}last_synced_at']),
+      labelIdsJson: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}label_ids_json'])!,
     );
   }
 
@@ -1860,9 +2279,12 @@ class Group extends DataClass implements Insertable<Group> {
   final String? type;
   final bool? isVerified;
   final String? lastMessage;
+  final bool lastMessageFromMe;
+  final String? lastMessageOutgoingStatus;
   final bool isPinned;
   final bool isMuted;
   final DateTime? lastSyncedAt;
+  final String labelIdsJson;
   const Group(
       {required this.id,
       required this.name,
@@ -1873,9 +2295,12 @@ class Group extends DataClass implements Insertable<Group> {
       this.type,
       this.isVerified,
       this.lastMessage,
+      required this.lastMessageFromMe,
+      this.lastMessageOutgoingStatus,
       required this.isPinned,
       required this.isMuted,
-      this.lastSyncedAt});
+      this.lastSyncedAt,
+      required this.labelIdsJson});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -1900,11 +2325,17 @@ class Group extends DataClass implements Insertable<Group> {
     if (!nullToAbsent || lastMessage != null) {
       map['last_message'] = Variable<String>(lastMessage);
     }
+    map['last_message_from_me'] = Variable<bool>(lastMessageFromMe);
+    if (!nullToAbsent || lastMessageOutgoingStatus != null) {
+      map['last_message_outgoing_status'] =
+          Variable<String>(lastMessageOutgoingStatus);
+    }
     map['is_pinned'] = Variable<bool>(isPinned);
     map['is_muted'] = Variable<bool>(isMuted);
     if (!nullToAbsent || lastSyncedAt != null) {
       map['last_synced_at'] = Variable<DateTime>(lastSyncedAt);
     }
+    map['label_ids_json'] = Variable<String>(labelIdsJson);
     return map;
   }
 
@@ -1929,11 +2360,17 @@ class Group extends DataClass implements Insertable<Group> {
       lastMessage: lastMessage == null && nullToAbsent
           ? const Value.absent()
           : Value(lastMessage),
+      lastMessageFromMe: Value(lastMessageFromMe),
+      lastMessageOutgoingStatus:
+          lastMessageOutgoingStatus == null && nullToAbsent
+              ? const Value.absent()
+              : Value(lastMessageOutgoingStatus),
       isPinned: Value(isPinned),
       isMuted: Value(isMuted),
       lastSyncedAt: lastSyncedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(lastSyncedAt),
+      labelIdsJson: Value(labelIdsJson),
     );
   }
 
@@ -1950,9 +2387,13 @@ class Group extends DataClass implements Insertable<Group> {
       type: serializer.fromJson<String?>(json['type']),
       isVerified: serializer.fromJson<bool?>(json['isVerified']),
       lastMessage: serializer.fromJson<String?>(json['lastMessage']),
+      lastMessageFromMe: serializer.fromJson<bool>(json['lastMessageFromMe']),
+      lastMessageOutgoingStatus:
+          serializer.fromJson<String?>(json['lastMessageOutgoingStatus']),
       isPinned: serializer.fromJson<bool>(json['isPinned']),
       isMuted: serializer.fromJson<bool>(json['isMuted']),
       lastSyncedAt: serializer.fromJson<DateTime?>(json['lastSyncedAt']),
+      labelIdsJson: serializer.fromJson<String>(json['labelIdsJson']),
     );
   }
   @override
@@ -1968,9 +2409,13 @@ class Group extends DataClass implements Insertable<Group> {
       'type': serializer.toJson<String?>(type),
       'isVerified': serializer.toJson<bool?>(isVerified),
       'lastMessage': serializer.toJson<String?>(lastMessage),
+      'lastMessageFromMe': serializer.toJson<bool>(lastMessageFromMe),
+      'lastMessageOutgoingStatus':
+          serializer.toJson<String?>(lastMessageOutgoingStatus),
       'isPinned': serializer.toJson<bool>(isPinned),
       'isMuted': serializer.toJson<bool>(isMuted),
       'lastSyncedAt': serializer.toJson<DateTime?>(lastSyncedAt),
+      'labelIdsJson': serializer.toJson<String>(labelIdsJson),
     };
   }
 
@@ -1984,9 +2429,12 @@ class Group extends DataClass implements Insertable<Group> {
           Value<String?> type = const Value.absent(),
           Value<bool?> isVerified = const Value.absent(),
           Value<String?> lastMessage = const Value.absent(),
+          bool? lastMessageFromMe,
+          Value<String?> lastMessageOutgoingStatus = const Value.absent(),
           bool? isPinned,
           bool? isMuted,
-          Value<DateTime?> lastSyncedAt = const Value.absent()}) =>
+          Value<DateTime?> lastSyncedAt = const Value.absent(),
+          String? labelIdsJson}) =>
       Group(
         id: id ?? this.id,
         name: name ?? this.name,
@@ -1997,10 +2445,15 @@ class Group extends DataClass implements Insertable<Group> {
         type: type.present ? type.value : this.type,
         isVerified: isVerified.present ? isVerified.value : this.isVerified,
         lastMessage: lastMessage.present ? lastMessage.value : this.lastMessage,
+        lastMessageFromMe: lastMessageFromMe ?? this.lastMessageFromMe,
+        lastMessageOutgoingStatus: lastMessageOutgoingStatus.present
+            ? lastMessageOutgoingStatus.value
+            : this.lastMessageOutgoingStatus,
         isPinned: isPinned ?? this.isPinned,
         isMuted: isMuted ?? this.isMuted,
         lastSyncedAt:
             lastSyncedAt.present ? lastSyncedAt.value : this.lastSyncedAt,
+        labelIdsJson: labelIdsJson ?? this.labelIdsJson,
       );
   Group copyWithCompanion(GroupsCompanion data) {
     return Group(
@@ -2017,11 +2470,20 @@ class Group extends DataClass implements Insertable<Group> {
           data.isVerified.present ? data.isVerified.value : this.isVerified,
       lastMessage:
           data.lastMessage.present ? data.lastMessage.value : this.lastMessage,
+      lastMessageFromMe: data.lastMessageFromMe.present
+          ? data.lastMessageFromMe.value
+          : this.lastMessageFromMe,
+      lastMessageOutgoingStatus: data.lastMessageOutgoingStatus.present
+          ? data.lastMessageOutgoingStatus.value
+          : this.lastMessageOutgoingStatus,
       isPinned: data.isPinned.present ? data.isPinned.value : this.isPinned,
       isMuted: data.isMuted.present ? data.isMuted.value : this.isMuted,
       lastSyncedAt: data.lastSyncedAt.present
           ? data.lastSyncedAt.value
           : this.lastSyncedAt,
+      labelIdsJson: data.labelIdsJson.present
+          ? data.labelIdsJson.value
+          : this.labelIdsJson,
     );
   }
 
@@ -2037,9 +2499,12 @@ class Group extends DataClass implements Insertable<Group> {
           ..write('type: $type, ')
           ..write('isVerified: $isVerified, ')
           ..write('lastMessage: $lastMessage, ')
+          ..write('lastMessageFromMe: $lastMessageFromMe, ')
+          ..write('lastMessageOutgoingStatus: $lastMessageOutgoingStatus, ')
           ..write('isPinned: $isPinned, ')
           ..write('isMuted: $isMuted, ')
-          ..write('lastSyncedAt: $lastSyncedAt')
+          ..write('lastSyncedAt: $lastSyncedAt, ')
+          ..write('labelIdsJson: $labelIdsJson')
           ..write(')'))
         .toString();
   }
@@ -2055,9 +2520,12 @@ class Group extends DataClass implements Insertable<Group> {
       type,
       isVerified,
       lastMessage,
+      lastMessageFromMe,
+      lastMessageOutgoingStatus,
       isPinned,
       isMuted,
-      lastSyncedAt);
+      lastSyncedAt,
+      labelIdsJson);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -2071,9 +2539,12 @@ class Group extends DataClass implements Insertable<Group> {
           other.type == this.type &&
           other.isVerified == this.isVerified &&
           other.lastMessage == this.lastMessage &&
+          other.lastMessageFromMe == this.lastMessageFromMe &&
+          other.lastMessageOutgoingStatus == this.lastMessageOutgoingStatus &&
           other.isPinned == this.isPinned &&
           other.isMuted == this.isMuted &&
-          other.lastSyncedAt == this.lastSyncedAt);
+          other.lastSyncedAt == this.lastSyncedAt &&
+          other.labelIdsJson == this.labelIdsJson);
 }
 
 class GroupsCompanion extends UpdateCompanion<Group> {
@@ -2086,9 +2557,12 @@ class GroupsCompanion extends UpdateCompanion<Group> {
   final Value<String?> type;
   final Value<bool?> isVerified;
   final Value<String?> lastMessage;
+  final Value<bool> lastMessageFromMe;
+  final Value<String?> lastMessageOutgoingStatus;
   final Value<bool> isPinned;
   final Value<bool> isMuted;
   final Value<DateTime?> lastSyncedAt;
+  final Value<String> labelIdsJson;
   const GroupsCompanion({
     this.id = const Value.absent(),
     this.name = const Value.absent(),
@@ -2099,9 +2573,12 @@ class GroupsCompanion extends UpdateCompanion<Group> {
     this.type = const Value.absent(),
     this.isVerified = const Value.absent(),
     this.lastMessage = const Value.absent(),
+    this.lastMessageFromMe = const Value.absent(),
+    this.lastMessageOutgoingStatus = const Value.absent(),
     this.isPinned = const Value.absent(),
     this.isMuted = const Value.absent(),
     this.lastSyncedAt = const Value.absent(),
+    this.labelIdsJson = const Value.absent(),
   });
   GroupsCompanion.insert({
     this.id = const Value.absent(),
@@ -2113,9 +2590,12 @@ class GroupsCompanion extends UpdateCompanion<Group> {
     this.type = const Value.absent(),
     this.isVerified = const Value.absent(),
     this.lastMessage = const Value.absent(),
+    this.lastMessageFromMe = const Value.absent(),
+    this.lastMessageOutgoingStatus = const Value.absent(),
     this.isPinned = const Value.absent(),
     this.isMuted = const Value.absent(),
     this.lastSyncedAt = const Value.absent(),
+    this.labelIdsJson = const Value.absent(),
   }) : name = Value(name);
   static Insertable<Group> custom({
     Expression<int>? id,
@@ -2127,9 +2607,12 @@ class GroupsCompanion extends UpdateCompanion<Group> {
     Expression<String>? type,
     Expression<bool>? isVerified,
     Expression<String>? lastMessage,
+    Expression<bool>? lastMessageFromMe,
+    Expression<String>? lastMessageOutgoingStatus,
     Expression<bool>? isPinned,
     Expression<bool>? isMuted,
     Expression<DateTime>? lastSyncedAt,
+    Expression<String>? labelIdsJson,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -2141,9 +2624,13 @@ class GroupsCompanion extends UpdateCompanion<Group> {
       if (type != null) 'type': type,
       if (isVerified != null) 'is_verified': isVerified,
       if (lastMessage != null) 'last_message': lastMessage,
+      if (lastMessageFromMe != null) 'last_message_from_me': lastMessageFromMe,
+      if (lastMessageOutgoingStatus != null)
+        'last_message_outgoing_status': lastMessageOutgoingStatus,
       if (isPinned != null) 'is_pinned': isPinned,
       if (isMuted != null) 'is_muted': isMuted,
       if (lastSyncedAt != null) 'last_synced_at': lastSyncedAt,
+      if (labelIdsJson != null) 'label_ids_json': labelIdsJson,
     });
   }
 
@@ -2157,9 +2644,12 @@ class GroupsCompanion extends UpdateCompanion<Group> {
       Value<String?>? type,
       Value<bool?>? isVerified,
       Value<String?>? lastMessage,
+      Value<bool>? lastMessageFromMe,
+      Value<String?>? lastMessageOutgoingStatus,
       Value<bool>? isPinned,
       Value<bool>? isMuted,
-      Value<DateTime?>? lastSyncedAt}) {
+      Value<DateTime?>? lastSyncedAt,
+      Value<String>? labelIdsJson}) {
     return GroupsCompanion(
       id: id ?? this.id,
       name: name ?? this.name,
@@ -2170,9 +2660,13 @@ class GroupsCompanion extends UpdateCompanion<Group> {
       type: type ?? this.type,
       isVerified: isVerified ?? this.isVerified,
       lastMessage: lastMessage ?? this.lastMessage,
+      lastMessageFromMe: lastMessageFromMe ?? this.lastMessageFromMe,
+      lastMessageOutgoingStatus:
+          lastMessageOutgoingStatus ?? this.lastMessageOutgoingStatus,
       isPinned: isPinned ?? this.isPinned,
       isMuted: isMuted ?? this.isMuted,
       lastSyncedAt: lastSyncedAt ?? this.lastSyncedAt,
+      labelIdsJson: labelIdsJson ?? this.labelIdsJson,
     );
   }
 
@@ -2206,6 +2700,13 @@ class GroupsCompanion extends UpdateCompanion<Group> {
     if (lastMessage.present) {
       map['last_message'] = Variable<String>(lastMessage.value);
     }
+    if (lastMessageFromMe.present) {
+      map['last_message_from_me'] = Variable<bool>(lastMessageFromMe.value);
+    }
+    if (lastMessageOutgoingStatus.present) {
+      map['last_message_outgoing_status'] =
+          Variable<String>(lastMessageOutgoingStatus.value);
+    }
     if (isPinned.present) {
       map['is_pinned'] = Variable<bool>(isPinned.value);
     }
@@ -2214,6 +2715,9 @@ class GroupsCompanion extends UpdateCompanion<Group> {
     }
     if (lastSyncedAt.present) {
       map['last_synced_at'] = Variable<DateTime>(lastSyncedAt.value);
+    }
+    if (labelIdsJson.present) {
+      map['label_ids_json'] = Variable<String>(labelIdsJson.value);
     }
     return map;
   }
@@ -2230,9 +2734,12 @@ class GroupsCompanion extends UpdateCompanion<Group> {
           ..write('type: $type, ')
           ..write('isVerified: $isVerified, ')
           ..write('lastMessage: $lastMessage, ')
+          ..write('lastMessageFromMe: $lastMessageFromMe, ')
+          ..write('lastMessageOutgoingStatus: $lastMessageOutgoingStatus, ')
           ..write('isPinned: $isPinned, ')
           ..write('isMuted: $isMuted, ')
-          ..write('lastSyncedAt: $lastSyncedAt')
+          ..write('lastSyncedAt: $lastSyncedAt, ')
+          ..write('labelIdsJson: $labelIdsJson')
           ..write(')'))
         .toString();
   }
@@ -2253,6 +2760,12 @@ class $OfflineMessagesTable extends OfflineMessages
       requiredDuringInsert: false,
       defaultConstraints:
           GeneratedColumn.constraintIsAlways('PRIMARY KEY AUTOINCREMENT'));
+  static const VerificationMeta _clientUuidMeta =
+      const VerificationMeta('clientUuid');
+  @override
+  late final GeneratedColumn<String> clientUuid = GeneratedColumn<String>(
+      'client_uuid', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _conversationIdMeta =
       const VerificationMeta('conversationId');
   @override
@@ -2300,6 +2813,58 @@ class $OfflineMessagesTable extends OfflineMessages
   late final GeneratedColumn<String> contactDataJson = GeneratedColumn<String>(
       'contact_data_json', aliasedName, true,
       type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _messageTypeMeta =
+      const VerificationMeta('messageType');
+  @override
+  late final GeneratedColumn<String> messageType = GeneratedColumn<String>(
+      'message_type', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _viewOnceMeta =
+      const VerificationMeta('viewOnce');
+  @override
+  late final GeneratedColumn<bool> viewOnce = GeneratedColumn<bool>(
+      'view_once', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('CHECK ("view_once" IN (0, 1))'),
+      defaultValue: const Constant(false));
+  static const VerificationMeta _scheduledAtMeta =
+      const VerificationMeta('scheduledAt');
+  @override
+  late final GeneratedColumn<DateTime> scheduledAt = GeneratedColumn<DateTime>(
+      'scheduled_at', aliasedName, true,
+      type: DriftSqlType.dateTime, requiredDuringInsert: false);
+  static const VerificationMeta _expiresInHoursMeta =
+      const VerificationMeta('expiresInHours');
+  @override
+  late final GeneratedColumn<int> expiresInHours = GeneratedColumn<int>(
+      'expires_in_hours', aliasedName, true,
+      type: DriftSqlType.int, requiredDuringInsert: false);
+  static const VerificationMeta _referencedStatusIdMeta =
+      const VerificationMeta('referencedStatusId');
+  @override
+  late final GeneratedColumn<int> referencedStatusId = GeneratedColumn<int>(
+      'referenced_status_id', aliasedName, true,
+      type: DriftSqlType.int, requiredDuringInsert: false);
+  static const VerificationMeta _referencedGroupIdMeta =
+      const VerificationMeta('referencedGroupId');
+  @override
+  late final GeneratedColumn<int> referencedGroupId = GeneratedColumn<int>(
+      'referenced_group_id', aliasedName, true,
+      type: DriftSqlType.int, requiredDuringInsert: false);
+  static const VerificationMeta _referencedGroupMessageIdMeta =
+      const VerificationMeta('referencedGroupMessageId');
+  @override
+  late final GeneratedColumn<int> referencedGroupMessageId =
+      GeneratedColumn<int>('referenced_group_message_id', aliasedName, true,
+          type: DriftSqlType.int, requiredDuringInsert: false);
+  static const VerificationMeta _referencedContextJsonMeta =
+      const VerificationMeta('referencedContextJson');
+  @override
+  late final GeneratedColumn<String> referencedContextJson =
+      GeneratedColumn<String>('referenced_context_json', aliasedName, true,
+          type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _createdAtMeta =
       const VerificationMeta('createdAt');
   @override
@@ -2340,6 +2905,7 @@ class $OfflineMessagesTable extends OfflineMessages
   @override
   List<GeneratedColumn> get $columns => [
         id,
+        clientUuid,
         conversationId,
         groupId,
         body,
@@ -2348,6 +2914,14 @@ class $OfflineMessagesTable extends OfflineMessages
         attachmentsJson,
         locationDataJson,
         contactDataJson,
+        messageType,
+        viewOnce,
+        scheduledAt,
+        expiresInHours,
+        referencedStatusId,
+        referencedGroupId,
+        referencedGroupMessageId,
+        referencedContextJson,
         createdAt,
         isSent,
         serverMessageId,
@@ -2366,6 +2940,12 @@ class $OfflineMessagesTable extends OfflineMessages
     final data = instance.toColumns(true);
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('client_uuid')) {
+      context.handle(
+          _clientUuidMeta,
+          clientUuid.isAcceptableOrUnknown(
+              data['client_uuid']!, _clientUuidMeta));
     }
     if (data.containsKey('conversation_id')) {
       context.handle(
@@ -2413,6 +2993,53 @@ class $OfflineMessagesTable extends OfflineMessages
           contactDataJson.isAcceptableOrUnknown(
               data['contact_data_json']!, _contactDataJsonMeta));
     }
+    if (data.containsKey('message_type')) {
+      context.handle(
+          _messageTypeMeta,
+          messageType.isAcceptableOrUnknown(
+              data['message_type']!, _messageTypeMeta));
+    }
+    if (data.containsKey('view_once')) {
+      context.handle(_viewOnceMeta,
+          viewOnce.isAcceptableOrUnknown(data['view_once']!, _viewOnceMeta));
+    }
+    if (data.containsKey('scheduled_at')) {
+      context.handle(
+          _scheduledAtMeta,
+          scheduledAt.isAcceptableOrUnknown(
+              data['scheduled_at']!, _scheduledAtMeta));
+    }
+    if (data.containsKey('expires_in_hours')) {
+      context.handle(
+          _expiresInHoursMeta,
+          expiresInHours.isAcceptableOrUnknown(
+              data['expires_in_hours']!, _expiresInHoursMeta));
+    }
+    if (data.containsKey('referenced_status_id')) {
+      context.handle(
+          _referencedStatusIdMeta,
+          referencedStatusId.isAcceptableOrUnknown(
+              data['referenced_status_id']!, _referencedStatusIdMeta));
+    }
+    if (data.containsKey('referenced_group_id')) {
+      context.handle(
+          _referencedGroupIdMeta,
+          referencedGroupId.isAcceptableOrUnknown(
+              data['referenced_group_id']!, _referencedGroupIdMeta));
+    }
+    if (data.containsKey('referenced_group_message_id')) {
+      context.handle(
+          _referencedGroupMessageIdMeta,
+          referencedGroupMessageId.isAcceptableOrUnknown(
+              data['referenced_group_message_id']!,
+              _referencedGroupMessageIdMeta));
+    }
+    if (data.containsKey('referenced_context_json')) {
+      context.handle(
+          _referencedContextJsonMeta,
+          referencedContextJson.isAcceptableOrUnknown(
+              data['referenced_context_json']!, _referencedContextJsonMeta));
+    }
     if (data.containsKey('created_at')) {
       context.handle(_createdAtMeta,
           createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta));
@@ -2450,6 +3077,8 @@ class $OfflineMessagesTable extends OfflineMessages
     return OfflineMessage(
       id: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}id'])!,
+      clientUuid: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}client_uuid']),
       conversationId: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}conversation_id']),
       groupId: attachedDatabase.typeMapping
@@ -2466,6 +3095,24 @@ class $OfflineMessagesTable extends OfflineMessages
           DriftSqlType.string, data['${effectivePrefix}location_data_json']),
       contactDataJson: attachedDatabase.typeMapping.read(
           DriftSqlType.string, data['${effectivePrefix}contact_data_json']),
+      messageType: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}message_type']),
+      viewOnce: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}view_once'])!,
+      scheduledAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}scheduled_at']),
+      expiresInHours: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}expires_in_hours']),
+      referencedStatusId: attachedDatabase.typeMapping.read(
+          DriftSqlType.int, data['${effectivePrefix}referenced_status_id']),
+      referencedGroupId: attachedDatabase.typeMapping.read(
+          DriftSqlType.int, data['${effectivePrefix}referenced_group_id']),
+      referencedGroupMessageId: attachedDatabase.typeMapping.read(
+          DriftSqlType.int,
+          data['${effectivePrefix}referenced_group_message_id']),
+      referencedContextJson: attachedDatabase.typeMapping.read(
+          DriftSqlType.string,
+          data['${effectivePrefix}referenced_context_json']),
       createdAt: attachedDatabase.typeMapping
           .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
       isSent: attachedDatabase.typeMapping
@@ -2487,6 +3134,10 @@ class $OfflineMessagesTable extends OfflineMessages
 
 class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
   final int id;
+
+  /// Stable client UUID generated when the message is first queued.
+  /// This same UUID is sent to the server for idempotency so retries don't create duplicates.
+  final String? clientUuid;
   final int? conversationId;
   final int? groupId;
   final String body;
@@ -2495,6 +3146,18 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
   final String? attachmentsJson;
   final String? locationDataJson;
   final String? contactDataJson;
+  final String? messageType;
+  final bool viewOnce;
+  final DateTime? scheduledAt;
+  final int? expiresInHours;
+
+  /// DM reply-to-status / reply-to-group-message (API fields).
+  final int? referencedStatusId;
+  final int? referencedGroupId;
+  final int? referencedGroupMessageId;
+
+  /// JSON: optional `referenced_status` / `referenced_group` maps for optimistic UI replay.
+  final String? referencedContextJson;
   final DateTime createdAt;
   final bool isSent;
   final int? serverMessageId;
@@ -2502,6 +3165,7 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
   final int retryCount;
   const OfflineMessage(
       {required this.id,
+      this.clientUuid,
       this.conversationId,
       this.groupId,
       required this.body,
@@ -2510,6 +3174,14 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
       this.attachmentsJson,
       this.locationDataJson,
       this.contactDataJson,
+      this.messageType,
+      required this.viewOnce,
+      this.scheduledAt,
+      this.expiresInHours,
+      this.referencedStatusId,
+      this.referencedGroupId,
+      this.referencedGroupMessageId,
+      this.referencedContextJson,
       required this.createdAt,
       required this.isSent,
       this.serverMessageId,
@@ -2519,6 +3191,9 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<int>(id);
+    if (!nullToAbsent || clientUuid != null) {
+      map['client_uuid'] = Variable<String>(clientUuid);
+    }
     if (!nullToAbsent || conversationId != null) {
       map['conversation_id'] = Variable<int>(conversationId);
     }
@@ -2541,6 +3216,29 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
     if (!nullToAbsent || contactDataJson != null) {
       map['contact_data_json'] = Variable<String>(contactDataJson);
     }
+    if (!nullToAbsent || messageType != null) {
+      map['message_type'] = Variable<String>(messageType);
+    }
+    map['view_once'] = Variable<bool>(viewOnce);
+    if (!nullToAbsent || scheduledAt != null) {
+      map['scheduled_at'] = Variable<DateTime>(scheduledAt);
+    }
+    if (!nullToAbsent || expiresInHours != null) {
+      map['expires_in_hours'] = Variable<int>(expiresInHours);
+    }
+    if (!nullToAbsent || referencedStatusId != null) {
+      map['referenced_status_id'] = Variable<int>(referencedStatusId);
+    }
+    if (!nullToAbsent || referencedGroupId != null) {
+      map['referenced_group_id'] = Variable<int>(referencedGroupId);
+    }
+    if (!nullToAbsent || referencedGroupMessageId != null) {
+      map['referenced_group_message_id'] =
+          Variable<int>(referencedGroupMessageId);
+    }
+    if (!nullToAbsent || referencedContextJson != null) {
+      map['referenced_context_json'] = Variable<String>(referencedContextJson);
+    }
     map['created_at'] = Variable<DateTime>(createdAt);
     map['is_sent'] = Variable<bool>(isSent);
     if (!nullToAbsent || serverMessageId != null) {
@@ -2556,6 +3254,9 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
   OfflineMessagesCompanion toCompanion(bool nullToAbsent) {
     return OfflineMessagesCompanion(
       id: Value(id),
+      clientUuid: clientUuid == null && nullToAbsent
+          ? const Value.absent()
+          : Value(clientUuid),
       conversationId: conversationId == null && nullToAbsent
           ? const Value.absent()
           : Value(conversationId),
@@ -2578,6 +3279,28 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
       contactDataJson: contactDataJson == null && nullToAbsent
           ? const Value.absent()
           : Value(contactDataJson),
+      messageType: messageType == null && nullToAbsent
+          ? const Value.absent()
+          : Value(messageType),
+      viewOnce: Value(viewOnce),
+      scheduledAt: scheduledAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(scheduledAt),
+      expiresInHours: expiresInHours == null && nullToAbsent
+          ? const Value.absent()
+          : Value(expiresInHours),
+      referencedStatusId: referencedStatusId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(referencedStatusId),
+      referencedGroupId: referencedGroupId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(referencedGroupId),
+      referencedGroupMessageId: referencedGroupMessageId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(referencedGroupMessageId),
+      referencedContextJson: referencedContextJson == null && nullToAbsent
+          ? const Value.absent()
+          : Value(referencedContextJson),
       createdAt: Value(createdAt),
       isSent: Value(isSent),
       serverMessageId: serverMessageId == null && nullToAbsent
@@ -2595,6 +3318,7 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return OfflineMessage(
       id: serializer.fromJson<int>(json['id']),
+      clientUuid: serializer.fromJson<String?>(json['clientUuid']),
       conversationId: serializer.fromJson<int?>(json['conversationId']),
       groupId: serializer.fromJson<int?>(json['groupId']),
       body: serializer.fromJson<String>(json['body']),
@@ -2603,6 +3327,16 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
       attachmentsJson: serializer.fromJson<String?>(json['attachmentsJson']),
       locationDataJson: serializer.fromJson<String?>(json['locationDataJson']),
       contactDataJson: serializer.fromJson<String?>(json['contactDataJson']),
+      messageType: serializer.fromJson<String?>(json['messageType']),
+      viewOnce: serializer.fromJson<bool>(json['viewOnce']),
+      scheduledAt: serializer.fromJson<DateTime?>(json['scheduledAt']),
+      expiresInHours: serializer.fromJson<int?>(json['expiresInHours']),
+      referencedStatusId: serializer.fromJson<int?>(json['referencedStatusId']),
+      referencedGroupId: serializer.fromJson<int?>(json['referencedGroupId']),
+      referencedGroupMessageId:
+          serializer.fromJson<int?>(json['referencedGroupMessageId']),
+      referencedContextJson:
+          serializer.fromJson<String?>(json['referencedContextJson']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       isSent: serializer.fromJson<bool>(json['isSent']),
       serverMessageId: serializer.fromJson<int?>(json['serverMessageId']),
@@ -2615,6 +3349,7 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'id': serializer.toJson<int>(id),
+      'clientUuid': serializer.toJson<String?>(clientUuid),
       'conversationId': serializer.toJson<int?>(conversationId),
       'groupId': serializer.toJson<int?>(groupId),
       'body': serializer.toJson<String>(body),
@@ -2623,6 +3358,16 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
       'attachmentsJson': serializer.toJson<String?>(attachmentsJson),
       'locationDataJson': serializer.toJson<String?>(locationDataJson),
       'contactDataJson': serializer.toJson<String?>(contactDataJson),
+      'messageType': serializer.toJson<String?>(messageType),
+      'viewOnce': serializer.toJson<bool>(viewOnce),
+      'scheduledAt': serializer.toJson<DateTime?>(scheduledAt),
+      'expiresInHours': serializer.toJson<int?>(expiresInHours),
+      'referencedStatusId': serializer.toJson<int?>(referencedStatusId),
+      'referencedGroupId': serializer.toJson<int?>(referencedGroupId),
+      'referencedGroupMessageId':
+          serializer.toJson<int?>(referencedGroupMessageId),
+      'referencedContextJson':
+          serializer.toJson<String?>(referencedContextJson),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'isSent': serializer.toJson<bool>(isSent),
       'serverMessageId': serializer.toJson<int?>(serverMessageId),
@@ -2633,6 +3378,7 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
 
   OfflineMessage copyWith(
           {int? id,
+          Value<String?> clientUuid = const Value.absent(),
           Value<int?> conversationId = const Value.absent(),
           Value<int?> groupId = const Value.absent(),
           String? body,
@@ -2641,6 +3387,14 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
           Value<String?> attachmentsJson = const Value.absent(),
           Value<String?> locationDataJson = const Value.absent(),
           Value<String?> contactDataJson = const Value.absent(),
+          Value<String?> messageType = const Value.absent(),
+          bool? viewOnce,
+          Value<DateTime?> scheduledAt = const Value.absent(),
+          Value<int?> expiresInHours = const Value.absent(),
+          Value<int?> referencedStatusId = const Value.absent(),
+          Value<int?> referencedGroupId = const Value.absent(),
+          Value<int?> referencedGroupMessageId = const Value.absent(),
+          Value<String?> referencedContextJson = const Value.absent(),
           DateTime? createdAt,
           bool? isSent,
           Value<int?> serverMessageId = const Value.absent(),
@@ -2648,6 +3402,7 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
           int? retryCount}) =>
       OfflineMessage(
         id: id ?? this.id,
+        clientUuid: clientUuid.present ? clientUuid.value : this.clientUuid,
         conversationId:
             conversationId.present ? conversationId.value : this.conversationId,
         groupId: groupId.present ? groupId.value : this.groupId,
@@ -2664,6 +3419,23 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
         contactDataJson: contactDataJson.present
             ? contactDataJson.value
             : this.contactDataJson,
+        messageType: messageType.present ? messageType.value : this.messageType,
+        viewOnce: viewOnce ?? this.viewOnce,
+        scheduledAt: scheduledAt.present ? scheduledAt.value : this.scheduledAt,
+        expiresInHours:
+            expiresInHours.present ? expiresInHours.value : this.expiresInHours,
+        referencedStatusId: referencedStatusId.present
+            ? referencedStatusId.value
+            : this.referencedStatusId,
+        referencedGroupId: referencedGroupId.present
+            ? referencedGroupId.value
+            : this.referencedGroupId,
+        referencedGroupMessageId: referencedGroupMessageId.present
+            ? referencedGroupMessageId.value
+            : this.referencedGroupMessageId,
+        referencedContextJson: referencedContextJson.present
+            ? referencedContextJson.value
+            : this.referencedContextJson,
         createdAt: createdAt ?? this.createdAt,
         isSent: isSent ?? this.isSent,
         serverMessageId: serverMessageId.present
@@ -2676,6 +3448,8 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
   OfflineMessage copyWithCompanion(OfflineMessagesCompanion data) {
     return OfflineMessage(
       id: data.id.present ? data.id.value : this.id,
+      clientUuid:
+          data.clientUuid.present ? data.clientUuid.value : this.clientUuid,
       conversationId: data.conversationId.present
           ? data.conversationId.value
           : this.conversationId,
@@ -2694,6 +3468,26 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
       contactDataJson: data.contactDataJson.present
           ? data.contactDataJson.value
           : this.contactDataJson,
+      messageType:
+          data.messageType.present ? data.messageType.value : this.messageType,
+      viewOnce: data.viewOnce.present ? data.viewOnce.value : this.viewOnce,
+      scheduledAt:
+          data.scheduledAt.present ? data.scheduledAt.value : this.scheduledAt,
+      expiresInHours: data.expiresInHours.present
+          ? data.expiresInHours.value
+          : this.expiresInHours,
+      referencedStatusId: data.referencedStatusId.present
+          ? data.referencedStatusId.value
+          : this.referencedStatusId,
+      referencedGroupId: data.referencedGroupId.present
+          ? data.referencedGroupId.value
+          : this.referencedGroupId,
+      referencedGroupMessageId: data.referencedGroupMessageId.present
+          ? data.referencedGroupMessageId.value
+          : this.referencedGroupMessageId,
+      referencedContextJson: data.referencedContextJson.present
+          ? data.referencedContextJson.value
+          : this.referencedContextJson,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       isSent: data.isSent.present ? data.isSent.value : this.isSent,
       serverMessageId: data.serverMessageId.present
@@ -2711,6 +3505,7 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
   String toString() {
     return (StringBuffer('OfflineMessage(')
           ..write('id: $id, ')
+          ..write('clientUuid: $clientUuid, ')
           ..write('conversationId: $conversationId, ')
           ..write('groupId: $groupId, ')
           ..write('body: $body, ')
@@ -2719,6 +3514,14 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
           ..write('attachmentsJson: $attachmentsJson, ')
           ..write('locationDataJson: $locationDataJson, ')
           ..write('contactDataJson: $contactDataJson, ')
+          ..write('messageType: $messageType, ')
+          ..write('viewOnce: $viewOnce, ')
+          ..write('scheduledAt: $scheduledAt, ')
+          ..write('expiresInHours: $expiresInHours, ')
+          ..write('referencedStatusId: $referencedStatusId, ')
+          ..write('referencedGroupId: $referencedGroupId, ')
+          ..write('referencedGroupMessageId: $referencedGroupMessageId, ')
+          ..write('referencedContextJson: $referencedContextJson, ')
           ..write('createdAt: $createdAt, ')
           ..write('isSent: $isSent, ')
           ..write('serverMessageId: $serverMessageId, ')
@@ -2729,26 +3532,37 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
   }
 
   @override
-  int get hashCode => Object.hash(
-      id,
-      conversationId,
-      groupId,
-      body,
-      replyToId,
-      forwardFromId,
-      attachmentsJson,
-      locationDataJson,
-      contactDataJson,
-      createdAt,
-      isSent,
-      serverMessageId,
-      errorMessage,
-      retryCount);
+  int get hashCode => Object.hashAll([
+        id,
+        clientUuid,
+        conversationId,
+        groupId,
+        body,
+        replyToId,
+        forwardFromId,
+        attachmentsJson,
+        locationDataJson,
+        contactDataJson,
+        messageType,
+        viewOnce,
+        scheduledAt,
+        expiresInHours,
+        referencedStatusId,
+        referencedGroupId,
+        referencedGroupMessageId,
+        referencedContextJson,
+        createdAt,
+        isSent,
+        serverMessageId,
+        errorMessage,
+        retryCount
+      ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is OfflineMessage &&
           other.id == this.id &&
+          other.clientUuid == this.clientUuid &&
           other.conversationId == this.conversationId &&
           other.groupId == this.groupId &&
           other.body == this.body &&
@@ -2757,6 +3571,14 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
           other.attachmentsJson == this.attachmentsJson &&
           other.locationDataJson == this.locationDataJson &&
           other.contactDataJson == this.contactDataJson &&
+          other.messageType == this.messageType &&
+          other.viewOnce == this.viewOnce &&
+          other.scheduledAt == this.scheduledAt &&
+          other.expiresInHours == this.expiresInHours &&
+          other.referencedStatusId == this.referencedStatusId &&
+          other.referencedGroupId == this.referencedGroupId &&
+          other.referencedGroupMessageId == this.referencedGroupMessageId &&
+          other.referencedContextJson == this.referencedContextJson &&
           other.createdAt == this.createdAt &&
           other.isSent == this.isSent &&
           other.serverMessageId == this.serverMessageId &&
@@ -2766,6 +3588,7 @@ class OfflineMessage extends DataClass implements Insertable<OfflineMessage> {
 
 class OfflineMessagesCompanion extends UpdateCompanion<OfflineMessage> {
   final Value<int> id;
+  final Value<String?> clientUuid;
   final Value<int?> conversationId;
   final Value<int?> groupId;
   final Value<String> body;
@@ -2774,6 +3597,14 @@ class OfflineMessagesCompanion extends UpdateCompanion<OfflineMessage> {
   final Value<String?> attachmentsJson;
   final Value<String?> locationDataJson;
   final Value<String?> contactDataJson;
+  final Value<String?> messageType;
+  final Value<bool> viewOnce;
+  final Value<DateTime?> scheduledAt;
+  final Value<int?> expiresInHours;
+  final Value<int?> referencedStatusId;
+  final Value<int?> referencedGroupId;
+  final Value<int?> referencedGroupMessageId;
+  final Value<String?> referencedContextJson;
   final Value<DateTime> createdAt;
   final Value<bool> isSent;
   final Value<int?> serverMessageId;
@@ -2781,6 +3612,7 @@ class OfflineMessagesCompanion extends UpdateCompanion<OfflineMessage> {
   final Value<int> retryCount;
   const OfflineMessagesCompanion({
     this.id = const Value.absent(),
+    this.clientUuid = const Value.absent(),
     this.conversationId = const Value.absent(),
     this.groupId = const Value.absent(),
     this.body = const Value.absent(),
@@ -2789,6 +3621,14 @@ class OfflineMessagesCompanion extends UpdateCompanion<OfflineMessage> {
     this.attachmentsJson = const Value.absent(),
     this.locationDataJson = const Value.absent(),
     this.contactDataJson = const Value.absent(),
+    this.messageType = const Value.absent(),
+    this.viewOnce = const Value.absent(),
+    this.scheduledAt = const Value.absent(),
+    this.expiresInHours = const Value.absent(),
+    this.referencedStatusId = const Value.absent(),
+    this.referencedGroupId = const Value.absent(),
+    this.referencedGroupMessageId = const Value.absent(),
+    this.referencedContextJson = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.isSent = const Value.absent(),
     this.serverMessageId = const Value.absent(),
@@ -2797,6 +3637,7 @@ class OfflineMessagesCompanion extends UpdateCompanion<OfflineMessage> {
   });
   OfflineMessagesCompanion.insert({
     this.id = const Value.absent(),
+    this.clientUuid = const Value.absent(),
     this.conversationId = const Value.absent(),
     this.groupId = const Value.absent(),
     required String body,
@@ -2805,6 +3646,14 @@ class OfflineMessagesCompanion extends UpdateCompanion<OfflineMessage> {
     this.attachmentsJson = const Value.absent(),
     this.locationDataJson = const Value.absent(),
     this.contactDataJson = const Value.absent(),
+    this.messageType = const Value.absent(),
+    this.viewOnce = const Value.absent(),
+    this.scheduledAt = const Value.absent(),
+    this.expiresInHours = const Value.absent(),
+    this.referencedStatusId = const Value.absent(),
+    this.referencedGroupId = const Value.absent(),
+    this.referencedGroupMessageId = const Value.absent(),
+    this.referencedContextJson = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.isSent = const Value.absent(),
     this.serverMessageId = const Value.absent(),
@@ -2813,6 +3662,7 @@ class OfflineMessagesCompanion extends UpdateCompanion<OfflineMessage> {
   }) : body = Value(body);
   static Insertable<OfflineMessage> custom({
     Expression<int>? id,
+    Expression<String>? clientUuid,
     Expression<int>? conversationId,
     Expression<int>? groupId,
     Expression<String>? body,
@@ -2821,6 +3671,14 @@ class OfflineMessagesCompanion extends UpdateCompanion<OfflineMessage> {
     Expression<String>? attachmentsJson,
     Expression<String>? locationDataJson,
     Expression<String>? contactDataJson,
+    Expression<String>? messageType,
+    Expression<bool>? viewOnce,
+    Expression<DateTime>? scheduledAt,
+    Expression<int>? expiresInHours,
+    Expression<int>? referencedStatusId,
+    Expression<int>? referencedGroupId,
+    Expression<int>? referencedGroupMessageId,
+    Expression<String>? referencedContextJson,
     Expression<DateTime>? createdAt,
     Expression<bool>? isSent,
     Expression<int>? serverMessageId,
@@ -2829,6 +3687,7 @@ class OfflineMessagesCompanion extends UpdateCompanion<OfflineMessage> {
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
+      if (clientUuid != null) 'client_uuid': clientUuid,
       if (conversationId != null) 'conversation_id': conversationId,
       if (groupId != null) 'group_id': groupId,
       if (body != null) 'body': body,
@@ -2837,6 +3696,17 @@ class OfflineMessagesCompanion extends UpdateCompanion<OfflineMessage> {
       if (attachmentsJson != null) 'attachments_json': attachmentsJson,
       if (locationDataJson != null) 'location_data_json': locationDataJson,
       if (contactDataJson != null) 'contact_data_json': contactDataJson,
+      if (messageType != null) 'message_type': messageType,
+      if (viewOnce != null) 'view_once': viewOnce,
+      if (scheduledAt != null) 'scheduled_at': scheduledAt,
+      if (expiresInHours != null) 'expires_in_hours': expiresInHours,
+      if (referencedStatusId != null)
+        'referenced_status_id': referencedStatusId,
+      if (referencedGroupId != null) 'referenced_group_id': referencedGroupId,
+      if (referencedGroupMessageId != null)
+        'referenced_group_message_id': referencedGroupMessageId,
+      if (referencedContextJson != null)
+        'referenced_context_json': referencedContextJson,
       if (createdAt != null) 'created_at': createdAt,
       if (isSent != null) 'is_sent': isSent,
       if (serverMessageId != null) 'server_message_id': serverMessageId,
@@ -2847,6 +3717,7 @@ class OfflineMessagesCompanion extends UpdateCompanion<OfflineMessage> {
 
   OfflineMessagesCompanion copyWith(
       {Value<int>? id,
+      Value<String?>? clientUuid,
       Value<int?>? conversationId,
       Value<int?>? groupId,
       Value<String>? body,
@@ -2855,6 +3726,14 @@ class OfflineMessagesCompanion extends UpdateCompanion<OfflineMessage> {
       Value<String?>? attachmentsJson,
       Value<String?>? locationDataJson,
       Value<String?>? contactDataJson,
+      Value<String?>? messageType,
+      Value<bool>? viewOnce,
+      Value<DateTime?>? scheduledAt,
+      Value<int?>? expiresInHours,
+      Value<int?>? referencedStatusId,
+      Value<int?>? referencedGroupId,
+      Value<int?>? referencedGroupMessageId,
+      Value<String?>? referencedContextJson,
       Value<DateTime>? createdAt,
       Value<bool>? isSent,
       Value<int?>? serverMessageId,
@@ -2862,6 +3741,7 @@ class OfflineMessagesCompanion extends UpdateCompanion<OfflineMessage> {
       Value<int>? retryCount}) {
     return OfflineMessagesCompanion(
       id: id ?? this.id,
+      clientUuid: clientUuid ?? this.clientUuid,
       conversationId: conversationId ?? this.conversationId,
       groupId: groupId ?? this.groupId,
       body: body ?? this.body,
@@ -2870,6 +3750,16 @@ class OfflineMessagesCompanion extends UpdateCompanion<OfflineMessage> {
       attachmentsJson: attachmentsJson ?? this.attachmentsJson,
       locationDataJson: locationDataJson ?? this.locationDataJson,
       contactDataJson: contactDataJson ?? this.contactDataJson,
+      messageType: messageType ?? this.messageType,
+      viewOnce: viewOnce ?? this.viewOnce,
+      scheduledAt: scheduledAt ?? this.scheduledAt,
+      expiresInHours: expiresInHours ?? this.expiresInHours,
+      referencedStatusId: referencedStatusId ?? this.referencedStatusId,
+      referencedGroupId: referencedGroupId ?? this.referencedGroupId,
+      referencedGroupMessageId:
+          referencedGroupMessageId ?? this.referencedGroupMessageId,
+      referencedContextJson:
+          referencedContextJson ?? this.referencedContextJson,
       createdAt: createdAt ?? this.createdAt,
       isSent: isSent ?? this.isSent,
       serverMessageId: serverMessageId ?? this.serverMessageId,
@@ -2883,6 +3773,9 @@ class OfflineMessagesCompanion extends UpdateCompanion<OfflineMessage> {
     final map = <String, Expression>{};
     if (id.present) {
       map['id'] = Variable<int>(id.value);
+    }
+    if (clientUuid.present) {
+      map['client_uuid'] = Variable<String>(clientUuid.value);
     }
     if (conversationId.present) {
       map['conversation_id'] = Variable<int>(conversationId.value);
@@ -2908,6 +3801,32 @@ class OfflineMessagesCompanion extends UpdateCompanion<OfflineMessage> {
     if (contactDataJson.present) {
       map['contact_data_json'] = Variable<String>(contactDataJson.value);
     }
+    if (messageType.present) {
+      map['message_type'] = Variable<String>(messageType.value);
+    }
+    if (viewOnce.present) {
+      map['view_once'] = Variable<bool>(viewOnce.value);
+    }
+    if (scheduledAt.present) {
+      map['scheduled_at'] = Variable<DateTime>(scheduledAt.value);
+    }
+    if (expiresInHours.present) {
+      map['expires_in_hours'] = Variable<int>(expiresInHours.value);
+    }
+    if (referencedStatusId.present) {
+      map['referenced_status_id'] = Variable<int>(referencedStatusId.value);
+    }
+    if (referencedGroupId.present) {
+      map['referenced_group_id'] = Variable<int>(referencedGroupId.value);
+    }
+    if (referencedGroupMessageId.present) {
+      map['referenced_group_message_id'] =
+          Variable<int>(referencedGroupMessageId.value);
+    }
+    if (referencedContextJson.present) {
+      map['referenced_context_json'] =
+          Variable<String>(referencedContextJson.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -2930,6 +3849,7 @@ class OfflineMessagesCompanion extends UpdateCompanion<OfflineMessage> {
   String toString() {
     return (StringBuffer('OfflineMessagesCompanion(')
           ..write('id: $id, ')
+          ..write('clientUuid: $clientUuid, ')
           ..write('conversationId: $conversationId, ')
           ..write('groupId: $groupId, ')
           ..write('body: $body, ')
@@ -2938,6 +3858,14 @@ class OfflineMessagesCompanion extends UpdateCompanion<OfflineMessage> {
           ..write('attachmentsJson: $attachmentsJson, ')
           ..write('locationDataJson: $locationDataJson, ')
           ..write('contactDataJson: $contactDataJson, ')
+          ..write('messageType: $messageType, ')
+          ..write('viewOnce: $viewOnce, ')
+          ..write('scheduledAt: $scheduledAt, ')
+          ..write('expiresInHours: $expiresInHours, ')
+          ..write('referencedStatusId: $referencedStatusId, ')
+          ..write('referencedGroupId: $referencedGroupId, ')
+          ..write('referencedGroupMessageId: $referencedGroupMessageId, ')
+          ..write('referencedContextJson: $referencedContextJson, ')
           ..write('createdAt: $createdAt, ')
           ..write('isSent: $isSent, ')
           ..write('serverMessageId: $serverMessageId, ')
@@ -2972,12 +3900,15 @@ typedef $$ConversationsTableCreateCompanionBuilder = ConversationsCompanion
   Value<String?> otherUserPhone,
   Value<String?> otherUserAvatarUrl,
   Value<String?> lastMessage,
+  Value<bool> lastMessageFromMe,
+  Value<String?> lastMessageOutgoingStatus,
   Value<int> unreadCount,
   Value<DateTime?> updatedAt,
   Value<bool> isPinned,
   Value<bool> isMuted,
   Value<DateTime?> archivedAt,
   Value<DateTime?> lastSyncedAt,
+  Value<String> labelIdsJson,
 });
 typedef $$ConversationsTableUpdateCompanionBuilder = ConversationsCompanion
     Function({
@@ -2987,12 +3918,15 @@ typedef $$ConversationsTableUpdateCompanionBuilder = ConversationsCompanion
   Value<String?> otherUserPhone,
   Value<String?> otherUserAvatarUrl,
   Value<String?> lastMessage,
+  Value<bool> lastMessageFromMe,
+  Value<String?> lastMessageOutgoingStatus,
   Value<int> unreadCount,
   Value<DateTime?> updatedAt,
   Value<bool> isPinned,
   Value<bool> isMuted,
   Value<DateTime?> archivedAt,
   Value<DateTime?> lastSyncedAt,
+  Value<String> labelIdsJson,
 });
 
 class $$ConversationsTableFilterComposer
@@ -3024,6 +3958,14 @@ class $$ConversationsTableFilterComposer
   ColumnFilters<String> get lastMessage => $composableBuilder(
       column: $table.lastMessage, builder: (column) => ColumnFilters(column));
 
+  ColumnFilters<bool> get lastMessageFromMe => $composableBuilder(
+      column: $table.lastMessageFromMe,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get lastMessageOutgoingStatus => $composableBuilder(
+      column: $table.lastMessageOutgoingStatus,
+      builder: (column) => ColumnFilters(column));
+
   ColumnFilters<int> get unreadCount => $composableBuilder(
       column: $table.unreadCount, builder: (column) => ColumnFilters(column));
 
@@ -3041,6 +3983,9 @@ class $$ConversationsTableFilterComposer
 
   ColumnFilters<DateTime> get lastSyncedAt => $composableBuilder(
       column: $table.lastSyncedAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get labelIdsJson => $composableBuilder(
+      column: $table.labelIdsJson, builder: (column) => ColumnFilters(column));
 }
 
 class $$ConversationsTableOrderingComposer
@@ -3073,6 +4018,14 @@ class $$ConversationsTableOrderingComposer
   ColumnOrderings<String> get lastMessage => $composableBuilder(
       column: $table.lastMessage, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<bool> get lastMessageFromMe => $composableBuilder(
+      column: $table.lastMessageFromMe,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get lastMessageOutgoingStatus => $composableBuilder(
+      column: $table.lastMessageOutgoingStatus,
+      builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<int> get unreadCount => $composableBuilder(
       column: $table.unreadCount, builder: (column) => ColumnOrderings(column));
 
@@ -3090,6 +4043,10 @@ class $$ConversationsTableOrderingComposer
 
   ColumnOrderings<DateTime> get lastSyncedAt => $composableBuilder(
       column: $table.lastSyncedAt,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get labelIdsJson => $composableBuilder(
+      column: $table.labelIdsJson,
       builder: (column) => ColumnOrderings(column));
 }
 
@@ -3120,6 +4077,12 @@ class $$ConversationsTableAnnotationComposer
   GeneratedColumn<String> get lastMessage => $composableBuilder(
       column: $table.lastMessage, builder: (column) => column);
 
+  GeneratedColumn<bool> get lastMessageFromMe => $composableBuilder(
+      column: $table.lastMessageFromMe, builder: (column) => column);
+
+  GeneratedColumn<String> get lastMessageOutgoingStatus => $composableBuilder(
+      column: $table.lastMessageOutgoingStatus, builder: (column) => column);
+
   GeneratedColumn<int> get unreadCount => $composableBuilder(
       column: $table.unreadCount, builder: (column) => column);
 
@@ -3137,6 +4100,9 @@ class $$ConversationsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get lastSyncedAt => $composableBuilder(
       column: $table.lastSyncedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get labelIdsJson => $composableBuilder(
+      column: $table.labelIdsJson, builder: (column) => column);
 }
 
 class $$ConversationsTableTableManager extends RootTableManager<
@@ -3171,12 +4137,15 @@ class $$ConversationsTableTableManager extends RootTableManager<
             Value<String?> otherUserPhone = const Value.absent(),
             Value<String?> otherUserAvatarUrl = const Value.absent(),
             Value<String?> lastMessage = const Value.absent(),
+            Value<bool> lastMessageFromMe = const Value.absent(),
+            Value<String?> lastMessageOutgoingStatus = const Value.absent(),
             Value<int> unreadCount = const Value.absent(),
             Value<DateTime?> updatedAt = const Value.absent(),
             Value<bool> isPinned = const Value.absent(),
             Value<bool> isMuted = const Value.absent(),
             Value<DateTime?> archivedAt = const Value.absent(),
             Value<DateTime?> lastSyncedAt = const Value.absent(),
+            Value<String> labelIdsJson = const Value.absent(),
           }) =>
               ConversationsCompanion(
             id: id,
@@ -3185,12 +4154,15 @@ class $$ConversationsTableTableManager extends RootTableManager<
             otherUserPhone: otherUserPhone,
             otherUserAvatarUrl: otherUserAvatarUrl,
             lastMessage: lastMessage,
+            lastMessageFromMe: lastMessageFromMe,
+            lastMessageOutgoingStatus: lastMessageOutgoingStatus,
             unreadCount: unreadCount,
             updatedAt: updatedAt,
             isPinned: isPinned,
             isMuted: isMuted,
             archivedAt: archivedAt,
             lastSyncedAt: lastSyncedAt,
+            labelIdsJson: labelIdsJson,
           ),
           createCompanionCallback: ({
             Value<int> id = const Value.absent(),
@@ -3199,12 +4171,15 @@ class $$ConversationsTableTableManager extends RootTableManager<
             Value<String?> otherUserPhone = const Value.absent(),
             Value<String?> otherUserAvatarUrl = const Value.absent(),
             Value<String?> lastMessage = const Value.absent(),
+            Value<bool> lastMessageFromMe = const Value.absent(),
+            Value<String?> lastMessageOutgoingStatus = const Value.absent(),
             Value<int> unreadCount = const Value.absent(),
             Value<DateTime?> updatedAt = const Value.absent(),
             Value<bool> isPinned = const Value.absent(),
             Value<bool> isMuted = const Value.absent(),
             Value<DateTime?> archivedAt = const Value.absent(),
             Value<DateTime?> lastSyncedAt = const Value.absent(),
+            Value<String> labelIdsJson = const Value.absent(),
           }) =>
               ConversationsCompanion.insert(
             id: id,
@@ -3213,12 +4188,15 @@ class $$ConversationsTableTableManager extends RootTableManager<
             otherUserPhone: otherUserPhone,
             otherUserAvatarUrl: otherUserAvatarUrl,
             lastMessage: lastMessage,
+            lastMessageFromMe: lastMessageFromMe,
+            lastMessageOutgoingStatus: lastMessageOutgoingStatus,
             unreadCount: unreadCount,
             updatedAt: updatedAt,
             isPinned: isPinned,
             isMuted: isMuted,
             archivedAt: archivedAt,
             lastSyncedAt: lastSyncedAt,
+            labelIdsJson: labelIdsJson,
           ),
           withReferenceMapper: (p0) => p0
               .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
@@ -3243,14 +4221,17 @@ typedef $$ConversationsTableProcessedTableManager = ProcessedTableManager<
     Conversation,
     PrefetchHooks Function()>;
 typedef $$MessagesTableCreateCompanionBuilder = MessagesCompanion Function({
-  Value<int> id,
+  Value<int?> id,
+  required String clientUuid,
   Value<int?> conversationId,
   Value<int?> groupId,
   required int senderId,
   Value<String?> senderName,
   Value<String?> senderAvatarUrl,
   required String body,
+  Value<String> status,
   required DateTime createdAt,
+  Value<DateTime?> serverCreatedAt,
   Value<int?> replyToId,
   Value<int?> forwardedFromId,
   Value<String?> attachmentsJson,
@@ -3263,17 +4244,23 @@ typedef $$MessagesTableCreateCompanionBuilder = MessagesCompanion Function({
   Value<String?> linkPreviewsJson,
   Value<bool> isDeleted,
   Value<bool> deletedForMe,
+  Value<bool> isSystem,
+  Value<String?> systemAction,
   Value<DateTime?> lastSyncedAt,
+  Value<int> rowid,
 });
 typedef $$MessagesTableUpdateCompanionBuilder = MessagesCompanion Function({
-  Value<int> id,
+  Value<int?> id,
+  Value<String> clientUuid,
   Value<int?> conversationId,
   Value<int?> groupId,
   Value<int> senderId,
   Value<String?> senderName,
   Value<String?> senderAvatarUrl,
   Value<String> body,
+  Value<String> status,
   Value<DateTime> createdAt,
+  Value<DateTime?> serverCreatedAt,
   Value<int?> replyToId,
   Value<int?> forwardedFromId,
   Value<String?> attachmentsJson,
@@ -3286,7 +4273,10 @@ typedef $$MessagesTableUpdateCompanionBuilder = MessagesCompanion Function({
   Value<String?> linkPreviewsJson,
   Value<bool> isDeleted,
   Value<bool> deletedForMe,
+  Value<bool> isSystem,
+  Value<String?> systemAction,
   Value<DateTime?> lastSyncedAt,
+  Value<int> rowid,
 });
 
 class $$MessagesTableFilterComposer
@@ -3300,6 +4290,9 @@ class $$MessagesTableFilterComposer
   });
   ColumnFilters<int> get id => $composableBuilder(
       column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get clientUuid => $composableBuilder(
+      column: $table.clientUuid, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<int> get conversationId => $composableBuilder(
       column: $table.conversationId,
@@ -3321,8 +4314,15 @@ class $$MessagesTableFilterComposer
   ColumnFilters<String> get body => $composableBuilder(
       column: $table.body, builder: (column) => ColumnFilters(column));
 
+  ColumnFilters<String> get status => $composableBuilder(
+      column: $table.status, builder: (column) => ColumnFilters(column));
+
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
       column: $table.createdAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get serverCreatedAt => $composableBuilder(
+      column: $table.serverCreatedAt,
+      builder: (column) => ColumnFilters(column));
 
   ColumnFilters<int> get replyToId => $composableBuilder(
       column: $table.replyToId, builder: (column) => ColumnFilters(column));
@@ -3365,6 +4365,12 @@ class $$MessagesTableFilterComposer
   ColumnFilters<bool> get deletedForMe => $composableBuilder(
       column: $table.deletedForMe, builder: (column) => ColumnFilters(column));
 
+  ColumnFilters<bool> get isSystem => $composableBuilder(
+      column: $table.isSystem, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get systemAction => $composableBuilder(
+      column: $table.systemAction, builder: (column) => ColumnFilters(column));
+
   ColumnFilters<DateTime> get lastSyncedAt => $composableBuilder(
       column: $table.lastSyncedAt, builder: (column) => ColumnFilters(column));
 }
@@ -3380,6 +4386,9 @@ class $$MessagesTableOrderingComposer
   });
   ColumnOrderings<int> get id => $composableBuilder(
       column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get clientUuid => $composableBuilder(
+      column: $table.clientUuid, builder: (column) => ColumnOrderings(column));
 
   ColumnOrderings<int> get conversationId => $composableBuilder(
       column: $table.conversationId,
@@ -3401,8 +4410,15 @@ class $$MessagesTableOrderingComposer
   ColumnOrderings<String> get body => $composableBuilder(
       column: $table.body, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<String> get status => $composableBuilder(
+      column: $table.status, builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
       column: $table.createdAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get serverCreatedAt => $composableBuilder(
+      column: $table.serverCreatedAt,
+      builder: (column) => ColumnOrderings(column));
 
   ColumnOrderings<int> get replyToId => $composableBuilder(
       column: $table.replyToId, builder: (column) => ColumnOrderings(column));
@@ -3448,6 +4464,13 @@ class $$MessagesTableOrderingComposer
       column: $table.deletedForMe,
       builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<bool> get isSystem => $composableBuilder(
+      column: $table.isSystem, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get systemAction => $composableBuilder(
+      column: $table.systemAction,
+      builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<DateTime> get lastSyncedAt => $composableBuilder(
       column: $table.lastSyncedAt,
       builder: (column) => ColumnOrderings(column));
@@ -3464,6 +4487,9 @@ class $$MessagesTableAnnotationComposer
   });
   GeneratedColumn<int> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get clientUuid => $composableBuilder(
+      column: $table.clientUuid, builder: (column) => column);
 
   GeneratedColumn<int> get conversationId => $composableBuilder(
       column: $table.conversationId, builder: (column) => column);
@@ -3483,8 +4509,14 @@ class $$MessagesTableAnnotationComposer
   GeneratedColumn<String> get body =>
       $composableBuilder(column: $table.body, builder: (column) => column);
 
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get serverCreatedAt => $composableBuilder(
+      column: $table.serverCreatedAt, builder: (column) => column);
 
   GeneratedColumn<int> get replyToId =>
       $composableBuilder(column: $table.replyToId, builder: (column) => column);
@@ -3522,6 +4554,12 @@ class $$MessagesTableAnnotationComposer
   GeneratedColumn<bool> get deletedForMe => $composableBuilder(
       column: $table.deletedForMe, builder: (column) => column);
 
+  GeneratedColumn<bool> get isSystem =>
+      $composableBuilder(column: $table.isSystem, builder: (column) => column);
+
+  GeneratedColumn<String> get systemAction => $composableBuilder(
+      column: $table.systemAction, builder: (column) => column);
+
   GeneratedColumn<DateTime> get lastSyncedAt => $composableBuilder(
       column: $table.lastSyncedAt, builder: (column) => column);
 }
@@ -3549,14 +4587,17 @@ class $$MessagesTableTableManager extends RootTableManager<
           createComputedFieldComposer: () =>
               $$MessagesTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback: ({
-            Value<int> id = const Value.absent(),
+            Value<int?> id = const Value.absent(),
+            Value<String> clientUuid = const Value.absent(),
             Value<int?> conversationId = const Value.absent(),
             Value<int?> groupId = const Value.absent(),
             Value<int> senderId = const Value.absent(),
             Value<String?> senderName = const Value.absent(),
             Value<String?> senderAvatarUrl = const Value.absent(),
             Value<String> body = const Value.absent(),
+            Value<String> status = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
+            Value<DateTime?> serverCreatedAt = const Value.absent(),
             Value<int?> replyToId = const Value.absent(),
             Value<int?> forwardedFromId = const Value.absent(),
             Value<String?> attachmentsJson = const Value.absent(),
@@ -3569,17 +4610,23 @@ class $$MessagesTableTableManager extends RootTableManager<
             Value<String?> linkPreviewsJson = const Value.absent(),
             Value<bool> isDeleted = const Value.absent(),
             Value<bool> deletedForMe = const Value.absent(),
+            Value<bool> isSystem = const Value.absent(),
+            Value<String?> systemAction = const Value.absent(),
             Value<DateTime?> lastSyncedAt = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
           }) =>
               MessagesCompanion(
             id: id,
+            clientUuid: clientUuid,
             conversationId: conversationId,
             groupId: groupId,
             senderId: senderId,
             senderName: senderName,
             senderAvatarUrl: senderAvatarUrl,
             body: body,
+            status: status,
             createdAt: createdAt,
+            serverCreatedAt: serverCreatedAt,
             replyToId: replyToId,
             forwardedFromId: forwardedFromId,
             attachmentsJson: attachmentsJson,
@@ -3592,17 +4639,23 @@ class $$MessagesTableTableManager extends RootTableManager<
             linkPreviewsJson: linkPreviewsJson,
             isDeleted: isDeleted,
             deletedForMe: deletedForMe,
+            isSystem: isSystem,
+            systemAction: systemAction,
             lastSyncedAt: lastSyncedAt,
+            rowid: rowid,
           ),
           createCompanionCallback: ({
-            Value<int> id = const Value.absent(),
+            Value<int?> id = const Value.absent(),
+            required String clientUuid,
             Value<int?> conversationId = const Value.absent(),
             Value<int?> groupId = const Value.absent(),
             required int senderId,
             Value<String?> senderName = const Value.absent(),
             Value<String?> senderAvatarUrl = const Value.absent(),
             required String body,
+            Value<String> status = const Value.absent(),
             required DateTime createdAt,
+            Value<DateTime?> serverCreatedAt = const Value.absent(),
             Value<int?> replyToId = const Value.absent(),
             Value<int?> forwardedFromId = const Value.absent(),
             Value<String?> attachmentsJson = const Value.absent(),
@@ -3615,17 +4668,23 @@ class $$MessagesTableTableManager extends RootTableManager<
             Value<String?> linkPreviewsJson = const Value.absent(),
             Value<bool> isDeleted = const Value.absent(),
             Value<bool> deletedForMe = const Value.absent(),
+            Value<bool> isSystem = const Value.absent(),
+            Value<String?> systemAction = const Value.absent(),
             Value<DateTime?> lastSyncedAt = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
           }) =>
               MessagesCompanion.insert(
             id: id,
+            clientUuid: clientUuid,
             conversationId: conversationId,
             groupId: groupId,
             senderId: senderId,
             senderName: senderName,
             senderAvatarUrl: senderAvatarUrl,
             body: body,
+            status: status,
             createdAt: createdAt,
+            serverCreatedAt: serverCreatedAt,
             replyToId: replyToId,
             forwardedFromId: forwardedFromId,
             attachmentsJson: attachmentsJson,
@@ -3638,7 +4697,10 @@ class $$MessagesTableTableManager extends RootTableManager<
             linkPreviewsJson: linkPreviewsJson,
             isDeleted: isDeleted,
             deletedForMe: deletedForMe,
+            isSystem: isSystem,
+            systemAction: systemAction,
             lastSyncedAt: lastSyncedAt,
+            rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0
               .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
@@ -3669,9 +4731,12 @@ typedef $$GroupsTableCreateCompanionBuilder = GroupsCompanion Function({
   Value<String?> type,
   Value<bool?> isVerified,
   Value<String?> lastMessage,
+  Value<bool> lastMessageFromMe,
+  Value<String?> lastMessageOutgoingStatus,
   Value<bool> isPinned,
   Value<bool> isMuted,
   Value<DateTime?> lastSyncedAt,
+  Value<String> labelIdsJson,
 });
 typedef $$GroupsTableUpdateCompanionBuilder = GroupsCompanion Function({
   Value<int> id,
@@ -3683,9 +4748,12 @@ typedef $$GroupsTableUpdateCompanionBuilder = GroupsCompanion Function({
   Value<String?> type,
   Value<bool?> isVerified,
   Value<String?> lastMessage,
+  Value<bool> lastMessageFromMe,
+  Value<String?> lastMessageOutgoingStatus,
   Value<bool> isPinned,
   Value<bool> isMuted,
   Value<DateTime?> lastSyncedAt,
+  Value<String> labelIdsJson,
 });
 
 class $$GroupsTableFilterComposer
@@ -3724,6 +4792,14 @@ class $$GroupsTableFilterComposer
   ColumnFilters<String> get lastMessage => $composableBuilder(
       column: $table.lastMessage, builder: (column) => ColumnFilters(column));
 
+  ColumnFilters<bool> get lastMessageFromMe => $composableBuilder(
+      column: $table.lastMessageFromMe,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get lastMessageOutgoingStatus => $composableBuilder(
+      column: $table.lastMessageOutgoingStatus,
+      builder: (column) => ColumnFilters(column));
+
   ColumnFilters<bool> get isPinned => $composableBuilder(
       column: $table.isPinned, builder: (column) => ColumnFilters(column));
 
@@ -3732,6 +4808,9 @@ class $$GroupsTableFilterComposer
 
   ColumnFilters<DateTime> get lastSyncedAt => $composableBuilder(
       column: $table.lastSyncedAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get labelIdsJson => $composableBuilder(
+      column: $table.labelIdsJson, builder: (column) => ColumnFilters(column));
 }
 
 class $$GroupsTableOrderingComposer
@@ -3770,6 +4849,14 @@ class $$GroupsTableOrderingComposer
   ColumnOrderings<String> get lastMessage => $composableBuilder(
       column: $table.lastMessage, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<bool> get lastMessageFromMe => $composableBuilder(
+      column: $table.lastMessageFromMe,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get lastMessageOutgoingStatus => $composableBuilder(
+      column: $table.lastMessageOutgoingStatus,
+      builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<bool> get isPinned => $composableBuilder(
       column: $table.isPinned, builder: (column) => ColumnOrderings(column));
 
@@ -3778,6 +4865,10 @@ class $$GroupsTableOrderingComposer
 
   ColumnOrderings<DateTime> get lastSyncedAt => $composableBuilder(
       column: $table.lastSyncedAt,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get labelIdsJson => $composableBuilder(
+      column: $table.labelIdsJson,
       builder: (column) => ColumnOrderings(column));
 }
 
@@ -3817,6 +4908,12 @@ class $$GroupsTableAnnotationComposer
   GeneratedColumn<String> get lastMessage => $composableBuilder(
       column: $table.lastMessage, builder: (column) => column);
 
+  GeneratedColumn<bool> get lastMessageFromMe => $composableBuilder(
+      column: $table.lastMessageFromMe, builder: (column) => column);
+
+  GeneratedColumn<String> get lastMessageOutgoingStatus => $composableBuilder(
+      column: $table.lastMessageOutgoingStatus, builder: (column) => column);
+
   GeneratedColumn<bool> get isPinned =>
       $composableBuilder(column: $table.isPinned, builder: (column) => column);
 
@@ -3825,6 +4922,9 @@ class $$GroupsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get lastSyncedAt => $composableBuilder(
       column: $table.lastSyncedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get labelIdsJson => $composableBuilder(
+      column: $table.labelIdsJson, builder: (column) => column);
 }
 
 class $$GroupsTableTableManager extends RootTableManager<
@@ -3859,9 +4959,12 @@ class $$GroupsTableTableManager extends RootTableManager<
             Value<String?> type = const Value.absent(),
             Value<bool?> isVerified = const Value.absent(),
             Value<String?> lastMessage = const Value.absent(),
+            Value<bool> lastMessageFromMe = const Value.absent(),
+            Value<String?> lastMessageOutgoingStatus = const Value.absent(),
             Value<bool> isPinned = const Value.absent(),
             Value<bool> isMuted = const Value.absent(),
             Value<DateTime?> lastSyncedAt = const Value.absent(),
+            Value<String> labelIdsJson = const Value.absent(),
           }) =>
               GroupsCompanion(
             id: id,
@@ -3873,9 +4976,12 @@ class $$GroupsTableTableManager extends RootTableManager<
             type: type,
             isVerified: isVerified,
             lastMessage: lastMessage,
+            lastMessageFromMe: lastMessageFromMe,
+            lastMessageOutgoingStatus: lastMessageOutgoingStatus,
             isPinned: isPinned,
             isMuted: isMuted,
             lastSyncedAt: lastSyncedAt,
+            labelIdsJson: labelIdsJson,
           ),
           createCompanionCallback: ({
             Value<int> id = const Value.absent(),
@@ -3887,9 +4993,12 @@ class $$GroupsTableTableManager extends RootTableManager<
             Value<String?> type = const Value.absent(),
             Value<bool?> isVerified = const Value.absent(),
             Value<String?> lastMessage = const Value.absent(),
+            Value<bool> lastMessageFromMe = const Value.absent(),
+            Value<String?> lastMessageOutgoingStatus = const Value.absent(),
             Value<bool> isPinned = const Value.absent(),
             Value<bool> isMuted = const Value.absent(),
             Value<DateTime?> lastSyncedAt = const Value.absent(),
+            Value<String> labelIdsJson = const Value.absent(),
           }) =>
               GroupsCompanion.insert(
             id: id,
@@ -3901,9 +5010,12 @@ class $$GroupsTableTableManager extends RootTableManager<
             type: type,
             isVerified: isVerified,
             lastMessage: lastMessage,
+            lastMessageFromMe: lastMessageFromMe,
+            lastMessageOutgoingStatus: lastMessageOutgoingStatus,
             isPinned: isPinned,
             isMuted: isMuted,
             lastSyncedAt: lastSyncedAt,
+            labelIdsJson: labelIdsJson,
           ),
           withReferenceMapper: (p0) => p0
               .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
@@ -3927,6 +5039,7 @@ typedef $$GroupsTableProcessedTableManager = ProcessedTableManager<
 typedef $$OfflineMessagesTableCreateCompanionBuilder = OfflineMessagesCompanion
     Function({
   Value<int> id,
+  Value<String?> clientUuid,
   Value<int?> conversationId,
   Value<int?> groupId,
   required String body,
@@ -3935,6 +5048,14 @@ typedef $$OfflineMessagesTableCreateCompanionBuilder = OfflineMessagesCompanion
   Value<String?> attachmentsJson,
   Value<String?> locationDataJson,
   Value<String?> contactDataJson,
+  Value<String?> messageType,
+  Value<bool> viewOnce,
+  Value<DateTime?> scheduledAt,
+  Value<int?> expiresInHours,
+  Value<int?> referencedStatusId,
+  Value<int?> referencedGroupId,
+  Value<int?> referencedGroupMessageId,
+  Value<String?> referencedContextJson,
   Value<DateTime> createdAt,
   Value<bool> isSent,
   Value<int?> serverMessageId,
@@ -3944,6 +5065,7 @@ typedef $$OfflineMessagesTableCreateCompanionBuilder = OfflineMessagesCompanion
 typedef $$OfflineMessagesTableUpdateCompanionBuilder = OfflineMessagesCompanion
     Function({
   Value<int> id,
+  Value<String?> clientUuid,
   Value<int?> conversationId,
   Value<int?> groupId,
   Value<String> body,
@@ -3952,6 +5074,14 @@ typedef $$OfflineMessagesTableUpdateCompanionBuilder = OfflineMessagesCompanion
   Value<String?> attachmentsJson,
   Value<String?> locationDataJson,
   Value<String?> contactDataJson,
+  Value<String?> messageType,
+  Value<bool> viewOnce,
+  Value<DateTime?> scheduledAt,
+  Value<int?> expiresInHours,
+  Value<int?> referencedStatusId,
+  Value<int?> referencedGroupId,
+  Value<int?> referencedGroupMessageId,
+  Value<String?> referencedContextJson,
   Value<DateTime> createdAt,
   Value<bool> isSent,
   Value<int?> serverMessageId,
@@ -3970,6 +5100,9 @@ class $$OfflineMessagesTableFilterComposer
   });
   ColumnFilters<int> get id => $composableBuilder(
       column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get clientUuid => $composableBuilder(
+      column: $table.clientUuid, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<int> get conversationId => $composableBuilder(
       column: $table.conversationId,
@@ -3997,6 +5130,35 @@ class $$OfflineMessagesTableFilterComposer
 
   ColumnFilters<String> get contactDataJson => $composableBuilder(
       column: $table.contactDataJson,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get messageType => $composableBuilder(
+      column: $table.messageType, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get viewOnce => $composableBuilder(
+      column: $table.viewOnce, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get scheduledAt => $composableBuilder(
+      column: $table.scheduledAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get expiresInHours => $composableBuilder(
+      column: $table.expiresInHours,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get referencedStatusId => $composableBuilder(
+      column: $table.referencedStatusId,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get referencedGroupId => $composableBuilder(
+      column: $table.referencedGroupId,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get referencedGroupMessageId => $composableBuilder(
+      column: $table.referencedGroupMessageId,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get referencedContextJson => $composableBuilder(
+      column: $table.referencedContextJson,
       builder: (column) => ColumnFilters(column));
 
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
@@ -4028,6 +5190,9 @@ class $$OfflineMessagesTableOrderingComposer
   ColumnOrderings<int> get id => $composableBuilder(
       column: $table.id, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<String> get clientUuid => $composableBuilder(
+      column: $table.clientUuid, builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<int> get conversationId => $composableBuilder(
       column: $table.conversationId,
       builder: (column) => ColumnOrderings(column));
@@ -4055,6 +5220,35 @@ class $$OfflineMessagesTableOrderingComposer
 
   ColumnOrderings<String> get contactDataJson => $composableBuilder(
       column: $table.contactDataJson,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get messageType => $composableBuilder(
+      column: $table.messageType, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get viewOnce => $composableBuilder(
+      column: $table.viewOnce, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get scheduledAt => $composableBuilder(
+      column: $table.scheduledAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get expiresInHours => $composableBuilder(
+      column: $table.expiresInHours,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get referencedStatusId => $composableBuilder(
+      column: $table.referencedStatusId,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get referencedGroupId => $composableBuilder(
+      column: $table.referencedGroupId,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get referencedGroupMessageId => $composableBuilder(
+      column: $table.referencedGroupMessageId,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get referencedContextJson => $composableBuilder(
+      column: $table.referencedContextJson,
       builder: (column) => ColumnOrderings(column));
 
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
@@ -4087,6 +5281,9 @@ class $$OfflineMessagesTableAnnotationComposer
   GeneratedColumn<int> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
 
+  GeneratedColumn<String> get clientUuid => $composableBuilder(
+      column: $table.clientUuid, builder: (column) => column);
+
   GeneratedColumn<int> get conversationId => $composableBuilder(
       column: $table.conversationId, builder: (column) => column);
 
@@ -4110,6 +5307,30 @@ class $$OfflineMessagesTableAnnotationComposer
 
   GeneratedColumn<String> get contactDataJson => $composableBuilder(
       column: $table.contactDataJson, builder: (column) => column);
+
+  GeneratedColumn<String> get messageType => $composableBuilder(
+      column: $table.messageType, builder: (column) => column);
+
+  GeneratedColumn<bool> get viewOnce =>
+      $composableBuilder(column: $table.viewOnce, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get scheduledAt => $composableBuilder(
+      column: $table.scheduledAt, builder: (column) => column);
+
+  GeneratedColumn<int> get expiresInHours => $composableBuilder(
+      column: $table.expiresInHours, builder: (column) => column);
+
+  GeneratedColumn<int> get referencedStatusId => $composableBuilder(
+      column: $table.referencedStatusId, builder: (column) => column);
+
+  GeneratedColumn<int> get referencedGroupId => $composableBuilder(
+      column: $table.referencedGroupId, builder: (column) => column);
+
+  GeneratedColumn<int> get referencedGroupMessageId => $composableBuilder(
+      column: $table.referencedGroupMessageId, builder: (column) => column);
+
+  GeneratedColumn<String> get referencedContextJson => $composableBuilder(
+      column: $table.referencedContextJson, builder: (column) => column);
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
@@ -4155,6 +5376,7 @@ class $$OfflineMessagesTableTableManager extends RootTableManager<
               $$OfflineMessagesTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback: ({
             Value<int> id = const Value.absent(),
+            Value<String?> clientUuid = const Value.absent(),
             Value<int?> conversationId = const Value.absent(),
             Value<int?> groupId = const Value.absent(),
             Value<String> body = const Value.absent(),
@@ -4163,6 +5385,14 @@ class $$OfflineMessagesTableTableManager extends RootTableManager<
             Value<String?> attachmentsJson = const Value.absent(),
             Value<String?> locationDataJson = const Value.absent(),
             Value<String?> contactDataJson = const Value.absent(),
+            Value<String?> messageType = const Value.absent(),
+            Value<bool> viewOnce = const Value.absent(),
+            Value<DateTime?> scheduledAt = const Value.absent(),
+            Value<int?> expiresInHours = const Value.absent(),
+            Value<int?> referencedStatusId = const Value.absent(),
+            Value<int?> referencedGroupId = const Value.absent(),
+            Value<int?> referencedGroupMessageId = const Value.absent(),
+            Value<String?> referencedContextJson = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
             Value<bool> isSent = const Value.absent(),
             Value<int?> serverMessageId = const Value.absent(),
@@ -4171,6 +5401,7 @@ class $$OfflineMessagesTableTableManager extends RootTableManager<
           }) =>
               OfflineMessagesCompanion(
             id: id,
+            clientUuid: clientUuid,
             conversationId: conversationId,
             groupId: groupId,
             body: body,
@@ -4179,6 +5410,14 @@ class $$OfflineMessagesTableTableManager extends RootTableManager<
             attachmentsJson: attachmentsJson,
             locationDataJson: locationDataJson,
             contactDataJson: contactDataJson,
+            messageType: messageType,
+            viewOnce: viewOnce,
+            scheduledAt: scheduledAt,
+            expiresInHours: expiresInHours,
+            referencedStatusId: referencedStatusId,
+            referencedGroupId: referencedGroupId,
+            referencedGroupMessageId: referencedGroupMessageId,
+            referencedContextJson: referencedContextJson,
             createdAt: createdAt,
             isSent: isSent,
             serverMessageId: serverMessageId,
@@ -4187,6 +5426,7 @@ class $$OfflineMessagesTableTableManager extends RootTableManager<
           ),
           createCompanionCallback: ({
             Value<int> id = const Value.absent(),
+            Value<String?> clientUuid = const Value.absent(),
             Value<int?> conversationId = const Value.absent(),
             Value<int?> groupId = const Value.absent(),
             required String body,
@@ -4195,6 +5435,14 @@ class $$OfflineMessagesTableTableManager extends RootTableManager<
             Value<String?> attachmentsJson = const Value.absent(),
             Value<String?> locationDataJson = const Value.absent(),
             Value<String?> contactDataJson = const Value.absent(),
+            Value<String?> messageType = const Value.absent(),
+            Value<bool> viewOnce = const Value.absent(),
+            Value<DateTime?> scheduledAt = const Value.absent(),
+            Value<int?> expiresInHours = const Value.absent(),
+            Value<int?> referencedStatusId = const Value.absent(),
+            Value<int?> referencedGroupId = const Value.absent(),
+            Value<int?> referencedGroupMessageId = const Value.absent(),
+            Value<String?> referencedContextJson = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
             Value<bool> isSent = const Value.absent(),
             Value<int?> serverMessageId = const Value.absent(),
@@ -4203,6 +5451,7 @@ class $$OfflineMessagesTableTableManager extends RootTableManager<
           }) =>
               OfflineMessagesCompanion.insert(
             id: id,
+            clientUuid: clientUuid,
             conversationId: conversationId,
             groupId: groupId,
             body: body,
@@ -4211,6 +5460,14 @@ class $$OfflineMessagesTableTableManager extends RootTableManager<
             attachmentsJson: attachmentsJson,
             locationDataJson: locationDataJson,
             contactDataJson: contactDataJson,
+            messageType: messageType,
+            viewOnce: viewOnce,
+            scheduledAt: scheduledAt,
+            expiresInHours: expiresInHours,
+            referencedStatusId: referencedStatusId,
+            referencedGroupId: referencedGroupId,
+            referencedGroupMessageId: referencedGroupMessageId,
+            referencedContextJson: referencedContextJson,
             createdAt: createdAt,
             isSent: isSent,
             serverMessageId: serverMessageId,

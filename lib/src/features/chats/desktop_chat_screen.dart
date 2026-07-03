@@ -5,23 +5,28 @@ import 'package:go_router/go_router.dart';
 import 'dart:async';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../profile/settings_screen.dart';
 import '../profile/profile_edit_screen.dart';
 import '../contacts/contacts_screen.dart';
-import '../search/search_screen.dart';
+import '../contacts/contact_display_service.dart';
+import '../search/search_repository.dart';
+import '../search/desktop_sidebar_search_results.dart';
 import '../status/status_list_screen.dart';
 import '../status/create_status_screen.dart';
 import 'create_group_screen.dart';
 import 'models.dart';
 import 'chat_repo.dart';
 import 'chat_providers.dart';
+import 'sidebar_inbox_bump.dart';
 import 'widgets/conversation_list_item.dart';
 import 'widgets/group_list_item.dart';
+import 'providers/typing_status_provider.dart';
+import 'providers/group_typing_status_provider.dart';
 import 'widgets/chat_view.dart';
 import 'widgets/group_chat_view.dart';
 import '../calls/calls_screen.dart';
 import '../channels/channels_screen.dart';
-import '../starred/starred_screen.dart';
 import '../archive/archived_screen.dart';
 import '../broadcast/broadcast_lists_screen.dart';
 import '../broadcast/broadcast_repository.dart';
@@ -39,15 +44,22 @@ import '../../core/services/deep_link_service.dart';
 import '../ai/ai_chat_screen.dart';
 import '../live/live_broadcast_screen.dart';
 import '../labels/labels_repository.dart';
+import '../notices/in_app_notice.dart';
+import '../notices/in_app_notice_repository.dart';
+import '../notices/in_app_notice_strip.dart';
 import '../../core/providers.dart';
 import '../../core/session.dart';
 import '../../core/feature_flags.dart';
-import '../multi_account/account_switcher.dart';
+import '../multi_account/account_switcher_screen.dart';
 import '../../widgets/side_nav.dart';
 import '../../theme/app_theme.dart';
 import '../../core/providers/connectivity_provider.dart';
 import '../../core/services/taskbar_badge_service.dart';
 import '../../features/auth/auth_provider.dart';
+import '../calls/incoming_call_handler.dart';
+import '../../services/inbox_realtime_sync.dart';
+import '../../widgets/skeleton_loader.dart';
+import '../../core/global_navigator_key.dart';
 
 class DesktopChatScreen extends ConsumerStatefulWidget {
   const DesktopChatScreen({super.key});
@@ -61,12 +73,21 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
   GroupSummary? _selectedGroup;
   int? _selectedConversationId;
   int? _selectedGroupId;
-  
+  int? _groupInitialScrollMessageId;
+  int? _conversationInitialScrollMessageId;
+
   final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
   String _selectedFilter = 'all';
-  String _searchQuery = ''; // Store search query for filtering conversations
+  String _searchQuery = '';
+  Map<String, dynamic>? _searchResults;
+  bool _isSearching = false;
+  List<String>? _searchFilters;
   Timer? _searchDebounceTimer;
   List<Label> _labels = []; // Store labels for filter chips
+  List<InAppNotice> _inAppNotices = [];
+  Set<int> _manualUnreadConversationIds = <int>{};
+  Set<int> _manualUnreadGroupIds = <int>{};
 
   @override
   void initState() {
@@ -77,20 +98,123 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     ref.read(optimizedGroupsProvider.future);
     ref.read(optimizedArchivedConversationsProvider.future);
     _loadLabels();
+    _loadInAppNotices();
+    _loadManualUnreadMarkers();
+    // Warm up contact display names after first frame (avoid provider churn during build).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(contactDisplayServiceProvider).warmUp();
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(incomingCallHandlerProvider).setContext(context);
+      _restoreSelectionFromProviders();
+    });
+  }
+
+  /// After route changes (e.g. /settings → /chats) GoRouter recreates this widget;
+  /// restore the open chat from Riverpod so the sidebar tap still opens the thread.
+  void _restoreSelectionFromProviders() {
+    if (!mounted) return;
+    final convId = ref.read(selectedConversationProvider);
+    final groupId = ref.read(selectedGroupIdProvider);
+    if (convId != null && _selectedConversationId != convId) {
+      _selectConversationById(convId);
+    } else if (groupId != null && _selectedGroupId != groupId) {
+      _selectGroupById(groupId);
+    }
+  }
+
+  Future<void> _selectGroupById(int groupId, {int? scrollToMessageId}) async {
+    try {
+      GroupSummary? found;
+      for (final g in ref.read(sidebarPendingGroupsProvider)) {
+        if (g.id == groupId) {
+          found = g;
+          break;
+        }
+      }
+      if (found == null) {
+        final groups = await ref.read(optimizedGroupsProvider.future);
+        for (final g in groups) {
+          if (g.id == groupId) {
+            found = g;
+            break;
+          }
+        }
+      }
+      if (!mounted || found == null) return;
+      await _popChatOverlayRoutes();
+      if (!mounted) return;
+      setState(() {
+        _selectedConversation = null;
+        _selectedConversationId = null;
+        _selectedGroup = found;
+        _selectedGroupId = groupId;
+        _groupInitialScrollMessageId = scrollToMessageId;
+        _conversationInitialScrollMessageId = null;
+      });
+      ref.read(selectedGroupIdProvider.notifier).state = groupId;
+      ref.read(selectedConversationProvider.notifier).clearSelection();
+      _switchToChatsView();
+    } catch (e) {
+      debugPrint('Failed to select group: $e');
+    }
   }
   
-  void _selectConversationById(int conversationId) async {
+  Future<void> _popChatOverlayRoutes() async {
+    final navigator = rootNavigatorKey.currentState;
+    if (navigator == null || !navigator.mounted) return;
+    var safety = 0;
+    while (navigator.canPop() && safety < 8) {
+      safety++;
+      final popped = await navigator.maybePop();
+      if (popped != true) break;
+    }
+  }
+
+  Future<void> _popOverlaysThen(VoidCallback fn) async {
+    await _popChatOverlayRoutes();
+    if (!mounted) return;
+    fn();
+  }
+
+  /// Returns to the chats pane when World, Status, Settings, etc. is open.
+  void _switchToChatsView() {
+    ref.read(currentSectionProvider.notifier).setSection('/chats');
+    final path = GoRouterState.of(context).uri.path;
+    if (path != '/chats') {
+      context.go('/chats');
+    }
+  }
+
+  void _deferIfMounted(VoidCallback fn) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      fn();
+    });
+  }
+
+  Future<void> _selectConversationById(
+    int conversationId, {
+    int? scrollToMessageId,
+  }) async {
     try {
       final chatRepo = ref.read(chatRepositoryProvider);
       final conversation = await chatRepo.getConversation(conversationId);
+      if (!mounted) return;
+      await _popChatOverlayRoutes();
+      if (!mounted) return;
       setState(() {
         _selectedConversation = conversation;
         _selectedConversationId = conversationId;
         _selectedGroup = null;
         _selectedGroupId = null;
+        _groupInitialScrollMessageId = null;
+        _conversationInitialScrollMessageId = scrollToMessageId;
       });
-      // Switch to chats section
-      ref.read(currentSectionProvider.notifier).setSection('/chats');
+      ref.read(selectedGroupIdProvider.notifier).state = null;
+      _switchToChatsView();
     } catch (e) {
       debugPrint('Failed to select conversation: $e');
     }
@@ -100,19 +224,89 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _searchController.dispose();
+    _searchFocusNode.dispose();
     _searchDebounceTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _performSidebarSearch() async {
+    final query = _searchQuery.trim();
+    if (query.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _isSearching = false;
+          _searchResults = null;
+        });
+      }
+      return;
+    }
+
+    if (mounted) {
+      setState(() => _isSearching = true);
+    }
+
+    try {
+      final searchRepo = ref.read(searchRepositoryProvider);
+      final results = await searchRepo.search(
+        query: query,
+        filters: _searchFilters?.isNotEmpty == true ? _searchFilters : null,
+        limit: 50,
+      );
+      if (!mounted) return;
+      setState(() {
+        _searchResults = results;
+        _isSearching = false;
+      });
+    } catch (e) {
+      debugPrint('Sidebar search error: $e');
+      if (!mounted) return;
+      setState(() {
+        _searchResults = null;
+        _isSearching = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Search failed: $e')),
+      );
+    }
+  }
+
+  Future<void> _selectConversationFromSearch(
+    int conversationId, {
+    int? messageId,
+  }) async {
+    _clearSidebarSearch();
+    ref.read(selectedConversationProvider.notifier).selectConversation(conversationId);
+    await _selectConversationById(conversationId, scrollToMessageId: messageId);
+  }
+
+  Future<void> _selectGroupFromSearch(
+    int groupId, {
+    int? messageId,
+  }) async {
+    _clearSidebarSearch();
+    await _selectGroupById(groupId, scrollToMessageId: messageId);
+  }
+
+  void _clearSidebarSearch() {
+    _searchDebounceTimer?.cancel();
+    _searchController.clear();
+    setState(() {
+      _searchQuery = '';
+      _searchResults = null;
+      _isSearching = false;
+    });
   }
   
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      // Invalidate providers to refresh data when app comes to foreground
-      // This will fetch fresh data while showing cached data immediately
       ref.invalidate(optimizedConversationsProvider);
       ref.invalidate(optimizedGroupsProvider);
       ref.invalidate(optimizedArchivedConversationsProvider);
+      unawaited(ref.read(pusherServiceProvider).resetReconnectPolicyAndConnect());
+      unawaited(ref.read(inboxRealtimeSyncProvider).initialize(force: true));
       _updateTaskbarBadge();
+      _loadInAppNotices();
     }
   }
 
@@ -129,6 +323,101 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
   void _refreshGroups() {
     ref.invalidate(optimizedGroupsProvider);
     _updateTaskbarBadge();
+  }
+
+  bool _isManuallyUnreadConversation(int conversationId) {
+    return _manualUnreadConversationIds.contains(conversationId);
+  }
+
+  bool _isManuallyUnreadGroup(int groupId) {
+    return _manualUnreadGroupIds.contains(groupId);
+  }
+
+  Future<void> _loadManualUnreadMarkers() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final convIds =
+          prefs.getStringList('manual_unread_conversation_ids') ?? const [];
+      final groupIds =
+          prefs.getStringList('manual_unread_group_ids') ?? const [];
+      if (!mounted) return;
+      setState(() {
+        _manualUnreadConversationIds = convIds
+            .map(int.tryParse)
+            .whereType<int>()
+            .toSet();
+        _manualUnreadGroupIds =
+            groupIds.map(int.tryParse).whereType<int>().toSet();
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _persistManualUnreadMarkers() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(
+        'manual_unread_conversation_ids',
+        _manualUnreadConversationIds.map((e) => e.toString()).toList(),
+      );
+      await prefs.setStringList(
+        'manual_unread_group_ids',
+        _manualUnreadGroupIds.map((e) => e.toString()).toList(),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _setConversationManualUnread(
+    int conversationId, {
+    required bool value,
+  }) async {
+    if (value) {
+      _manualUnreadConversationIds.add(conversationId);
+    } else {
+      _manualUnreadConversationIds.remove(conversationId);
+    }
+    if (mounted) setState(() {});
+    await _persistManualUnreadMarkers();
+  }
+
+  Future<void> _setGroupManualUnread(int groupId, {required bool value}) async {
+    if (value) {
+      _manualUnreadGroupIds.add(groupId);
+    } else {
+      _manualUnreadGroupIds.remove(groupId);
+    }
+    if (mounted) setState(() {});
+    await _persistManualUnreadMarkers();
+  }
+
+  void _onFilterChipSelected(String filter) {
+    setState(() {
+      _selectedFilter = filter;
+    });
+    if (filter == 'archived') {
+      _refreshArchivedConversations();
+    }
+  }
+
+  String _emptyFilterMessage() {
+    switch (_selectedFilter) {
+      case 'unread':
+        return 'No unread conversations';
+      case 'groups':
+        return 'No groups';
+      case 'channels':
+        return 'No channels';
+      case 'archived':
+        return 'No archived conversations';
+      case 'broadcast':
+        return 'No broadcast lists';
+      default:
+        if (_selectedFilter.startsWith('label-')) {
+          return 'No conversations match this filter';
+        }
+        return _searchQuery.isNotEmpty
+            ? 'No results found'
+            : 'No conversations yet';
+    }
   }
   
   void _updateTaskbarBadge() {
@@ -180,10 +469,18 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
       filteredGroups = searchFilteredGroups.where((g) => g.type != 'channel').toList();
     } else if (_selectedFilter == 'unread') {
       filteredConversations = searchFilteredConversations
-          .where((c) => c.unreadCount > 0 && c.archivedAt == null)
+          .where(
+            (c) =>
+                c.archivedAt == null &&
+                (c.unreadCount > 0 || _isManuallyUnreadConversation(c.id)),
+          )
           .toList();
       filteredGroups = searchFilteredGroups
-          .where((g) => g.unreadCount > 0 && g.type != 'channel')
+          .where(
+            (g) =>
+                g.type != 'channel' &&
+                (g.unreadCount > 0 || _isManuallyUnreadGroup(g.id)),
+          )
           .toList();
     } else if (_selectedFilter == 'groups') {
       filteredConversations = [];
@@ -201,13 +498,22 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
         filteredConversations = searchFilteredConversations
             .where((c) => c.archivedAt == null && c.labelIds.contains(labelId))
             .toList();
-        filteredGroups = [];
+        filteredGroups = searchFilteredGroups
+            .where((g) => g.type != 'channel' && g.labelIds.contains(labelId))
+            .toList();
       }
     }
     
-    // Combine and sort by updatedAt
+    // Combine and sort: pinned first, then by updatedAt
     final allItems = <dynamic>[...filteredConversations, ...filteredGroups];
     allItems.sort((a, b) {
+      final aPinned = a is ConversationSummary
+          ? a.isPinned
+          : (a is GroupSummary ? a.isPinned : false);
+      final bPinned = b is ConversationSummary
+          ? b.isPinned
+          : (b is GroupSummary ? b.isPinned : false);
+      if (aPinned != bPinned) return aPinned ? -1 : 1;
       final aTime = a is ConversationSummary
           ? a.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0)
           : (a is GroupSummary ? a.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0) : DateTime.fromMillisecondsSinceEpoch(0));
@@ -220,7 +526,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     if (allItems.isEmpty) {
       return Center(
         child: Text(
-          _searchQuery.isNotEmpty ? 'No results found' : 'No conversations yet',
+          _emptyFilterMessage(),
           style: TextStyle(
             color: isDark ? Colors.white70 : Colors.grey[600],
           ),
@@ -239,17 +545,24 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
             child: ConversationListItem(
               conversation: item,
               isSelected: isSelected,
-              onTap: () {
+              forceUnreadBadge: _isManuallyUnreadConversation(item.id),
+              onTap: () async {
+                await _setConversationManualUnread(item.id, value: false);
+                if (!mounted) return;
+                await _popChatOverlayRoutes();
+                if (!mounted) return;
+                ref.read(selectedGroupIdProvider.notifier).state = null;
+                ref
+                    .read(selectedConversationProvider.notifier)
+                    .selectConversation(item.id);
                 setState(() {
                   _selectedConversation = item;
                   _selectedConversationId = item.id;
                   _selectedGroup = null;
                   _selectedGroupId = null;
+                  _groupInitialScrollMessageId = null;
                 });
-                // Update selected conversation provider
-                ref.read(selectedConversationProvider.notifier).selectConversation(item.id);
-                // Update provider so other widgets (like ContactInfoScreen) can react
-                ref.read(selectedConversationProvider.notifier).selectConversation(item.id);
+                _switchToChatsView();
               },
             ),
           );
@@ -260,13 +573,22 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
             child: GroupListItem(
               group: item,
               isSelected: isSelected,
-              onTap: () {
+              forceUnreadBadge: _isManuallyUnreadGroup(item.id),
+              onTap: () async {
+                await _setGroupManualUnread(item.id, value: false);
+                if (!mounted) return;
+                await _popChatOverlayRoutes();
+                if (!mounted) return;
+                ref.read(selectedGroupIdProvider.notifier).state = item.id;
+                ref.read(selectedConversationProvider.notifier).clearSelection();
                 setState(() {
                   _selectedGroup = item;
                   _selectedGroupId = item.id;
                   _selectedConversation = null;
                   _selectedConversationId = null;
+                  _groupInitialScrollMessageId = null;
                 });
+                _switchToChatsView();
               },
             ),
           );
@@ -293,6 +615,30 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
           _labels = [];
         });
       }
+    }
+  }
+
+  Future<void> _loadInAppNotices() async {
+    try {
+      final repo = ref.read(inAppNoticeRepositoryProvider);
+      final list = await repo.fetchVisible();
+      if (mounted) setState(() => _inAppNotices = list);
+    } catch (e) {
+      debugPrint('In-app notices load skipped: $e');
+    }
+  }
+
+  Future<void> _dismissInAppNotice(String noticeKey) async {
+    try {
+      final repo = ref.read(inAppNoticeRepositoryProvider);
+      await repo.dismiss(noticeKey);
+      if (mounted) {
+        setState(() {
+          _inAppNotices = _inAppNotices.where((n) => n.noticeKey != noticeKey).toList();
+        });
+      }
+    } catch (e) {
+      debugPrint('Dismiss in-app notice: $e');
     }
   }
 
@@ -370,6 +716,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
           onTap: () async {
             try {
               await chatRepo.markConversationUnread(conversation.id);
+              await _setConversationManualUnread(conversation.id, value: true);
               _refreshConversations();
             } catch (e) {
               if (mounted) {
@@ -742,6 +1089,28 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
             }
           },
         ),
+        PopupMenuItem<dynamic>(
+          child: const Row(
+            children: [
+              Icon(Icons.mark_chat_unread),
+              SizedBox(width: 8),
+              Text('Mark as unread'),
+            ],
+          ),
+          onTap: () async {
+            try {
+              await chatRepo.markGroupUnread(group.id);
+              await _setGroupManualUnread(group.id, value: true);
+              _refreshGroups();
+            } catch (e) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Failed: $e')),
+                );
+              }
+            }
+          },
+        ),
       ],
     );
   }
@@ -985,15 +1354,161 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
         _selectConversationById(next);
       }
     });
+
+    ref.listen<GroupSummary?>(pendingDesktopGroupOpenProvider, (previous, next) {
+      if (next == null) return;
+      _deferIfMounted(() {
+        unawaited(_popOverlaysThen(() {
+          ref.read(pendingDesktopGroupOpenProvider.notifier).state = null;
+          setState(() {
+            _selectedConversation = null;
+            _selectedConversationId = null;
+            _selectedGroup = next;
+            _selectedGroupId = next.id;
+          });
+          ref.read(selectedGroupIdProvider.notifier).state = next.id;
+          ref.read(selectedConversationProvider.notifier).clearSelection();
+          _switchToChatsView();
+        }));
+      });
+    });
+
+    ref.listen<int?>(pendingDesktopGroupSelectProvider, (previous, next) async {
+      if (next == null) return;
+      ref.read(pendingDesktopGroupSelectProvider.notifier).state = null;
+      GroupSummary? found;
+      for (final g in ref.read(sidebarPendingGroupsProvider)) {
+        if (g.id == next) {
+          found = g;
+          break;
+        }
+      }
+      try {
+        if (found == null) {
+          final groups = await ref.read(optimizedGroupsProvider.future);
+          for (final g in groups) {
+            if (g.id == next) {
+              found = g;
+              break;
+            }
+          }
+        }
+        if (!mounted) return;
+        if (found != null) {
+          final group = found;
+          await _popChatOverlayRoutes();
+          if (!mounted) return;
+          setState(() {
+            _selectedConversation = null;
+            _selectedConversationId = null;
+            _selectedGroup = group;
+            _selectedGroupId = group.id;
+          });
+          ref.read(selectedGroupIdProvider.notifier).state = group.id;
+          ref.read(selectedConversationProvider.notifier).clearSelection();
+          _switchToChatsView();
+        }
+      } catch (_) {}
+    });
+
+    ref.listen<AsyncValue<List<GroupSummary>>>(optimizedGroupsProvider, (previous, next) {
+      next.whenData((groups) {
+        final pending = ref.read(sidebarPendingGroupsProvider);
+        if (pending.isEmpty) return;
+        final syncedIds = groups.map((g) => g.id).toSet();
+        final remaining =
+            pending.where((g) => !syncedIds.contains(g.id)).toList();
+        if (remaining.length != pending.length) {
+          ref.read(sidebarPendingGroupsProvider.notifier).state = remaining;
+        }
+      });
+    });
+
+    ref.listen<DesktopPendingStatusChatOpen?>(
+        pendingDesktopStatusChatOpenProvider, (previous, next) {
+      if (next != null) {
+        _selectConversationById(next.conversationId);
+      }
+    });
+
+    ref.listen<DesktopPendingGroupPrivateOpen?>(
+        pendingDesktopGroupPrivateOpenProvider, (previous, next) {
+      if (next != null) {
+        _selectConversationById(next.conversationId);
+      }
+    });
+
+    ref.listen<AsyncValue<List<ConversationSummary>>>(
+        optimizedConversationsProvider, (previous, next) {
+      next.whenData((conversations) {
+        final ids = conversations.map((c) => c.id).toList();
+        ref.read(typingStatusProvider.notifier).subscribeToConversations(ids);
+        ref.read(recordingStatusProvider.notifier).subscribeToConversations(ids);
+      });
+    });
+
+    ref.listen<AsyncValue<List<GroupSummary>>>(optimizedGroupsProvider,
+        (previous, next) {
+      next.whenData((groups) {
+        final ids = groups.map((g) => g.id).toList();
+        ref.read(groupTypingStatusProvider.notifier).subscribeToGroups(ids);
+        ref.read(groupRecordingStatusProvider.notifier).subscribeToGroups(ids);
+      });
+    });
+
+    ref.listen<DesktopGroupDeepLink?>(
+        pendingDesktopGroupDeepLinkProvider, (previous, next) async {
+      if (next == null) return;
+      final link = next;
+      ref.read(pendingDesktopGroupDeepLinkProvider.notifier).state = null;
+      try {
+        final groups = await ref.read(optimizedGroupsProvider.future);
+        GroupSummary? found;
+        for (final g in groups) {
+          if (g.id == link.groupId) {
+            found = g;
+            break;
+          }
+        }
+        if (!mounted) return;
+        final group = found;
+        if (group != null) {
+          _deferIfMounted(() {
+            unawaited(_popOverlaysThen(() {
+              setState(() {
+                _selectedConversation = null;
+                _selectedConversationId = null;
+                _selectedGroup = group;
+                _selectedGroupId = group.id;
+                _groupInitialScrollMessageId = link.messageId;
+              });
+              ref.read(selectedGroupIdProvider.notifier).state = group.id;
+              ref.read(selectedConversationProvider.notifier).clearSelection();
+              _switchToChatsView();
+            }));
+          });
+        } else if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Group not found in your list.')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not open group: $e')),
+          );
+        }
+      }
+    });
     
     // Listen to account changes and refresh data
     ref.listen(currentUserProvider, (previous, next) {
-      final previousId = previous?.value?.id;
-      final nextId = next.value?.id;
+      final previousId = previous?.valueOrNull?.id;
+      final nextId = next.valueOrNull?.id;
       if (previousId != null && nextId != null && previousId != nextId) {
         debugPrint('🔄 Account changed detected: User ID $previousId -> $nextId');
         debugPrint('🔄 Refreshing conversations, groups, and labels for new account...');
-        _loadConversations();
+        _refreshConversations();
         _refreshArchivedConversations();
         _refreshGroups();
         _loadLabels();
@@ -1007,8 +1522,11 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     
     // Use currentSection for main sections, currentRoute for external routes like /settings
     // Main sections use provider state, but settings and other external routes use actual router state
-    final mainSections = ['/chats', '/status', '/channels', '/world', '/mail', '/ai', '/live-broadcast', '/calls'];
-    final effectiveRoute = mainSections.contains(currentRoute) ? currentSection : currentRoute;
+    final isSettingsRoute =
+        currentRoute == '/settings' || currentRoute.startsWith('/settings');
+    // Shell stays on /chats; sidenav + main pane use [currentSectionProvider].
+    final effectiveRoute =
+        isSettingsRoute ? currentRoute : currentSection;
     
     debugPrint('🔧 [ROUTE] currentRoute: $currentRoute, currentSection: $currentSection, effectiveRoute: $effectiveRoute');
 
@@ -1123,7 +1641,10 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
               }
               
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
+                return const SkeletonList(
+                  skeletonItem: SkeletonConversationItem(),
+                  itemCount: 6,
+                );
               }
               
               final groups = snapshot.data ?? [];
@@ -1167,7 +1688,10 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                           _selectedGroupId = channel.id;
                           _selectedConversation = null;
                           _selectedConversationId = null;
+                          _groupInitialScrollMessageId = null;
                         });
+                        ref.read(selectedGroupIdProvider.notifier).state = channel.id;
+                        ref.read(selectedConversationProvider.notifier).clearSelection();
                       },
                     ),
                   );
@@ -1237,7 +1761,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      userProfileAsync.value?.name ?? 'User',
+                      userProfileAsync.valueOrNull?.name ?? 'User',
                       style: TextStyle(
                         color: isDark ? Colors.white : Colors.black,
                         fontWeight: FontWeight.w600,
@@ -1254,8 +1778,18 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                 tooltip: 'New chat',
                 onPressed: () => _showNewChatMenu(context),
               ),
-              // Account Switcher (if multi-account enabled)
-              const AccountSwitcher(),
+              // Account Switcher (opens account switcher screen)
+              IconButton(
+                icon: Icon(Icons.account_circle_outlined, color: isDark ? Colors.white70 : Colors.grey[600]),
+                tooltip: 'Switch account',
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => const AccountSwitcherScreen(),
+                    ),
+                  );
+                },
+              ),
               Consumer(
                 builder: (context, ref, child) {
                   final worldFeedEnabled = featureEnabled(ref, 'world_feed');
@@ -1295,10 +1829,8 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                           context.go('/contacts');
                           break;
                         case 'search':
-                          context.go('/search');
-                          break;
-                        case 'starred':
-                          context.go('/starred');
+                          _switchToChatsView();
+                          _searchFocusNode.requestFocus();
                           break;
                         case 'archived':
                           context.go('/archived');
@@ -1320,7 +1852,6 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                       const PopupMenuItem(value: 'profile', child: Text('Profile')),
                       const PopupMenuItem(value: 'contacts', child: Text('Contacts')),
                       const PopupMenuItem(value: 'search', child: Text('Search')),
-                      const PopupMenuItem(value: 'starred', child: Text('Starred Messages')),
                       const PopupMenuItem(value: 'archived', child: Text('Archived')),
                       const PopupMenuItem(value: 'broadcast_lists', child: Text('Broadcast Lists')),
                       const PopupMenuItem(value: 'two_factor', child: Text('Two-Step Verification')),
@@ -1349,6 +1880,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
               Expanded(
                 child: TextField(
                   controller: _searchController,
+                  focusNode: _searchFocusNode,
                   style: TextStyle(color: isDark ? Colors.white : Colors.black),
                   decoration: InputDecoration(
                     hintText: 'Search or start new chat',
@@ -1357,12 +1889,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                     suffixIcon: _searchController.text.isNotEmpty
                         ? IconButton(
                             icon: Icon(Icons.clear, color: isDark ? Colors.white54 : Colors.grey[600]),
-                            onPressed: () {
-                              _searchController.clear();
-                              setState(() {
-                                _searchQuery = '';
-                              });
-                            },
+                            onPressed: _clearSidebarSearch,
                           )
                         : null,
                     filled: true,
@@ -1376,22 +1903,30 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                   onChanged: (value) {
                     setState(() {
                       _searchQuery = value;
+                      if (value.trim().isEmpty) {
+                        _searchResults = null;
+                        _isSearching = false;
+                      } else {
+                        _isSearching = true;
+                      }
                     });
-                    // Debounce search for world feed
                     _searchDebounceTimer?.cancel();
                     final router = GoRouter.of(context);
                     final currentRoute = router.routerDelegate.currentConfiguration.uri.path;
-                    if (currentRoute == '/world' && value.isNotEmpty) {
+                    if (value.trim().isEmpty) return;
+                    if (currentRoute == '/world') {
                       _searchDebounceTimer = Timer(const Duration(milliseconds: 500), () async {
                         try {
                           final worldFeedRepo = ref.read(worldFeedRepositoryProvider);
                           final response = await worldFeedRepo.getFeed(page: 1, query: value);
-                          // Search results are automatically displayed in the world feed
-                          // The feed will filter to show matching posts
                           debugPrint('World feed search results: ${response['data']?.length ?? 0} posts');
                         } catch (e) {
                           debugPrint('World feed search error: $e');
                         }
+                      });
+                    } else {
+                      _searchDebounceTimer = Timer(const Duration(milliseconds: 400), () {
+                        _performSidebarSearch();
                       });
                     }
                   },
@@ -1416,70 +1951,83 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
             ],
           ),
         ),
-        // Filter Chips (for conversation list filtering)
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          decoration: BoxDecoration(
+        if (_inAppNotices.isNotEmpty)
+          Container(
+            padding: const EdgeInsets.only(top: 4, bottom: 4),
             color: isDark ? const Color(0xFF202C33) : Colors.white,
-            border: Border(
-              bottom: BorderSide(
-                color: isDark ? const Color(0xFF2A3942) : const Color(0xFFD1D7DB),
-                width: 1,
+            child: InAppNoticeStrip(
+              notices: _inAppNotices,
+              onDismiss: _dismissInAppNotice,
+            ),
+          ),
+        if (_searchQuery.trim().isEmpty)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF202C33) : Colors.white,
+              border: Border(
+                bottom: BorderSide(
+                  color: isDark ? const Color(0xFF2A3942) : const Color(0xFFD1D7DB),
+                  width: 1,
+                ),
+              ),
+            ),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _buildFilterChip('all', 'All', isDark),
+                  const SizedBox(width: 8),
+                  _buildFilterChip('unread', 'Unread', isDark),
+                  const SizedBox(width: 8),
+                  _buildFilterChip('groups', 'Groups', isDark),
+                  const SizedBox(width: 8),
+                  _buildFilterChip('channels', 'Channels', isDark),
+                  const SizedBox(width: 8),
+                  _buildFilterChip('archived', 'Archived', isDark),
+                  const SizedBox(width: 8),
+                  _buildFilterChip('broadcast', 'Broadcast', isDark),
+                  ..._labels.map((label) {
+                    return Padding(
+                      padding: const EdgeInsets.only(left: 8),
+                      child: _buildFilterChip('label-${label.id}', label.name, isDark),
+                    );
+                  }),
+                  const SizedBox(width: 8),
+                  FilterChip(
+                    label: const Icon(Icons.add, size: 16),
+                    selected: false,
+                    onSelected: (selected) {
+                      _showCreateLabelDialog(context, isDark);
+                    },
+                    backgroundColor: isDark ? const Color(0xFF2A3942) : Colors.grey[200],
+                    side: BorderSide(
+                      color: isDark ? const Color(0xFF2A3942) : Colors.grey[300]!,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _buildFilterChip('all', 'All', isDark),
-                const SizedBox(width: 8),
-                _buildFilterChip('unread', 'Unread', isDark),
-                const SizedBox(width: 8),
-                _buildFilterChip('groups', 'Groups', isDark),
-                const SizedBox(width: 8),
-                _buildFilterChip('channels', 'Channels', isDark),
-                const SizedBox(width: 8),
-                _buildFilterChip('mail', 'Mail', isDark),
-                const SizedBox(width: 8),
-                _buildFilterChip('archived', 'Archived', isDark),
-                const SizedBox(width: 8),
-                _buildFilterChip('broadcast', 'Broadcast', isDark),
-                // Show labels as filter chips
-                ..._labels.map((label) {
-                  return Padding(
-                    padding: const EdgeInsets.only(left: 8),
-                    child: _buildFilterChip('label-${label.id}', label.name, isDark),
-                  );
-                }),
-                const SizedBox(width: 8),
-                // Add new label button
-                FilterChip(
-                  label: const Icon(Icons.add, size: 16),
-                  selected: false,
-                  onSelected: (selected) {
-                    _showCreateLabelDialog(context, isDark);
-                  },
-                  backgroundColor: isDark ? const Color(0xFF2A3942) : Colors.grey[200],
-                  side: BorderSide(
-                    color: isDark ? const Color(0xFF2A3942) : Colors.grey[300]!,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        // Conversations/Groups List (Unified list - no tabs)
-        // Telegram-style: Show cached data immediately, refresh in background
         Expanded(
-          child: Consumer(
+          child: _searchQuery.trim().isNotEmpty
+              ? DesktopSidebarSearchResults(
+                  query: _searchQuery.trim(),
+                  results: _searchResults,
+                  isSearching: _isSearching,
+                  onSelectConversation: _selectConversationFromSearch,
+                  onSelectGroup: _selectGroupFromSearch,
+                )
+              : _selectedFilter == 'broadcast'
+              ? const EmbeddableBroadcastListsScreen()
+              : Consumer(
             builder: (context, ref, child) {
               // Use providers instead of FutureBuilder - shows cached data immediately
               final conversationsAsync = _selectedFilter == 'archived'
                   ? ref.watch(optimizedArchivedConversationsProvider)
-                  : ref.watch(optimizedConversationsProvider);
+                  : ref.watch(sidebarConversationsProvider);
               
-              final groupsAsync = ref.watch(optimizedGroupsProvider);
+              final groupsAsync = ref.watch(sidebarGroupsProvider);
               
               return conversationsAsync.when(
                 data: (allConversations) {
@@ -1500,10 +2048,13 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                   );
                 },
                 loading: () {
-                  // First load - show skeleton or empty state
+                  // First load - show skeleton loaders
                   return groupsAsync.when(
                     data: (allGroups) => _buildConversationList([], allGroups),
-                    loading: () => const Center(child: CircularProgressIndicator()),
+                    loading: () => const SkeletonList(
+                      skeletonItem: SkeletonConversationItem(),
+                      itemCount: 8,
+                    ),
                     error: (_, __) => _buildConversationList([], []),
                   );
                 },
@@ -1591,8 +2142,8 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     
     // Calculate unread count for unread filter using providers
     if (filter == 'unread') {
-      final conversationsAsync = ref.watch(optimizedConversationsProvider);
-      final groupsAsync = ref.watch(optimizedGroupsProvider);
+      final conversationsAsync = ref.watch(sidebarConversationsProvider);
+      final groupsAsync = ref.watch(sidebarGroupsProvider);
       
       return Consumer(
         builder: (context, ref, child) {
@@ -1603,7 +2154,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                   .where((c) => c.unreadCount > 0 && c.archivedAt == null)
                   .fold<int>(0, (sum, c) => sum + c.unreadCount) +
                   groups
-                      .where((g) => g.unreadCount > 0)
+                      .where((g) => g.unreadCount > 0 && g.type != 'channel')
                       .fold<int>(0, (sum, g) => sum + g.unreadCount);
             });
           });
@@ -1645,11 +2196,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
         ],
       ),
       selected: isSelected,
-      onSelected: (selected) {
-        setState(() {
-          _selectedFilter = filter;
-        });
-      },
+      onSelected: (_) => _onFilterChipSelected(filter),
       selectedColor: const Color(0xFF008069).withOpacity(0.2),
       checkmarkColor: const Color(0xFF008069),
       labelStyle: TextStyle(
@@ -1668,7 +2215,43 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
   }
   
   Widget _buildMainContent(BuildContext context, String currentRoute, bool isDark) {
-    // Handle settings route FIRST (before other routes)
+    // Open chat always wins over World, Settings, etc. (sidebar tap while browsing).
+    if (_selectedConversation != null) {
+      return ChatView(
+        key: ValueKey('conv-${_selectedConversation!.id}'),
+        conversationId: _selectedConversation!.id,
+        contactName: _selectedConversation!.isSavedMessages
+            ? 'Saved Messages'
+            : _selectedConversation!.otherUser.name,
+        contactAvatar: _selectedConversation!.otherUser.avatarUrl,
+        otherUser: _selectedConversation!.otherUser,
+        isSavedMessages: _selectedConversation!.isSavedMessages,
+        initialScrollToMessageId: _conversationInitialScrollMessageId,
+        onInitialScrollConsumed: () {
+          if (_conversationInitialScrollMessageId != null) {
+            setState(() => _conversationInitialScrollMessageId = null);
+          }
+        },
+      );
+    }
+
+    if (_selectedGroup != null) {
+      return GroupChatView(
+        key: ValueKey('group-${_selectedGroup!.id}'),
+        groupId: _selectedGroup!.id,
+        groupName: _selectedGroup!.name,
+        groupAvatarUrl: _selectedGroup!.avatarUrl,
+        memberCount: _selectedGroup!.memberCount,
+        initialScrollToMessageId: _groupInitialScrollMessageId,
+        onInitialScrollConsumed: () {
+          if (_groupInitialScrollMessageId != null) {
+            setState(() => _groupInitialScrollMessageId = null);
+          }
+        },
+      );
+    }
+
+    // Handle settings route (before other section routes)
     if (currentRoute == '/settings' || currentRoute.startsWith('/settings')) {
       debugPrint('🔧 [SETTINGS] Showing SettingsScreen for route: $currentRoute');
       return const SettingsScreen();
@@ -1678,10 +2261,17 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     if (currentRoute == '/channels' || currentRoute.startsWith('/channels')) {
       if (_selectedGroup != null) {
         return GroupChatView(
+          key: ValueKey('channel-${_selectedGroup!.id}'),
           groupId: _selectedGroup!.id,
           groupName: _selectedGroup!.name,
           groupAvatarUrl: _selectedGroup!.avatarUrl,
           memberCount: _selectedGroup!.memberCount,
+          initialScrollToMessageId: _groupInitialScrollMessageId,
+          onInitialScrollConsumed: () {
+            if (_groupInitialScrollMessageId != null) {
+              setState(() => _groupInitialScrollMessageId = null);
+            }
+          },
         );
       }
       return Container(
@@ -1722,30 +2312,14 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     if (currentRoute == '/calls') {
       return const CallsScreen();
     }
+    if (currentRoute == '/live-broadcast') {
+      return const LiveBroadcastScreen();
+    }
     if (currentRoute == '/status') {
       return const StatusListScreen();
     }
     
-    // Default: show conversations/group chats
-    if (_selectedConversation != null) {
-      return ChatView(
-        conversationId: _selectedConversation!.id,
-        contactName: _selectedConversation!.otherUser.name,
-        contactAvatar: _selectedConversation!.otherUser.avatarUrl,
-        otherUser: _selectedConversation!.otherUser,
-      );
-    }
-    
-    if (_selectedGroup != null) {
-      return GroupChatView(
-        groupId: _selectedGroup!.id,
-        groupName: _selectedGroup!.name,
-        groupAvatarUrl: _selectedGroup!.avatarUrl,
-        memberCount: _selectedGroup!.memberCount,
-      );
-    }
-    
-    // Empty state
+    // Empty state (no chat selected)
     return Container(
       color: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
       child: Center(
@@ -1841,19 +2415,12 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
       );
 
       if (result != null && mounted) {
-        // Apply filters to search
         setState(() {
-          // Store selected filters for use in search
-          // The search can use these filters when performing queries
-          debugPrint('Selected search filters: $result');
+          _searchFilters = result.isEmpty ? null : result;
         });
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Filters applied: ${result.join(", ")}'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
+        if (_searchQuery.trim().isNotEmpty) {
+          _performSidebarSearch();
+        }
       }
     } catch (e) {
       if (mounted) {

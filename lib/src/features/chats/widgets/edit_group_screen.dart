@@ -4,7 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'dart:io';
 import '../../../core/providers.dart';
-import '../chat_repo.dart';
+import '../chat_providers.dart';
 import '../../../theme/app_theme.dart';
 
 final groupDetailsProvider = FutureProvider.family<Map<String, dynamic>, int>((ref, groupId) async {
