@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/feature_flags.dart';
 import '../../core/session.dart';
+import '../../utils/snackbar_helper.dart';
 
 /// PHASE 2: Mail Screen - Email as chat threads
 class MailScreen extends ConsumerWidget {
@@ -185,10 +186,7 @@ class MailScreen extends ConsumerWidget {
                   ElevatedButton.icon(
                     onPressed: () {
                       Clipboard.setData(ClipboardData(text: emailAddress));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Email address copied to clipboard')),
-                      );
-                    },
+                                            context.showSuccessToast('Email address copied to clipboard');                    },
                     icon: const Icon(Icons.copy),
                     label: const Text('Copy Email Address'),
                     style: ElevatedButton.styleFrom(

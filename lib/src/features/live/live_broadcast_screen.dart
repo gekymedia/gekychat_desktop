@@ -4,6 +4,7 @@ import '../../core/session.dart';
 import 'live_broadcast_repository.dart';
 import 'broadcast_viewer_screen.dart';
 import 'broadcast_streaming_screen.dart';
+import '../../utils/snackbar_helper.dart';
 
 final liveBroadcastsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final repo = ref.read(liveBroadcastRepositoryProvider);
@@ -216,13 +217,7 @@ class LiveBroadcastScreen extends ConsumerWidget {
       // Refresh the list in background
       ref.invalidate(liveBroadcastsProvider);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to start broadcast: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
+            context.showErrorToast('Failed to start broadcast: $e');    }
   }
 
   Future<void> _joinBroadcast(BuildContext context, WidgetRef ref, int broadcastId) async {
@@ -233,13 +228,7 @@ class LiveBroadcastScreen extends ConsumerWidget {
       // Check if user is the broadcaster (owner)
       final isBroadcaster = result['is_broadcaster'] as bool? ?? false;
       
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(isBroadcaster ? 'Joining as broadcaster...' : 'Joining broadcast...'),
-          backgroundColor: Colors.green,
-        ),
-      );
-      
+            context.showInfoToast(isBroadcaster ? 'Joining as broadcaster...' : 'Joining broadcast...');      
       // Navigate to appropriate screen based on role
       if (context.mounted) {
         if (isBroadcaster) {
@@ -274,13 +263,7 @@ class LiveBroadcastScreen extends ConsumerWidget {
       if (e is LiveBroadcastJoinException && e.errorCode == 'BROADCAST_ENDED') {
         ref.invalidate(liveBroadcastsProvider);
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(msg),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
+            context.showErrorToast(msg);    }
   }
 }
 

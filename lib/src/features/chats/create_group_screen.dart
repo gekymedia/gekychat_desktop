@@ -9,9 +9,35 @@ import '../../widgets/colored_avatar.dart';
 import 'chat_providers.dart';
 import 'models.dart';
 import 'sidebar_inbox_bump.dart';
+import '../../utils/snackbar_helper.dart';
+import '../../widgets/desktop_center_modal.dart';
 
 class CreateGroupScreen extends ConsumerStatefulWidget {
-  const CreateGroupScreen({super.key});
+  final String? initialGroupType;
+  final bool forModal;
+
+  const CreateGroupScreen({
+    super.key,
+    this.initialGroupType,
+    this.forModal = false,
+  });
+
+  static Future<bool?> showModal(
+    BuildContext context, {
+    String groupType = 'group',
+  }) {
+    final title = groupType == 'channel' ? 'Create Channel' : 'Create Group';
+    return showDesktopCenterModal<bool>(
+      context: context,
+      title: title,
+      maxWidth: 640,
+      maxHeightFraction: 0.88,
+      child: CreateGroupScreen(
+        initialGroupType: groupType,
+        forModal: true,
+      ),
+    );
+  }
 
   @override
   ConsumerState<CreateGroupScreen> createState() => _CreateGroupScreenState();
@@ -39,6 +65,13 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (widget.initialGroupType != null) {
+      final type = widget.initialGroupType!;
+      if (_groupType != type) {
+        setState(() => _groupType = type);
+      }
+      return;
+    }
     // Check for type parameter in route
     final uri = GoRouterState.of(context).uri;
     final typeParam = uri.queryParameters['type'];
@@ -84,10 +117,7 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
     if (!_formKey.currentState!.validate()) return;
 
     if (_selectedMemberIds.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select at least one member')),
-      );
-      return;
+            context.showInfoToast('Select at least one member');      return;
     }
 
     setState(() => _isLoading = true);
@@ -112,22 +142,18 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
         if (items.any((g) => g.id == group.id)) return items;
         return [...items, group];
       });
-      ref.invalidate(optimizedGroupsProvider);
-      ref.read(inboxListRefreshTickProvider.notifier).state++;
+      unawaited(ref.read(optimizedGroupsProvider.notifier).refreshSilently());
       ref.read(pendingDesktopGroupOpenProvider.notifier).state = group;
       ref.read(currentSectionProvider.notifier).setSection('/chats');
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
+            context.showSuccessToast(
             _groupType == 'channel'
                 ? 'Channel "${group.name}" created successfully'
                 : 'Group "${group.name}" created successfully',
-          ),
-        ),
-      );
-
-      if (context.canPop()) {
+          );
+      if (widget.forModal && context.mounted) {
+        Navigator.of(context).pop(true);
+      } else if (context.canPop()) {
         context.pop(true);
       } else {
         context.go('/chats');
@@ -135,13 +161,7 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to create group: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+                context.showErrorToast('Failed to create group: ${e.toString()}');      }
     } finally {
       if (mounted && _isLoading) {
         setState(() => _isLoading = false);
@@ -149,45 +169,26 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    
-    return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            if (context.canPop()) {
-              context.pop();
-            } else {
-              context.go('/chats');
-            }
-          },
-        ),
-        title: Text(_groupType == 'channel' ? 'Create Channel' : 'Create Group'),
-        actions: [
-          IconButton(
-            icon: _isLoading
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.check),
-            onPressed: _isLoading ? null : _createGroup,
-          ),
-        ],
-      ),
-      body: Form(
-        key: _formKey,
-        child: Center(
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 600),
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
+  void _close() {
+    if (widget.forModal) {
+      Navigator.of(context).pop();
+      return;
+    }
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/chats');
+    }
+  }
+
+  Widget _buildFormContent(bool isDark) {
+    final lockType = widget.initialGroupType != null;
+
+    return Form(
+      key: _formKey,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
                 // Avatar selection
                 Center(
                   child: GestureDetector(
@@ -232,60 +233,61 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                // Type selector
-                Card(
-                  color: isDark ? const Color(0xFF202C33) : Colors.white,
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Type',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: isDark ? Colors.white70 : Colors.grey[700],
+                // Type selector (hidden when opened as New group / New channel)
+                if (!lockType)
+                  Card(
+                    color: isDark ? const Color(0xFF202C33) : Colors.white,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Type',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? Colors.white70 : Colors.grey[700],
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: RadioListTile<String>(
-                                title: const Text('Group'),
-                                subtitle: const Text('Private group chat'),
-                                value: 'group',
-                                groupValue: _groupType,
-                                onChanged: (value) {
-                                  setState(() {
-                                    _groupType = value!;
-                                  });
-                                },
-                                contentPadding: EdgeInsets.zero,
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: RadioListTile<String>(
+                                  title: const Text('Group'),
+                                  subtitle: const Text('Private group chat'),
+                                  value: 'group',
+                                  groupValue: _groupType,
+                                  onChanged: (value) {
+                                    setState(() {
+                                      _groupType = value!;
+                                    });
+                                  },
+                                  contentPadding: EdgeInsets.zero,
+                                ),
                               ),
-                            ),
-                            Expanded(
-                              child: RadioListTile<String>(
-                                title: const Text('Channel'),
-                                subtitle: const Text('Public broadcast'),
-                                value: 'channel',
-                                groupValue: _groupType,
-                                onChanged: (value) {
-                                  setState(() {
-                                    _groupType = value!;
-                                  });
-                                },
-                                contentPadding: EdgeInsets.zero,
+                              Expanded(
+                                child: RadioListTile<String>(
+                                  title: const Text('Channel'),
+                                  subtitle: const Text('Public broadcast'),
+                                  value: 'channel',
+                                  groupValue: _groupType,
+                                  onChanged: (value) {
+                                    setState(() {
+                                      _groupType = value!;
+                                    });
+                                  },
+                                  contentPadding: EdgeInsets.zero,
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 16),
+                if (!lockType) const SizedBox(height: 16),
                 TextFormField(
                   controller: _nameController,
                   decoration: InputDecoration(
@@ -327,9 +329,70 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
                     });
                   },
                 ),
+                if (widget.forModal) ...[
+                  const SizedBox(height: 20),
+                  FilledButton(
+                    onPressed: _isLoading ? null : _createGroup,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF008069),
+                      minimumSize: const Size.fromHeight(44),
+                    ),
+                    child: _isLoading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : Text(
+                            _groupType == 'channel'
+                                ? 'Create channel'
+                                : 'Create group',
+                          ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
               ],
             ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final form = _buildFormContent(isDark);
+
+    if (widget.forModal) {
+      return form;
+    }
+
+    return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: _close,
+        ),
+        title: Text(_groupType == 'channel' ? 'Create Channel' : 'Create Group'),
+        actions: [
+          IconButton(
+            icon: _isLoading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.check),
+            onPressed: _isLoading ? null : _createGroup,
           ),
+        ],
+      ),
+      body: Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: form,
         ),
       ),
     );

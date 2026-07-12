@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:audioplayers/audioplayers.dart';
 import '../../core/providers.dart';
+import '../../utils/snackbar_helper.dart';
 
 class AudioSearchScreen extends ConsumerStatefulWidget {
   final Function(Map<String, dynamic>)? onAudioSelected;
@@ -84,10 +85,7 @@ class _AudioSearchScreenState extends ConsumerState<AudioSearchScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Search failed: $e')),
-        );
-      }
+                context.showErrorToast('Search failed: $e');      }
     } finally {
       setState(() => _isSearching = false);
     }
@@ -135,10 +133,7 @@ class _AudioSearchScreenState extends ConsumerState<AudioSearchScreen> {
     } catch (e) {
       setState(() => _playingAudioId = null);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to play preview: $e')),
-        );
-      }
+                context.showErrorToast('Failed to play preview: $e');      }
     }
   }
   

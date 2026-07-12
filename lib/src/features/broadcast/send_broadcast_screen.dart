@@ -6,6 +6,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'broadcast_repository.dart';
 import 'models.dart';
 import '../../core/providers.dart';
+import '../../utils/snackbar_helper.dart';
 
 final broadcastListProvider = FutureProvider.family<BroadcastList, int>((ref, id) async {
   final repo = ref.read(broadcastRepositoryProvider);
@@ -14,8 +15,15 @@ final broadcastListProvider = FutureProvider.family<BroadcastList, int>((ref, id
 
 class SendBroadcastScreen extends ConsumerStatefulWidget {
   final int broadcastListId;
+  final bool forModal;
+  final VoidCallback? onComplete;
 
-  const SendBroadcastScreen({super.key, required this.broadcastListId});
+  const SendBroadcastScreen({
+    super.key,
+    required this.broadcastListId,
+    this.forModal = false,
+    this.onComplete,
+  });
 
   @override
   ConsumerState<SendBroadcastScreen> createState() => _SendBroadcastScreenState();
@@ -52,10 +60,7 @@ class _SendBroadcastScreenState extends ConsumerState<SendBroadcastScreen> {
 
   Future<void> _sendMessage() async {
     if (_messageController.text.trim().isEmpty && _selectedFiles.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a message or select files')),
-      );
-      return;
+            context.showInfoToast('Please enter a message or select files');      return;
     }
 
     setState(() => _sending = true);
@@ -83,18 +88,17 @@ class _SendBroadcastScreenState extends ConsumerState<SendBroadcastScreen> {
       );
 
       if (mounted) {
-        Navigator.pop(context);
+        if (widget.forModal) {
+          widget.onComplete?.call();
+        } else {
+          Navigator.pop(context);
+        }
         final count = result['sent_messages']?.length ?? 0;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Message sent to $count recipients')),
-        );
+        context.showSuccessToast('Message sent to $count recipients');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to send message: $e')),
-        );
-      }
+                context.showErrorToast('Failed to send message: $e');      }
     } finally {
       if (mounted) {
         setState(() => _sending = false);
@@ -107,24 +111,15 @@ class _SendBroadcastScreenState extends ConsumerState<SendBroadcastScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final listAsync = ref.watch(broadcastListProvider(widget.broadcastListId));
 
-    return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
-      appBar: AppBar(
-        title: listAsync.when(
-          data: (list) => Text(list.name),
-          loading: () => const Text('Send Message'),
-          error: (_, __) => const Text('Send Message'),
-        ),
-      ),
-      body: listAsync.when(
-        data: (list) => Column(
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+    final content = listAsync.when(
+      data: (list) => Column(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                     Text(
                       'Recipients (${list.recipientCount})',
                       style: TextStyle(
@@ -246,21 +241,37 @@ class _SendBroadcastScreenState extends ConsumerState<SendBroadcastScreen> {
             ),
           ],
         ),
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text('Error loading broadcast list: $error'),
-              const SizedBox(height: 8),
-              ElevatedButton(
-                onPressed: () => ref.invalidate(broadcastListProvider(widget.broadcastListId)),
-                child: const Text('Retry'),
-              ),
-            ],
-          ),
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (error, _) => Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text('Error loading broadcast list: $error'),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: () =>
+                  ref.invalidate(broadcastListProvider(widget.broadcastListId)),
+              child: const Text('Retry'),
+            ),
+          ],
         ),
       ),
+    );
+
+    if (widget.forModal) {
+      return content;
+    }
+
+    return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
+      appBar: AppBar(
+        title: listAsync.when(
+          data: (list) => Text(list.name),
+          loading: () => const Text('Send Message'),
+          error: (_, __) => const Text('Send Message'),
+        ),
+      ),
+      body: content,
     );
   }
 }

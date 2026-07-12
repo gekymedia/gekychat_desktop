@@ -6,11 +6,119 @@ import 'models.dart';
 import 'create_broadcast_screen.dart';
 import 'edit_broadcast_screen.dart';
 import 'send_broadcast_screen.dart';
+import '../../utils/snackbar_helper.dart';
+import '../../widgets/desktop_center_modal.dart';
 
 final broadcastListsProvider = FutureProvider<List<BroadcastList>>((ref) async {
   final repo = ref.read(broadcastRepositoryProvider);
   return await repo.getBroadcastLists();
 });
+
+/// Opens broadcast lists in a centered desktop modal.
+Future<void> showBroadcastListsModal(BuildContext context) {
+  return showDesktopCenterModal<void>(
+    context: context,
+    title: 'Broadcast Lists',
+    maxWidth: 520,
+    maxHeightFraction: 0.82,
+    headerActions: [
+      Builder(
+        builder: (headerContext) {
+          return IconButton(
+            tooltip: 'Create broadcast list',
+            icon: const Icon(Icons.add),
+            onPressed: () => _openCreateBroadcastModal(headerContext),
+          );
+        },
+      ),
+    ],
+    child: const BroadcastListsBody(inModal: true),
+  );
+}
+
+Future<void> _openCreateBroadcastModal(BuildContext context) {
+  return showDesktopCenterModal<void>(
+    context: context,
+    title: 'Create Broadcast List',
+    maxWidth: 520,
+    maxHeightFraction: 0.82,
+    child: const _ModalCreateBroadcastBody(),
+  );
+}
+
+Future<void> _openEditBroadcastModal(
+  BuildContext context,
+  BroadcastList list,
+) {
+  return showDesktopCenterModal<void>(
+    context: context,
+    title: 'Edit Broadcast List',
+    maxWidth: 520,
+    maxHeightFraction: 0.82,
+    child: _ModalEditBroadcastBody(broadcastList: list),
+  );
+}
+
+Future<void> _openSendBroadcastModal(
+  BuildContext context,
+  int broadcastListId,
+) {
+  return showDesktopCenterModal<void>(
+    context: context,
+    title: 'Send Broadcast',
+    maxWidth: 520,
+    maxHeightFraction: 0.75,
+    child: _ModalSendBroadcastBody(broadcastListId: broadcastListId),
+  );
+}
+
+class _ModalCreateBroadcastBody extends ConsumerWidget {
+  const _ModalCreateBroadcastBody();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return CreateBroadcastScreen(
+      forModal: true,
+      onComplete: () {
+        ref.invalidate(broadcastListsProvider);
+        Navigator.of(context).pop();
+      },
+    );
+  }
+}
+
+class _ModalEditBroadcastBody extends ConsumerWidget {
+  final BroadcastList broadcastList;
+
+  const _ModalEditBroadcastBody({required this.broadcastList});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return EditBroadcastScreen(
+      broadcastList: broadcastList,
+      forModal: true,
+      onComplete: () {
+        ref.invalidate(broadcastListsProvider);
+        Navigator.of(context).pop();
+      },
+    );
+  }
+}
+
+class _ModalSendBroadcastBody extends StatelessWidget {
+  final int broadcastListId;
+
+  const _ModalSendBroadcastBody({required this.broadcastListId});
+
+  @override
+  Widget build(BuildContext context) {
+    return SendBroadcastScreen(
+      broadcastListId: broadcastListId,
+      forModal: true,
+      onComplete: () => Navigator.of(context).pop(),
+    );
+  }
+}
 
 /// Sidebar / filter-tab body (no app bar) — matches mobile [EmbeddableBroadcastListsScreen].
 class EmbeddableBroadcastListsScreen extends ConsumerWidget {
@@ -65,7 +173,9 @@ class BroadcastListsScreen extends ConsumerWidget {
 }
 
 class BroadcastListsBody extends ConsumerWidget {
-  const BroadcastListsBody({super.key});
+  final bool inModal;
+
+  const BroadcastListsBody({super.key, this.inModal = false});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -104,14 +214,18 @@ class BroadcastListsBody extends ConsumerWidget {
                 const SizedBox(height: 24),
                 ElevatedButton.icon(
                   onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const CreateBroadcastScreen(),
-                      ),
-                    ).then((_) {
-                      ref.invalidate(broadcastListsProvider);
-                    });
+                    if (inModal) {
+                      _openCreateBroadcastModal(context);
+                    } else {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const CreateBroadcastScreen(),
+                        ),
+                      ).then((_) {
+                        ref.invalidate(broadcastListsProvider);
+                      });
+                    }
                   },
                   icon: const Icon(Icons.add),
                   label: const Text('Create Broadcast List'),
@@ -172,23 +286,32 @@ class BroadcastListsBody extends ConsumerWidget {
                   trailing: PopupMenuButton<String>(
                     onSelected: (value) async {
                       if (value == 'send') {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) =>
-                                SendBroadcastScreen(broadcastListId: list.id),
-                          ),
-                        );
+                        if (inModal) {
+                          _openSendBroadcastModal(context, list.id);
+                        } else {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) =>
+                                  SendBroadcastScreen(broadcastListId: list.id),
+                            ),
+                          );
+                        }
                       } else if (value == 'edit') {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) =>
-                                EditBroadcastScreen(broadcastList: list),
-                          ),
-                        ).then((_) {
+                        if (inModal) {
+                          await _openEditBroadcastModal(context, list);
                           ref.invalidate(broadcastListsProvider);
-                        });
+                        } else {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) =>
+                                  EditBroadcastScreen(broadcastList: list),
+                            ),
+                          ).then((_) {
+                            ref.invalidate(broadcastListsProvider);
+                          });
+                        }
                       } else if (value == 'delete') {
                         final confirmed = await showDialog<bool>(
                           context: context,
@@ -217,18 +340,11 @@ class BroadcastListsBody extends ConsumerWidget {
                                 ref.read(broadcastRepositoryProvider);
                             await repo.deleteBroadcastList(list.id);
                             if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content: Text('Broadcast list deleted')),
-                              );
-                            }
+                                                            context.showSuccessToast('Broadcast list deleted');                            }
                             ref.invalidate(broadcastListsProvider);
                           } catch (e) {
                             if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Failed to delete: $e')),
-                              );
-                            }
+                                                            context.showErrorToast('Failed to delete: $e');                            }
                           }
                         }
                       }
@@ -267,13 +383,17 @@ class BroadcastListsBody extends ConsumerWidget {
                     ],
                   ),
                   onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) =>
-                            SendBroadcastScreen(broadcastListId: list.id),
-                      ),
-                    );
+                    if (inModal) {
+                      _openSendBroadcastModal(context, list.id);
+                    } else {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              SendBroadcastScreen(broadcastListId: list.id),
+                        ),
+                      );
+                    }
                   },
                 ),
               );

@@ -8,9 +8,11 @@ import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'models.dart';
 import 'status_repository.dart';
+import 'status_text_limits.dart';
 import '../../core/providers.dart';
 import '../chats/models.dart'
     show DesktopPendingStatusChatOpen, PendingStatusReply;
+import '../../utils/snackbar_helper.dart';
 
 /// Helper function to build avatar with error handling
 Widget _buildStatusAvatar({required String? avatarUrl, required String name, required double radius}) {
@@ -49,12 +51,14 @@ class StatusViewerScreen extends ConsumerStatefulWidget {
   final StatusSummary statusSummary;
   final int startIndex;
   final bool isOwnStatus;
+  final bool desktopOverlay;
 
   const StatusViewerScreen({
     super.key,
     required this.statusSummary,
     this.startIndex = 0,
     this.isOwnStatus = false,
+    this.desktopOverlay = false,
   });
 
   @override
@@ -69,6 +73,7 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
   Timer? _autoAdvanceTimer;
   bool _isPaused = false;
   bool _stealthModeEnabled = false; // Stealth viewing toggle
+  final _replyController = TextEditingController();
 
   static const _imageDuration = Duration(seconds: 5);
   static const _textDuration = Duration(seconds: 7);
@@ -83,6 +88,7 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
 
   @override
   void dispose() {
+    _replyController.dispose();
     _progressController.dispose();
     _videoController?.dispose();
     _autoAdvanceTimer?.cancel();
@@ -182,13 +188,10 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
     });
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_stealthModeEnabled
-              ? 'Stealth mode enabled - views will be hidden'
-              : 'Stealth mode disabled'),
-          duration: const Duration(seconds: 2),
-        ),
+      context.showInfoToast(
+        _stealthModeEnabled
+            ? 'Stealth mode enabled - views will be hidden'
+            : 'Stealth mode disabled',
       );
     }
   }
@@ -215,30 +218,27 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
 
     return Scaffold(
       backgroundColor: Colors.black,
-      body: GestureDetector(
-        onTapDown: (details) {
-          final screenWidth = MediaQuery.of(context).size.width;
-          if (details.globalPosition.dx < screenWidth / 2) {
-            _previousStatus();
-          } else {
-            _nextStatus();
-          }
-        },
-        child: Stack(
-          children: [
-            // Status content
-            _buildStatusContent(status, isDark),
-            
-            // Header with progress bars
-            _buildHeader(isDark),
-            
-            // Navigation buttons at edges
-            _buildNavigationButtons(),
-            
-            // Bottom controls
-            _buildBottomControls(isDark),
-          ],
-        ),
+      body: Stack(
+        children: [
+          // Tap left/right only on the media — not on header/reply chrome.
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapDown: (details) {
+                final screenWidth = MediaQuery.of(context).size.width;
+                if (details.globalPosition.dx < screenWidth / 2) {
+                  _previousStatus();
+                } else {
+                  _nextStatus();
+                }
+              },
+              child: _buildStatusContent(status, isDark),
+            ),
+          ),
+          _buildHeader(isDark),
+          _buildNavigationButtons(),
+          _buildBottomControls(isDark),
+        ],
       ),
     );
   }
@@ -254,7 +254,8 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
             child: Text(
               status.text ?? '',
               style: TextStyle(
-                fontSize: (status.fontSize ?? 32).toDouble(),
+                fontSize: status.fontSize?.toDouble() ??
+                    statusTextFontSizeForLength((status.text ?? '').trim().length),
                 fontWeight: FontWeight.bold,
                 color: status.textColor != null
                     ? Color(int.parse(
@@ -432,67 +433,160 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
   }
 
   Widget _buildBottomControls(bool isDark) {
+    if (widget.desktopOverlay && !widget.isOwnStatus) {
+      return Positioned(
+        bottom: 0,
+        left: 0,
+        right: 0,
+        child: Material(
+          type: MaterialType.transparency,
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+              // Absorb taps so the media GestureDetector behind never steals focus.
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {},
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _replyController,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: 'Type a reply…',
+                          hintStyle: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.55),
+                          ),
+                          filled: true,
+                          fillColor: Colors.white.withValues(alpha: 0.12),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(24),
+                            borderSide: BorderSide.none,
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                        ),
+                        textInputAction: TextInputAction.send,
+                        onTap: () {
+                          if (!_isPaused) _togglePause();
+                        },
+                        onSubmitted: (_) => _sendDesktopReply(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.send_rounded, color: Colors.white),
+                      tooltip: 'Send reply',
+                      onPressed: _sendDesktopReply,
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        _isPaused ? Icons.play_arrow : Icons.pause,
+                        color: Colors.white,
+                      ),
+                      tooltip: _isPaused ? 'Resume' : 'Pause',
+                      onPressed: _togglePause,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Positioned(
       bottom: 0,
       left: 0,
       right: 0,
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // View count for own status
-              if (widget.isOwnStatus && widget.statusSummary.updates[currentIndex].viewCount > 0)
-                GestureDetector(
-                  onTap: () => _showViewersList(widget.statusSummary.updates[currentIndex].id),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.3),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.remove_red_eye, color: Colors.white, size: 18),
-                        const SizedBox(width: 6),
-                        Text(
-                          '${widget.statusSummary.updates[currentIndex].viewCount}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+      child: Material(
+        type: MaterialType.transparency,
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {},
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (!widget.isOwnStatus)
-                    IconButton(
-                      icon: const Icon(Icons.reply, color: Colors.white, size: 28),
-                      tooltip: 'Reply in chat',
-                      onPressed: _openReplyInDm,
+                  // View count for own status
+                  if (widget.isOwnStatus &&
+                      widget.statusSummary.updates[currentIndex].viewCount > 0)
+                    GestureDetector(
+                      onTap: () => _showViewersList(
+                        widget.statusSummary.updates[currentIndex].id,
+                      ),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.3),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.remove_red_eye,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              '${widget.statusSummary.updates[currentIndex].viewCount}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                  IconButton(
-                    icon: const Icon(Icons.comment_outlined, color: Colors.white, size: 28),
-                    onPressed: () => _showCommentsDialog(widget.statusSummary.updates[currentIndex].id),
-                  ),
-                  IconButton(
-                    icon: Icon(
-                      _isPaused ? Icons.play_arrow : Icons.pause,
-                      color: Colors.white,
-                    ),
-                    onPressed: _togglePause,
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (!widget.isOwnStatus)
+                        IconButton(
+                          icon: const Icon(
+                            Icons.reply,
+                            color: Colors.white,
+                            size: 28,
+                          ),
+                          tooltip: 'Reply in chat',
+                          onPressed: () => _openReplyInDm(),
+                        ),
+                      IconButton(
+                        icon: const Icon(
+                          Icons.comment_outlined,
+                          color: Colors.white,
+                          size: 28,
+                        ),
+                        onPressed: () => _showCommentsDialog(
+                          widget.statusSummary.updates[currentIndex].id,
+                        ),
+                      ),
+                      IconButton(
+                        icon: Icon(
+                          _isPaused ? Icons.play_arrow : Icons.pause,
+                          color: Colors.white,
+                        ),
+                        onPressed: _togglePause,
+                      ),
+                    ],
                   ),
                 ],
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -500,29 +594,46 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
   }
   
   Widget _buildNavigationButtons() {
+    Widget navButton({
+      required IconData icon,
+      required VoidCallback? onPressed,
+    }) {
+      final button = IconButton(
+        icon: Icon(icon, color: Colors.white, size: 28),
+        onPressed: onPressed,
+      );
+      if (!widget.desktopOverlay) return button;
+      return Material(
+        color: Colors.black.withValues(alpha: 0.35),
+        shape: const CircleBorder(),
+        child: button,
+      );
+    }
+
     return Stack(
       children: [
-        // Previous button at left edge, vertically centered
         Positioned(
-          left: 16,
+          left: widget.desktopOverlay ? 8 : 16,
           top: 0,
-          bottom: 0,
+          // Keep clear of the reply/composer strip at the bottom.
+          bottom: widget.desktopOverlay ? 72 : 0,
           child: Center(
-            child: IconButton(
-              icon: const Icon(Icons.chevron_left, color: Colors.white, size: 32),
+            child: navButton(
+              icon: Icons.chevron_left,
               onPressed: currentIndex > 0 ? _previousStatus : null,
             ),
           ),
         ),
-        // Next button at right edge, vertically centered
         Positioned(
-          right: 16,
+          right: widget.desktopOverlay ? 8 : 16,
           top: 0,
-          bottom: 0,
+          bottom: widget.desktopOverlay ? 72 : 0,
           child: Center(
-            child: IconButton(
-              icon: const Icon(Icons.chevron_right, color: Colors.white, size: 32),
-              onPressed: currentIndex < widget.statusSummary.updates.length - 1 ? _nextStatus : null,
+            child: navButton(
+              icon: Icons.chevron_right,
+              onPressed: currentIndex < widget.statusSummary.updates.length - 1
+                  ? _nextStatus
+                  : null,
             ),
           ),
         ),
@@ -530,7 +641,7 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
     );
   }
 
-  Future<void> _openReplyInDm() async {
+  Future<void> _openReplyInDm({String? draftText}) async {
     if (widget.isOwnStatus) return;
     final updates = widget.statusSummary.updates;
     if (currentIndex < 0 || currentIndex >= updates.length) return;
@@ -558,15 +669,22 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
           DesktopPendingStatusChatOpen(
         conversationId: conversationId,
         reply: pending,
+        draftText: draftText?.trim().isNotEmpty == true ? draftText!.trim() : null,
       );
       Navigator.of(context).pop();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open chat: $e')),
-        );
-      }
+                context.showErrorToast('Could not open chat: $e');      }
     }
+  }
+
+  Future<void> _sendDesktopReply() async {
+    final text = _replyController.text.trim();
+    if (text.isEmpty) {
+      await _openReplyInDm();
+      return;
+    }
+    await _openReplyInDm(draftText: text);
   }
 
   Future<void> _showViewersList(int statusId) async {
@@ -582,10 +700,7 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load viewers: $e')),
-        );
-      }
+                context.showErrorToast('Failed to load viewers: $e');      }
     }
   }
 
@@ -608,10 +723,7 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
       comments = await repo.getStatusComments(statusId);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load comments: $e')),
-        );
-      }
+                context.showErrorToast('Failed to load comments: $e');      }
       return;
     }
 
@@ -632,10 +744,7 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
     final status = widget.statusSummary.updates[currentIndex];
     
     if (status.mediaUrl == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No media to download')),
-      );
-      return;
+            context.showInfoToast('No media to download');      return;
     }
 
     try {
@@ -669,10 +778,7 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
       
       // Show downloading indicator
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Downloading...')),
-        );
-      }
+                context.showInfoToast('Downloading...');      }
       
       // Download file using apiService
       await apiService.downloadFile(
@@ -687,20 +793,10 @@ class _StatusViewerScreenState extends ConsumerState<StatusViewerScreen>
       );
       
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Downloaded to Downloads/$fileName'),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
+                context.showSuccessToast('Downloaded to Downloads/$fileName');      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to download: $e')),
-        );
-      }
+                context.showErrorToast('Failed to download: $e');      }
     }
   }
 }
@@ -851,10 +947,7 @@ class _CommentsDialogState extends ConsumerState<_CommentsDialog> {
     } catch (e) {
       setState(() => _isSending = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to send comment: $e')),
-        );
-      }
+                context.showErrorToast('Failed to send comment: $e');      }
     }
   }
 

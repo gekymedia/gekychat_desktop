@@ -32,6 +32,9 @@ dependencies:
   connectivity_plus: ^6.0.3
   path: ^1.8.3
   scrollable_positioned_list: ^0.3.8
+  package_info_plus: ^8.3.0
+  device_info_plus: ^11.2.0
+  mime: ^2.0.0
 
   # Desktop-specific
   file_picker: ^10.3.2
@@ -46,6 +49,7 @@ dependencies:
   flutter_webrtc: ^0.11.4
   livekit_client: ^2.2.6
   cupertino_icons: ^1.0.8
+  google_fonts: ^6.3.2
   json_annotation: ^4.8.1
 
   # Desktop notifications
@@ -90,10 +94,25 @@ flutter:
     - assets/icons/white_with_text/
 
 flutter_launcher_icons:
-  image_path: "assets/icons/gold_with_text/256x256.png"
+  image_path: "assets/icons/gold_no_text/1024x1024.png"
   windows:
     generate: true
+    image_path: "assets/icons/gold_no_text/1024x1024.png"
+    icon_size: 256
   macos:
     generate: true
+    image_path: "assets/icons/gold_no_text/1024x1024.png"
   linux:
     generate: true
+    image_path: "assets/icons/gold_no_text/1024x1024.png"
+
+# Start menu / Store tile icon comes from logo_path (not the .exe ICO alone).
+msix_config:
+  display_name: GekyChat
+  publisher_display_name: GekyChat
+  identity_name: com.flutter.gekychatdesktop
+  publisher: CN=Msix Testing, O=Msix Testing Corporation, S=Some-State, C=US
+  msix_version: 1.0.0.1
+  logo_path: assets/icons/gold_no_text/1024x1024.png
+  trim_logo: false
+  capabilities: internetClient, microphone, webcam, location

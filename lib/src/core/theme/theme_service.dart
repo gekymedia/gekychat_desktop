@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../widgets/desktop_typography.dart';
 import 'app_theme_mode.dart';
 
 /// Service to manage app theme preferences (palettes aligned with mobile).
@@ -22,10 +24,16 @@ class ThemeService {
     final isDark = mode.isDark;
     final colors = _getThemeColors(mode.themeColor, isDark);
 
+    final textTheme = DesktopTypography.shellTextTheme(isDark);
+    final openSansFamily = DesktopTypography.fontFamily;
+
     return ThemeData(
       useMaterial3: true,
       brightness: isDark ? Brightness.dark : Brightness.light,
       primaryColor: primaryColor,
+      fontFamily: openSansFamily,
+      textTheme: textTheme,
+      primaryTextTheme: textTheme,
       colorScheme: ColorScheme.fromSeed(
         seedColor: primaryColor,
         brightness: isDark ? Brightness.dark : Brightness.light,
@@ -36,6 +44,12 @@ class ThemeService {
         elevation: 0,
         scrolledUnderElevation: 0,
         surfaceTintColor: Colors.transparent,
+        titleTextStyle: GoogleFonts.openSans(
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
+          letterSpacing: -0.2,
+          color: colors.appBarForeground,
+        ),
       ),
       scaffoldBackgroundColor: colors.scaffoldBackground,
       cardTheme: CardThemeData(
@@ -55,6 +69,11 @@ class ThemeService {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: colors.inputBackground,
+        hintStyle: GoogleFonts.openSans(
+          fontSize: 14,
+          fontWeight: FontWeight.w400,
+          color: colors.unselectedIcon,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide.none,
@@ -82,6 +101,12 @@ class ThemeService {
       iconTheme: IconThemeData(color: colors.icon),
       dialogTheme: DialogThemeData(
         backgroundColor: colors.cardBackground,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+      popupMenuTheme: PopupMenuThemeData(
+        color: isDark ? const Color(0xFF202C33) : Colors.white,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.black.withValues(alpha: 0.12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
     );

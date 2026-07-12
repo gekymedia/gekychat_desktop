@@ -10,7 +10,9 @@ import '../chats/chat_providers.dart';
 import '../media/media_gallery_screen.dart';
 import '../../widgets/constrained_slide_route.dart';
 import 'contacts_repository.dart';
+import 'edit_gekychat_contact_dialog.dart';
 import '../../utils/phone_matcher.dart';
+import '../../utils/snackbar_helper.dart';
 
 class ContactInfoScreen extends ConsumerStatefulWidget {
   final User user;
@@ -39,6 +41,7 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
   bool _isLoadingProfile = true;
   int? _currentConversationId;
   User? _displayUser;
+  GekyContact? _gekyContact;
 
   User get _user => _displayUser ?? widget.user;
 
@@ -74,28 +77,29 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
 
       var user = profile.user;
       final savedName = widget.user.name.trim();
-      if (savedName.isNotEmpty &&
+      final preferSavedName = savedName.isNotEmpty &&
           savedName != 'Unknown' &&
           !savedName.startsWith('DM #') &&
-          user.name != savedName) {
-        user = User(
-          id: user.id,
-          name: savedName,
-          phone: user.phone ?? widget.user.phone,
-          avatarUrl: user.avatarUrl ?? widget.user.avatarUrl,
-          isOnline: user.isOnline,
-          lastSeenAt: user.lastSeenAt,
-        );
-      }
+          user.name != savedName;
+      // Keep chat/list phone when profile omits it (privacy or unlinked contact).
+      user = User(
+        id: user.id,
+        name: preferSavedName ? savedName : user.name,
+        phone: user.phone ?? widget.user.phone,
+        avatarUrl: user.avatarUrl ?? widget.user.avatarUrl,
+        isOnline: user.isOnline,
+        lastSeenAt: user.lastSeenAt,
+      );
 
       setState(() {
         _displayUser = user;
-        _isContact = profile.isContact;
+        _isContact = profile.isContact || profile.gekyContact != null;
+        _gekyContact = profile.gekyContact;
         _isChecking = false;
         _isLoadingProfile = false;
       });
 
-      if (!profile.isContact) {
+      if (!_isContact || _gekyContact == null) {
         await _checkIfContact(user: user);
       }
     } catch (e) {
@@ -148,11 +152,19 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
       final contactsRepo = ref.read(contactsRepositoryProvider);
       final matched = await contactsRepo.isUserInContacts(
         userId: target.id > 0 ? target.id : null,
-        phone: target.phone,
+        phone: target.phone ?? widget.user.phone,
       );
+      GekyContact? geky = _gekyContact;
+      if (matched || geky == null) {
+        geky = await contactsRepo.getGekyContactForUser(
+          userId: target.id > 0 ? target.id : null,
+          phone: target.phone ?? widget.user.phone ?? geky?.phone,
+        );
+      }
       if (mounted) {
         setState(() {
-          _isContact = matched;
+          _isContact = matched || geky != null;
+          _gekyContact = geky ?? _gekyContact;
           _isChecking = false;
         });
       }
@@ -191,10 +203,7 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
     }
 
     if (phone == null || phone.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Phone number not available')),
-      );
-      return;
+            context.showErrorToast('Phone number not available');      return;
     }
 
     setState(() {
@@ -203,7 +212,7 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
 
     try {
       final contactsRepo = ref.read(contactsRepositoryProvider);
-      await contactsRepo.saveContact(
+      final saved = await contactsRepo.saveContact(
         displayName: user.name,
         phone: PhoneMatcher.normalizeGhanaLoginPhone(phone).isNotEmpty
             ? PhoneMatcher.normalizeGhanaLoginPhone(phone)
@@ -214,30 +223,112 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
       if (mounted) {
         setState(() {
           _isContact = true;
+          _gekyContact = saved;
           _isSaving = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Contact saved successfully')),
-        );
-      }
+                context.showSuccessToast('Contact saved successfully');      }
     } on ContactAlreadyExistsException {
+      GekyContact? existing;
+      try {
+        existing = await ref.read(contactsRepositoryProvider).getGekyContactForUser(
+          userId: user.id > 0 ? user.id : null,
+          phone: phone,
+        );
+      } catch (_) {}
       if (mounted) {
         setState(() {
           _isContact = true;
+          _gekyContact = existing ?? _gekyContact;
           _isSaving = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Contact is already saved')),
-        );
+        context.showSuccessToast('Contact is already saved');
       }
     } catch (e) {
       if (mounted) {
         setState(() {
           _isSaving = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save contact: $e')),
+                context.showErrorToast('Failed to save contact: $e');      }
+    }
+  }
+
+  Future<void> _editInGekyChat() async {
+    final user = _user;
+    if (!_isContact && _gekyContact == null) {
+      context.showWarningToast('Save this contact first to edit it');
+      return;
+    }
+
+    final contactsRepo = ref.read(contactsRepositoryProvider);
+    final phoneHint =
+        user.phone ?? widget.user.phone ?? _gekyContact?.phone;
+
+    // Always resolve a fresh contact row id (profile contact_data, then search).
+    var gekyContact = await contactsRepo.getGekyContactForUser(
+      userId: user.id > 0 ? user.id : null,
+      phone: phoneHint,
+    );
+    gekyContact ??= _gekyContact;
+
+    if (gekyContact == null || gekyContact.id <= 0) {
+      if (mounted) {
+        context.showWarningToast('Contact not found in GekyChat');
+      }
+      return;
+    }
+
+    if (!mounted) return;
+
+    setState(() => _gekyContact = gekyContact);
+
+    final result = await showEditGekyChatContactDialog(
+      context,
+      displayName: gekyContact.name.trim().isNotEmpty
+          ? gekyContact.name.trim()
+          : user.name,
+      phone: gekyContact.phone?.trim().isNotEmpty == true
+          ? gekyContact.phone!.trim()
+          : (phoneHint ?? ''),
+      note: gekyContact.note,
+    );
+
+    if (result == null || !mounted) return;
+
+    try {
+      await contactsRepo.updateContact(
+        gekyContact.id,
+        displayName: result['displayName'],
+        phone: result['phone'],
+        note: result['note'],
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _displayUser = User(
+          id: user.id,
+          name: result['displayName'] ?? user.name,
+          phone: result['phone'] ?? user.phone,
+          avatarUrl: user.avatarUrl,
+          isOnline: user.isOnline,
+          lastSeenAt: user.lastSeenAt,
         );
+        _gekyContact = GekyContact(
+          id: gekyContact!.id,
+          name: result['displayName'] ?? gekyContact.name,
+          phone: result['phone'] ?? gekyContact.phone,
+          avatarUrl: gekyContact.avatarUrl,
+          isRegistered: gekyContact.isRegistered,
+          contactUserId: gekyContact.contactUserId,
+          contactUser: gekyContact.contactUser,
+          note: result['note'],
+        );
+        _isContact = true;
+      });
+      context.showSuccessToast('Contact updated in GekyChat');
+      await _loadProfile();
+    } catch (e) {
+      if (mounted) {
+        context.showErrorToast('Failed to update contact: $e');
       }
     }
   }
@@ -248,10 +339,7 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
   void _openMediaGallery(BuildContext context) {
     final conversationId = _resolvedConversationId;
     if (conversationId == null || conversationId <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Conversation not available yet')),
-      );
-      return;
+            context.showErrorToast('Conversation not available yet');      return;
     }
 
     final isSelfChat = _isSelfChat(ref);
@@ -421,10 +509,7 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
                         }
                       } catch (e) {
                         if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Failed to start conversation: $e')),
-                          );
-                        }
+                                                    context.showErrorToast('Failed to start conversation: $e');                        }
                       }
                     },
                   ),
@@ -525,6 +610,15 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
                       ),
                     ),
                   ),
+                  if (!_isChecking && _isContact && !isSelfChat)
+                    IconButton(
+                      tooltip: 'Edit contact',
+                      icon: Icon(
+                        Icons.edit_outlined,
+                        color: isDark ? Colors.white70 : Colors.grey[700],
+                      ),
+                      onPressed: _editInGekyChat,
+                    ),
                 ],
               ),
             ),
@@ -540,30 +634,63 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
         title: Text(panelTitle),
         backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
         foregroundColor: isDark ? Colors.white : Colors.black,
+        actions: [
+          if (!_isChecking && _isContact && !isSelfChat)
+            IconButton(
+              tooltip: 'Edit contact',
+              icon: const Icon(Icons.edit_outlined),
+              onPressed: _editInGekyChat,
+            ),
+        ],
       ),
       body: body,
     );
   }
 
   String _formatLastSeen(DateTime lastSeen) {
+    final local = lastSeen.toLocal();
     final now = DateTime.now();
-    final difference = now.difference(lastSeen);
+    final diff = now.difference(local);
 
-    if (difference.inDays == 0) {
-      if (difference.inHours == 0) {
-        if (difference.inMinutes == 0) {
-          return 'just now';
-        }
-        return '${difference.inMinutes} minute${difference.inMinutes == 1 ? '' : 's'} ago';
-      }
-      return '${difference.inHours} hour${difference.inHours == 1 ? '' : 's'} ago';
-    } else if (difference.inDays == 1) {
-      return 'yesterday';
-    } else if (difference.inDays < 7) {
-      return '${difference.inDays} days ago';
-    } else {
-      return '${(difference.inDays / 7).floor()} week${(difference.inDays / 7).floor() == 1 ? '' : 's'} ago';
+    String timeOfDay(DateTime dt) {
+      final hour = dt.hour;
+      final minute = dt.minute.toString().padLeft(2, '0');
+      final period = hour >= 12 ? 'PM' : 'AM';
+      final displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
+      return '$displayHour:$minute $period';
     }
+
+    if (diff.inMinutes < 1) {
+      return 'just now';
+    }
+    if (diff.inMinutes < 60) {
+      final m = diff.inMinutes;
+      return '$m ${m == 1 ? 'minute' : 'minutes'} ago';
+    }
+
+    final startOfToday = DateTime(now.year, now.month, now.day);
+    final startOfThatDay = DateTime(local.year, local.month, local.day);
+    final dayDiff = startOfToday.difference(startOfThatDay).inDays;
+
+    if (dayDiff == 0) {
+      return 'today at ${timeOfDay(local)}';
+    }
+    if (dayDiff == 1) {
+      return 'yesterday at ${timeOfDay(local)}';
+    }
+    if (dayDiff < 7) {
+      const days = [
+        'Monday',
+        'Tuesday',
+        'Wednesday',
+        'Thursday',
+        'Friday',
+        'Saturday',
+        'Sunday',
+      ];
+      return '${days[local.weekday - 1]} at ${timeOfDay(local)}';
+    }
+    return '${local.day}/${local.month}/${local.year}';
   }
 
   void _showBlockDialog(BuildContext context, bool isDark) {
@@ -586,17 +713,11 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
                 final apiService = ref.read(apiServiceProvider);
                 await apiService.blockUser(user.id);
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('${user.name} has been blocked')),
-                  );
-                  Navigator.pop(context); // Close contact info screen
+                                    context.showSuccessToast('${user.name} has been blocked');                  Navigator.pop(context); // Close contact info screen
                 }
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Failed to block contact: $e')),
-                  );
-                }
+                                    context.showErrorToast('Failed to block contact: $e');                }
               }
             },
             style: ElevatedButton.styleFrom(foregroundColor: Colors.red),
@@ -651,10 +772,7 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
             onPressed: () async {
               final reason = reasonController.text.trim();
               if (reason.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please enter a reason')),
-                );
-                return;
+                                context.showInfoToast('Please enter a reason');                return;
               }
 
               Navigator.pop(context);
@@ -662,16 +780,10 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
                 final apiService = ref.read(apiServiceProvider);
                 await apiService.reportUser(user.id, reason);
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Report submitted successfully')),
-                  );
-                }
+                                    context.showSuccessToast('Report submitted successfully');                }
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Failed to submit report: $e')),
-                  );
-                }
+                                    context.showErrorToast('Failed to submit report: $e');                }
               }
             },
             style: ElevatedButton.styleFrom(foregroundColor: Colors.red),

@@ -38,6 +38,7 @@ class _RouterRefreshNotifier extends ChangeNotifier {
 }
 
 final routerRefreshNotifierProvider = Provider((ref) {
+  ref.keepAlive();
   final notifier = _RouterRefreshNotifier();
   
   // Initialize with current auth state
@@ -53,12 +54,15 @@ final routerRefreshNotifierProvider = Provider((ref) {
 });
 
 final routerProvider = Provider<GoRouter>((ref) {
+  // Create once for the app lifetime. Recreating GoRouter disposes the root
+  // Navigator and can assert !_debugLocked during an in-flight route update.
+  ref.keepAlive();
   final refreshNotifier = ref.watch(routerRefreshNotifierProvider);
-  
+
   // Get initial auth state for initialLocation
   final initialAuthState = ref.read(authProvider);
   final initialLocation = (initialAuthState.token != null && initialAuthState.token!.isNotEmpty) ? '/chats' : '/login';
-  
+
   return GoRouter(
     navigatorKey: rootNavigatorKey,
     initialLocation: initialLocation, // Set initial location based on auth state
@@ -112,7 +116,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Settings and other screens (full screen, but settings keeps side nav)
       GoRoute(
         path: '/settings',
-        builder: (context, state) => const DesktopChatScreen(),
+        redirect: (context, state) => '/chats',
       ),
       GoRoute(
         path: '/profile',

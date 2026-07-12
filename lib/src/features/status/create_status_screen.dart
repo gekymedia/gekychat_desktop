@@ -1,19 +1,39 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:video_player/video_player.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'status_repository.dart';
+import 'status_text_limits.dart';
 import '../../core/providers.dart';
+import '../../utils/avatar_utils.dart';
+import '../../utils/storage_url.dart';
 import '../../utils/clipboard_media_helper.dart';
 import '../world/widgets/video_trimmer_widget.dart';
 import '../chats/chat_providers.dart';
 import '../contacts/contacts_repository.dart';
 import '../chats/models.dart' show GekyContact;
+import '../../utils/snackbar_helper.dart';
+import '../../services/product_analytics_service.dart';
+import '../../widgets/desktop_center_modal.dart';
 
 class CreateStatusScreen extends ConsumerStatefulWidget {
-  const CreateStatusScreen({super.key});
+  final bool forModal;
+
+  const CreateStatusScreen({super.key, this.forModal = false});
+
+  static Future<bool?> showModal(BuildContext context) {
+    return showDesktopCenterModal<bool>(
+      context: context,
+      title: 'Create status',
+      maxWidth: 640,
+      maxHeightFraction: 0.88,
+      child: const CreateStatusScreen(forModal: true),
+    );
+  }
 
   @override
   ConsumerState<CreateStatusScreen> createState() => _CreateStatusScreenState();
@@ -200,10 +220,7 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
               FilledButton(
                 onPressed: () {
                   if (mode == 'only_share_with' && inc.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Pick at least one person for “Only selected”.')),
-                    );
-                    return;
+                                        context.showInfoToast('Pick at least one person for “Only selected”.');                    return;
                   }
                   Navigator.pop(ctx, true);
                 },
@@ -357,10 +374,7 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to check video: $e')),
-        );
-      }
+                context.showErrorToast('Failed to check video: $e');      }
     }
   }
 
@@ -443,8 +457,9 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
         }
       } else {
         createdStatusId = (await repo.createTextStatus(
-          text: _textController.text,
+          text: _textController.text.trim(),
           backgroundColor: '#${_selectedColor.value.toRadixString(16).substring(2)}',
+          fontSize: statusTextFontSizeIntForLength(_textController.text.trim().length),
           audience: audience,
         ))
             .id;
@@ -454,19 +469,15 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
         await _sendStatusMentionAlerts(createdStatusId);
       }
 
+      ProductAnalytics.action('status_posted', feature: 'status');
+
       if (mounted) {
         Navigator.pop(context, true);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
+                context.showSuccessToast(
               _mentionedTargets.isNotEmpty
                   ? 'Status posted. Mention alerts sent to ${_mentionedTargets.length} contact(s).'
                   : 'Status posted successfully',
-            ),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
+            );      }
     } catch (e) {
       _showError('Failed to create status: $e');
     } finally {
@@ -477,10 +488,7 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
-  }
+        context.showInfoToast(message);  }
 
   Future<void> _pickMentionTargets() async {
     final selected = await showDialog<List<_StatusMentionTarget>>(
@@ -547,61 +555,13 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
-      appBar: AppBar(
-        title: const Text('Create Status'),
-        actions: [
-          IconButton(
-            tooltip: 'Who can see your status',
-            onPressed: _isLoading ? null : _openPrivacyEditor,
-            icon: const Icon(Icons.privacy_tip_outlined),
-          ),
-          IconButton(
-            tooltip: 'Mention people in this status',
-            onPressed: _isLoading ? null : _pickMentionTargets,
-            icon: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                const Icon(Icons.alternate_email_rounded),
-                if (_mentionedTargets.isNotEmpty)
-                  Positioned(
-                    right: -6,
-                    top: -4,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                      decoration: const BoxDecoration(
-                        color: Color(0xFF008069),
-                        shape: BoxShape.circle,
-                      ),
-                      constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-                      child: Text(
-                        '${_mentionedTargets.length}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          TextButton(
-            onPressed: _isLoading ? null : _createStatus,
-            child: const Text('Share'),
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Center(
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 600),
-            child: Column(
-              children: [
+    final content = SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: Column(
+            children: [
                 // Media preview or text input
                 if (_selectedMedia != null)
                   Container(
@@ -623,8 +583,14 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
                     ),
                     child: TextField(
                       controller: _textController,
-                      style: const TextStyle(
-                        fontSize: 32,
+                      maxLength: kStatusTextMaxLength,
+                      inputFormatters: [
+                        LengthLimitingTextInputFormatter(kStatusTextMaxLength),
+                      ],
+                      style: TextStyle(
+                        fontSize: statusTextFontSizeForLength(
+                          _textController.text.trim().length,
+                        ),
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
                       ),
@@ -635,9 +601,11 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
                         hintText: 'Type a status...',
                         hintStyle: TextStyle(color: Colors.white70),
                         contentPadding: EdgeInsets.all(24),
+                        counterText: '',
                       ),
                       maxLines: null,
                       textAlign: TextAlign.center,
+                      onChanged: (_) => setState(() {}),
                     ),
                   ),
                 
@@ -751,7 +719,85 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
             ),
           ),
         ),
+    );
+
+    if (widget.forModal) {
+      return Column(
+        children: [
+          Expanded(child: content),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: FilledButton(
+              onPressed: _isLoading ? null : _createStatus,
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF008069),
+                minimumSize: const Size.fromHeight(44),
+              ),
+              child: _isLoading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text('Share status'),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
+      appBar: AppBar(
+        title: const Text('Create Status'),
+        actions: [
+          IconButton(
+            tooltip: 'Who can see your status',
+            onPressed: _isLoading ? null : _openPrivacyEditor,
+            icon: const Icon(Icons.privacy_tip_outlined),
+          ),
+          IconButton(
+            tooltip: 'Mention people in this status',
+            onPressed: _isLoading ? null : _pickMentionTargets,
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.alternate_email_rounded),
+                if (_mentionedTargets.isNotEmpty)
+                  Positioned(
+                    right: -6,
+                    top: -4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF008069),
+                        shape: BoxShape.circle,
+                      ),
+                      constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                      child: Text(
+                        '${_mentionedTargets.length}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: _isLoading ? null : _createStatus,
+            child: const Text('Share'),
+          ),
+        ],
       ),
+      body: content,
     );
   }
 }
@@ -909,12 +955,22 @@ class _StatusMentionPickerDialogState
                               title: Text(c.name),
                               secondary: CircleAvatar(
                                 radius: 18,
-                                backgroundImage: c.avatarUrl != null &&
-                                        c.avatarUrl!.isNotEmpty
-                                    ? NetworkImage(c.avatarUrl!)
+                                backgroundColor:
+                                    AvatarUtils.getColorForName(c.name),
+                                backgroundImage:
+                                    resolveStorageUrl(c.avatarUrl) != null
+                                    ? CachedNetworkImageProvider(
+                                        resolveStorageUrl(c.avatarUrl)!,
+                                      )
                                     : null,
-                                child: c.avatarUrl == null || c.avatarUrl!.isEmpty
-                                    ? const Icon(Icons.person, size: 20)
+                                child: resolveStorageUrl(c.avatarUrl) == null
+                                    ? Text(
+                                        c.name.isNotEmpty
+                                            ? c.name[0].toUpperCase()
+                                            : '?',
+                                        style:
+                                            const TextStyle(color: Colors.white),
+                                      )
                                     : null,
                               ),
                             );

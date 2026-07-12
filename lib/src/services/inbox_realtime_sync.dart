@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/providers.dart';
+import '../features/calls/incoming_call_handler.dart';
+import '../features/calls/joinable_call_message.dart';
 import '../features/chats/sidebar_inbox_bump.dart';
 import '../features/chats/models.dart';
 import '../features/chats/chat_providers.dart';
@@ -87,6 +89,25 @@ class InboxRealtimeSync {
       final groupId = _asInt(messageMap['group_id'] ?? messageMap['groupId']);
       final isGroupMessage =
           groupId != null || messageMap['is_group'] == true;
+
+      // Ring from call_data when CallInvite WebSocket was missed (parity with mobile).
+      final callData = messageMap['call_data'] ?? messageMap['callData'];
+      if (callData is Map) {
+        final cd = Map<String, dynamic>.from(callData);
+        if (isJoinableCallDataStatus(cd['status'] as String?)) {
+          final senderMap = messageMap['sender'] is Map
+              ? Map<String, dynamic>.from(messageMap['sender'] as Map)
+              : null;
+          unawaited(
+            _ref.read(incomingCallHandlerProvider).handleInviteFromCallMessage(
+                  callData: cd,
+                  sender: senderMap,
+                  conversationId: isGroupMessage ? null : conversationId,
+                  groupId: isGroupMessage ? groupId : null,
+                ),
+          );
+        }
+      }
 
       final openGroupId = _ref.read(selectedGroupIdProvider);
       final openConversationId = _ref.read(selectedConversationProvider);
@@ -210,6 +231,60 @@ class InboxRealtimeSync {
     final attachments = messageMap['attachments'];
     if (messageMap['has_attachments'] == true ||
         (attachments is List && attachments.isNotEmpty)) {
+      if (attachments is List && attachments.isNotEmpty) {
+        var imageCount = 0;
+        var videoCount = 0;
+        var hasAudio = false;
+        for (final a in attachments) {
+          if (a is! Map) continue;
+          final map = Map<String, dynamic>.from(a);
+          final mime = map['mime_type']?.toString().toLowerCase() ?? '';
+          final type = map['type']?.toString().toLowerCase() ?? '';
+          final name = (map['original_name'] ?? map['originalName'] ?? '')
+              .toString()
+              .toLowerCase();
+          final isVoice = map['is_voicenote'] == true ||
+              map['is_audio'] == true ||
+              type == 'audio' ||
+              mime.startsWith('audio/') ||
+              name.endsWith('.m4a') ||
+              name.endsWith('.aac') ||
+              name.endsWith('.mp3') ||
+              name.endsWith('.ogg') ||
+              name.endsWith('.opus');
+          final isImage = map['is_image'] == true ||
+              type == 'image' ||
+              mime.startsWith('image/') ||
+              name.endsWith('.jpg') ||
+              name.endsWith('.jpeg') ||
+              name.endsWith('.png') ||
+              name.endsWith('.gif') ||
+              name.endsWith('.webp') ||
+              name.endsWith('.heic');
+          final isVideo = map['is_video'] == true ||
+              type == 'video' ||
+              mime.startsWith('video/') ||
+              name.endsWith('.mp4') ||
+              name.endsWith('.mov') ||
+              name.endsWith('.m4v') ||
+              name.endsWith('.webm');
+          if (isVoice) hasAudio = true;
+          if (isImage) imageCount++;
+          if (isVideo) videoCount++;
+        }
+        if (imageCount > 0 && videoCount == 0 && !hasAudio) {
+          return imageCount == 1 ? '📷 Photo' : '📷 $imageCount photos';
+        }
+        if (videoCount > 0 && imageCount == 0 && !hasAudio) {
+          return videoCount == 1 ? '🎬 Video' : '🎬 $videoCount videos';
+        }
+        if (hasAudio && imageCount == 0 && videoCount == 0) {
+          return '🎤 Voice message';
+        }
+        if (imageCount > 0 || videoCount > 0 || hasAudio) {
+          return '📎 ${attachments.length} attachments';
+        }
+      }
       return '📎 Attachment';
     }
     return 'New message';

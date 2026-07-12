@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/global_navigator_key.dart';
 import 'call_repository.dart';
+import '../../utils/snackbar_helper.dart';
 
 /// Issue keys must match Laravel `CallController::rate` whitelist.
 const Map<String, String> kCallRatingIssueLabels = {
@@ -116,20 +117,12 @@ class _CallRatingFormState extends State<_CallRatingForm> {
         Navigator.of(context).pop();
         final root = rootNavigatorKey.currentContext;
         if (root != null && root.mounted) {
-          ScaffoldMessenger.of(root).showSnackBar(
-            const SnackBar(
-              content: Text('Thanks — your feedback helps us improve calls.'),
-            ),
-          );
-        }
+                    root.showInfoToast('Thanks — your feedback helps us improve calls.');        }
       }
     } catch (e) {
       if (mounted) {
         setState(() => _submitting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not send feedback: $e')),
-        );
-      }
+                context.showErrorToast('Could not send feedback: $e');      }
     }
   }
 

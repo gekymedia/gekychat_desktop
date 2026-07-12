@@ -22,6 +22,7 @@ import '../../widgets/constrained_slide_route.dart';
 import '../../utils/external_share.dart';
 import '../chats/widgets/share_text_to_chats_screen.dart';
 import 'widgets/world_feed_share_dialog.dart';
+import '../../utils/snackbar_helper.dart';
 
 /// World Feed — TikTok-style vertical full-screen feed for desktop.
 class WorldFeedScreen extends ConsumerStatefulWidget {
@@ -180,10 +181,7 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
       debugPrint('World feed post fetch failed: $e $st');
       if (mounted) {
         ref.read(worldFeedNavigateToPostProvider.notifier).state = null;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open post')),
-        );
-      }
+                context.showErrorToast('Could not open post');      }
     } finally {
       if (_fetchingNavigatePostId == postId) {
         _fetchingNavigatePostId = null;
@@ -210,10 +208,7 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
       debugPrint('World share code resolve failed: $e $st');
       ref.read(worldFeedNavigateToPostSlugProvider.notifier).state = null;
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open post: $e')),
-        );
-      }
+                context.showErrorToast('Could not open post: $e');      }
     }
   }
 
@@ -308,10 +303,7 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
       if (result == WorldFeedShareResult.quickSent) {
         await recordShare();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Link sent in chat')),
-          );
-        }
+                    context.showSuccessToast('Link sent in chat');        }
       } else if (result == WorldFeedShareResult.gekyChat) {
         final sent = await Navigator.push<bool>(
           context,
@@ -327,42 +319,27 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
         await Clipboard.setData(ClipboardData(text: shareText));
         unawaited(recordShare());
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Link copied to clipboard')),
-          );
-        }
+                    context.showSuccessToast('Link copied to clipboard');        }
       } else if (result == WorldFeedShareResult.whatsapp) {
         final ok = await shareViaWhatsApp(shareText);
         if (ok) unawaited(recordShare());
         if (mounted && !ok) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not open WhatsApp')),
-          );
-        }
+                    context.showErrorToast('Could not open WhatsApp');        }
       } else if (result == WorldFeedShareResult.telegram) {
         final ok = await shareViaTelegram(url: shareUrl, text: shareText);
         if (ok) unawaited(recordShare());
         if (mounted && !ok) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not open Telegram')),
-          );
-        }
+                    context.showErrorToast('Could not open Telegram');        }
       } else if (result == WorldFeedShareResult.twitter) {
         final ok = await shareViaTwitter(shareText);
         if (ok) unawaited(recordShare());
         if (mounted && !ok) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not open X')),
-          );
-        }
+                    context.showErrorToast('Could not open X');        }
       } else if (result == WorldFeedShareResult.facebook) {
         final ok = await shareViaFacebook(shareUrl);
         if (ok) unawaited(recordShare());
         if (mounted && !ok) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not open Facebook')),
-          );
-        }
+                    context.showErrorToast('Could not open Facebook');        }
       } else if (result == WorldFeedShareResult.email) {
         final ok = await shareViaEmail(
           subject: 'Check out this GekyChat post',
@@ -370,20 +347,14 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
         );
         if (ok) unawaited(recordShare());
         if (mounted && !ok) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not open email app')),
-          );
-        }
+                    context.showErrorToast('Could not open email app');        }
       } else if (result == WorldFeedShareResult.more) {
         await Share.share(shareText);
         unawaited(recordShare());
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to share: $e')),
-        );
-      }
+                context.showErrorToast('Failed to share: $e');      }
     }
   }
 
@@ -1000,12 +971,7 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
 
     if (creatorId == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Unable to report: user information not available'),
-          ),
-        );
-      }
+                context.showErrorToast('Unable to report: user information not available');      }
       return;
     }
 
@@ -1126,16 +1092,10 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
         );
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('User reported successfully')),
-          );
-        }
+                    context.showSuccessToast('User reported successfully');        }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to report user: $e')),
-          );
-        }
+                    context.showErrorToast('Failed to report user: $e');        }
       }
     } else {
       reasonController.dispose();
@@ -1168,10 +1128,7 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
     } catch (e) {
       debugPrint('Error navigating to profile: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to open profile: $e')),
-        );
-      }
+                context.showErrorToast('Failed to open profile: $e');      }
     }
   }
 
@@ -1190,16 +1147,10 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
           final shareUrl = await repo.getShareUrl(post['id']);
           await Clipboard.setData(ClipboardData(text: shareUrl));
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Link copied to clipboard')),
-            );
-          }
+                        context.showSuccessToast('Link copied to clipboard');          }
         } catch (e) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Failed to copy link: $e')),
-            );
-          }
+                        context.showErrorToast('Failed to copy link: $e');          }
         }
         break;
       case 'view_profile':

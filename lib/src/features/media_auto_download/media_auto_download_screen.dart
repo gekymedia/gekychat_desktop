@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'media_auto_download_repository.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/snackbar_helper.dart';
 
 final mediaAutoDownloadSettingsProvider =
     FutureProvider<Map<String, dynamic>>((ref) async {
@@ -170,17 +171,11 @@ class _MediaAutoDownloadScreenState
       };
       await ref.read(mediaAutoDownloadRepositoryProvider).updateSettings(settings);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Settings updated')),
-        );
-      }
+                context.showSuccessToast('Settings updated');      }
       ref.invalidate(mediaAutoDownloadSettingsProvider);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save: $e')),
-        );
-      }
+                context.showErrorToast('Failed to save: $e');      }
     } finally {
       if (mounted) {
         setState(() => _saving = false);

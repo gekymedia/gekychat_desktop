@@ -26,16 +26,25 @@ class User {
     } else if (json['phone'] != null && json['phone'].toString().isNotEmpty) {
       userName = json['phone'].toString();
     }
+
+    final onlineRaw =
+        json['is_online'] ?? json['online'] ?? json['isOnline'];
+    final lastSeenRaw =
+        json['last_seen_at'] ?? json['lastSeenAt'] ?? json['last_active'];
+    final lastSeen = lastSeenRaw != null
+        ? DateTime.tryParse(lastSeenRaw.toString())?.toLocal()
+        : null;
     
     return User(
-      id: json['id'] ?? 0,
+      id: GekyContact.parseInt(json['id']) ?? 0,
       name: userName,
       phone: json['phone']?.toString() ?? json['phone_number']?.toString(),
       avatarUrl: resolveStorageUrl(json['avatar_url']?.toString()),
-      isOnline: json['is_online'] == true || json['online'] == true,
-      lastSeenAt: json['last_seen_at'] != null
-          ? DateTime.tryParse(json['last_seen_at'].toString())
-          : null,
+      isOnline: onlineRaw == true ||
+          onlineRaw == 1 ||
+          onlineRaw == '1' ||
+          onlineRaw == 'online',
+      lastSeenAt: lastSeen,
     );
   }
 }
@@ -48,6 +57,7 @@ class GekyContact {
   final bool isRegistered;
   final int? contactUserId; // User ID if registered
   final Map<String, dynamic>? contactUser; // User object if registered
+  final String? note;
 
   GekyContact({
     required this.id,
@@ -57,24 +67,43 @@ class GekyContact {
     required this.isRegistered,
     this.contactUserId,
     this.contactUser,
+    this.note,
   });
 
+  static int? parseInt(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return int.tryParse(v.toString());
+  }
+
   factory GekyContact.fromJson(Map<String, dynamic> json) {
-    // API can return contact_user_id or user_id (from formatContact)
-    final contactUserId = json['contact_user_id'] as int? ?? json['user_id'] as int?;
-    final contactUser = json['contact_user'] as Map<String, dynamic>?;
-    final isRegistered = contactUserId != null || contactUser != null || (json['is_registered'] == true);
-    
+    final nestedUser = json['contact_user'];
+    final contactUser = nestedUser is Map
+        ? Map<String, dynamic>.from(nestedUser)
+        : null;
+    final contactUserId = parseInt(json['contact_user_id']) ??
+        parseInt(json['user_id']) ??
+        parseInt(contactUser?['id']);
+    final isRegistered = contactUserId != null ||
+        contactUser != null ||
+        (json['is_registered'] == true);
+    final extra = json['extra'];
+    final noteRaw = json['note'] ?? (extra is Map ? extra['note'] : null);
+    final id = parseInt(json['id']) ?? 0;
+
     return GekyContact(
-      id: json['id'],
-      name: json['display_name'] ?? json['name'] ?? json['user_name'] ?? '',
-      phone: json['phone'] ?? json['user_phone'],
+      id: id,
+      name: (json['display_name'] ?? json['name'] ?? json['user_name'] ?? '')
+          .toString(),
+      phone: (json['phone'] ?? json['user_phone'])?.toString(),
       avatarUrl: resolveStorageUrl(
-          json['avatar_url']?.toString() ??
-          (json['contact_user'] as Map<String, dynamic>?)?['avatar_url']?.toString()),
+        json['avatar_url']?.toString() ?? contactUser?['avatar_url']?.toString(),
+      ),
       isRegistered: isRegistered,
       contactUserId: contactUserId,
       contactUser: contactUser,
+      note: noteRaw?.toString(),
     );
   }
 }
@@ -390,21 +419,70 @@ class MessageAttachment {
       return null;
     }
 
+    final mime =
+        json['mime_type']?.toString() ?? 'application/octet-stream';
+    final type = json['type']?.toString().toLowerCase();
+    final name = (json['original_name'] ?? json['originalName'] ?? '')
+        .toString()
+        .toLowerCase();
+    final looksAudio = type == 'audio' ||
+        mime.startsWith('audio/') ||
+        name.endsWith('.m4a') ||
+        name.endsWith('.aac') ||
+        name.endsWith('.mp3') ||
+        name.endsWith('.ogg') ||
+        name.endsWith('.wav') ||
+        name.endsWith('.opus');
+    final looksImage = type == 'image' ||
+        mime.startsWith('image/') ||
+        name.endsWith('.jpg') ||
+        name.endsWith('.jpeg') ||
+        name.endsWith('.png') ||
+        name.endsWith('.gif') ||
+        name.endsWith('.webp') ||
+        name.endsWith('.bmp') ||
+        name.endsWith('.heic') ||
+        name.endsWith('.heif');
+    final looksVideo = type == 'video' ||
+        mime.startsWith('video/') ||
+        name.endsWith('.mp4') ||
+        name.endsWith('.mov') ||
+        name.endsWith('.m4v') ||
+        name.endsWith('.webm') ||
+        name.endsWith('.mkv') ||
+        name.endsWith('.avi');
+    final sharedAsDocument = json['shared_as_document'] == true;
+    final isAudio = json['is_audio'] == true ||
+        json['is_voicenote'] == true ||
+        looksAudio;
+    final isVoicenote = json['is_voicenote'] == true ||
+        (isAudio && !sharedAsDocument);
+    final isImage = json['is_image'] == true || looksImage;
+    final isVideo = json['is_video'] == true || looksVideo;
+    final isDocument = sharedAsDocument ||
+        ((json['is_document'] == true ||
+                (!isImage && !isVideo && !isAudio)) &&
+            !isImage &&
+            !isVideo &&
+            !isAudio);
+
     return MessageAttachment(
       id: intField(json['id']) ?? 0,
-      url: json['url']?.toString() ?? '',
-      mimeType: json['mime_type']?.toString() ?? 'application/octet-stream',
-      isImage: json['is_image'] ?? false,
-      isVideo: json['is_video'] ?? false,
-      isAudio: json['is_audio'] ?? false,
-      isDocument: json['is_document'] ?? false,
+      url: resolveStorageUrl(json['url']?.toString()) ??
+          json['url']?.toString() ??
+          '',
+      mimeType: mime,
+      isImage: isImage,
+      isVideo: isVideo,
+      isAudio: isAudio,
+      isDocument: isDocument,
       originalName: json['original_name'] as String?,
-      sharedAsDocument: json['shared_as_document'] == true,
-      isVoicenote: json['is_voicenote'] == true,
+      sharedAsDocument: sharedAsDocument,
+      isVoicenote: isVoicenote,
       // MEDIA COMPRESSION fields
       compressionStatus: json['compression_status'] as String?,
-      compressedUrl: json['compressed_url'] as String?,
-      thumbnailUrl: json['thumbnail_url'] as String?,
+      compressedUrl: resolveStorageUrl(json['compressed_url']?.toString()),
+      thumbnailUrl: resolveStorageUrl(json['thumbnail_url']?.toString()),
       originalSize: intField(json['original_size']),
       compressedSize: intField(json['compressed_size']),
       compressionLevel: json['compression_level'] as String?,
@@ -793,6 +871,7 @@ class Message {
     Map<String, dynamic>? replyToPreview,
     String? messageType,
     Map<String, dynamic>? pollData,
+    String? status,
   }) {
     return Message(
       id: id,
@@ -817,7 +896,7 @@ class Message {
       linkPreviews: linkPreviews,
       isDeleted: isDeleted,
       deletedForMe: deletedForMe,
-      status: status,
+      status: status ?? this.status,
       isSystem: isSystem,
       systemAction: systemAction,
       mentionCount: mentionCount,
@@ -891,10 +970,12 @@ class PendingGroupMessageReply {
 class DesktopPendingStatusChatOpen {
   final int conversationId;
   final PendingStatusReply reply;
+  final String? draftText;
 
   const DesktopPendingStatusChatOpen({
     required this.conversationId,
     required this.reply,
+    this.draftText,
   });
 }
 
@@ -920,5 +1001,16 @@ class DesktopPendingGroupPrivateOpen {
         groupName: groupName,
         bodyPreview: bodyPreview,
       );
+}
+
+/// Prefill composer when opening a chat from birthday wishes (desktop).
+class DesktopPendingComposerDraft {
+  final int conversationId;
+  final String text;
+
+  const DesktopPendingComposerDraft({
+    required this.conversationId,
+    required this.text,
+  });
 }
 

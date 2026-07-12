@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../utils/snackbar_helper.dart';
 
 /// Supported languages with their display names and native names
 class AppLanguage {
@@ -229,17 +230,11 @@ class _LanguageSettingsScreenState extends ConsumerState<LanguageSettingsScreen>
                         onTap: () async {
                           await ref.read(appLanguageProvider.notifier).setLanguage(language);
                           if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
+                                                        context.showInfoToast(
                                   isSystemDefault
                                       ? 'Language set to system default'
                                       : 'Language changed to ${language.name}',
-                                ),
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
-                          }
+                                );                          }
                         },
                         leading: isSystemDefault
                             ? Container(

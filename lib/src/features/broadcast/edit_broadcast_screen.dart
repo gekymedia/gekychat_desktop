@@ -5,11 +5,19 @@ import 'broadcast_repository.dart';
 import 'models.dart';
 import '../contacts/contacts_repository.dart';
 import '../chats/models.dart' show GekyContact;
+import '../../utils/snackbar_helper.dart';
 
 class EditBroadcastScreen extends ConsumerStatefulWidget {
   final BroadcastList broadcastList;
+  final bool forModal;
+  final VoidCallback? onComplete;
 
-  const EditBroadcastScreen({super.key, required this.broadcastList});
+  const EditBroadcastScreen({
+    super.key,
+    required this.broadcastList,
+    this.forModal = false,
+    this.onComplete,
+  });
 
   @override
   ConsumerState<EditBroadcastScreen> createState() => _EditBroadcastScreenState();
@@ -38,17 +46,11 @@ class _EditBroadcastScreenState extends ConsumerState<EditBroadcastScreen> {
 
   Future<void> _updateBroadcastList() async {
     if (_nameController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a name')),
-      );
-      return;
+            context.showInfoToast('Please enter a name');      return;
     }
 
     if (_selectedContactIds.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select at least one recipient')),
-      );
-      return;
+            context.showInfoToast('Please select at least one recipient');      return;
     }
 
     setState(() => _loading = true);
@@ -65,17 +67,16 @@ class _EditBroadcastScreenState extends ConsumerState<EditBroadcastScreen> {
       );
 
       if (mounted) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Broadcast list updated successfully')),
-        );
+        if (widget.forModal) {
+          widget.onComplete?.call();
+        } else {
+          Navigator.pop(context);
+        }
+        context.showSuccessToast('Broadcast list updated successfully');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update broadcast list: $e')),
-        );
-      }
+                context.showErrorToast('Failed to update broadcast list: $e');      }
     } finally {
       if (mounted) {
         setState(() => _loading = false);
@@ -92,32 +93,11 @@ class _EditBroadcastScreenState extends ConsumerState<EditBroadcastScreen> {
       contactsRepo.filterRegistered(contacts)
     );
 
-    return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
-      appBar: AppBar(
-        title: const Text('Edit Broadcast List'),
-        actions: [
-          if (_loading)
-            const Padding(
-              padding: EdgeInsets.all(16.0),
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            )
-          else
-            IconButton(
-              icon: const Icon(Icons.check),
-              onPressed: _updateBroadcastList,
-            ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
+    final body = SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
             TextField(
               controller: _nameController,
               decoration: const InputDecoration(
@@ -235,9 +215,56 @@ class _EditBroadcastScreenState extends ConsumerState<EditBroadcastScreen> {
                 );
               },
             ),
+          if (widget.forModal) ...[
+            const SizedBox(height: 20),
+            FilledButton(
+              onPressed: _loading ? null : _updateBroadcastList,
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF008069),
+                minimumSize: const Size.fromHeight(44),
+              ),
+              child: _loading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text('Save changes'),
+            ),
           ],
-        ),
+        ],
       ),
+    );
+
+    if (widget.forModal) {
+      return body;
+    }
+
+    return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
+      appBar: AppBar(
+        title: const Text('Edit Broadcast List'),
+        actions: [
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.all(16.0),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.check),
+              onPressed: _updateBroadcastList,
+            ),
+        ],
+      ),
+      body: body,
     );
   }
 }

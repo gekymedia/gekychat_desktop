@@ -4,9 +4,17 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'broadcast_repository.dart';
 import '../contacts/contacts_repository.dart';
 import '../chats/models.dart' show GekyContact;
+import '../../utils/snackbar_helper.dart';
 
 class CreateBroadcastScreen extends ConsumerStatefulWidget {
-  const CreateBroadcastScreen({super.key});
+  final bool forModal;
+  final VoidCallback? onComplete;
+
+  const CreateBroadcastScreen({
+    super.key,
+    this.forModal = false,
+    this.onComplete,
+  });
 
   @override
   ConsumerState<CreateBroadcastScreen> createState() => _CreateBroadcastScreenState();
@@ -27,17 +35,11 @@ class _CreateBroadcastScreenState extends ConsumerState<CreateBroadcastScreen> {
 
   Future<void> _createBroadcastList() async {
     if (_nameController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a name')),
-      );
-      return;
+            context.showInfoToast('Please enter a name');      return;
     }
 
     if (_selectedContactIds.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select at least one recipient')),
-      );
-      return;
+            context.showInfoToast('Please select at least one recipient');      return;
     }
 
     setState(() => _loading = true);
@@ -53,17 +55,16 @@ class _CreateBroadcastScreenState extends ConsumerState<CreateBroadcastScreen> {
       );
 
       if (mounted) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Broadcast list created successfully')),
-        );
+        if (widget.forModal) {
+          widget.onComplete?.call();
+        } else {
+          Navigator.pop(context);
+        }
+        context.showSuccessToast('Broadcast list created successfully');
       }
     } catch (e) {
       if (mounted && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to create broadcast list: $e')),
-        );
-      }
+                context.showErrorToast('Failed to create broadcast list: $e');      }
     } finally {
       if (mounted) {
         setState(() => _loading = false);
@@ -80,32 +81,11 @@ class _CreateBroadcastScreenState extends ConsumerState<CreateBroadcastScreen> {
       contactsRepo.filterRegistered(contacts)
     );
 
-    return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
-      appBar: AppBar(
-        title: const Text('Create Broadcast List'),
-        actions: [
-          if (_loading)
-            const Padding(
-              padding: EdgeInsets.all(16.0),
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            )
-          else
-            IconButton(
-              icon: const Icon(Icons.check),
-              onPressed: _createBroadcastList,
-            ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
+    final body = SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
             TextField(
               controller: _nameController,
               decoration: const InputDecoration(
@@ -223,9 +203,56 @@ class _CreateBroadcastScreenState extends ConsumerState<CreateBroadcastScreen> {
                 );
               },
             ),
+          if (widget.forModal) ...[
+            const SizedBox(height: 20),
+            FilledButton(
+              onPressed: _loading ? null : _createBroadcastList,
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF008069),
+                minimumSize: const Size.fromHeight(44),
+              ),
+              child: _loading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text('Create broadcast list'),
+            ),
           ],
-        ),
+        ],
       ),
+    );
+
+    if (widget.forModal) {
+      return body;
+    }
+
+    return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
+      appBar: AppBar(
+        title: const Text('Create Broadcast List'),
+        actions: [
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.all(16.0),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.check),
+              onPressed: _createBroadcastList,
+            ),
+        ],
+      ),
+      body: body,
     );
   }
 }

@@ -4,11 +4,15 @@ import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 class EmojiPickerWidget extends StatelessWidget {
   final Function(String emoji) onEmojiSelected;
   final VoidCallback onBackspace;
+  final double height;
+  final bool popupStyle;
 
   const EmojiPickerWidget({
     super.key,
     required this.onEmojiSelected,
     required this.onBackspace,
+    this.height = 250,
+    this.popupStyle = false,
   });
 
   @override
@@ -17,20 +21,22 @@ class EmojiPickerWidget extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     final scheme = theme.colorScheme;
 
-    final panelBg = isDark ? const Color(0xFF202C33) : const Color(0xFFEBEFF2);
+    final panelBg = popupStyle
+        ? (isDark ? const Color(0xFF202C33) : Colors.white)
+        : (isDark ? const Color(0xFF202C33) : const Color(0xFFEBEFF2));
     final primary = scheme.primary;
     final onSurface = isDark ? Colors.white70 : scheme.onSurfaceVariant;
     final onSurfaceMuted = isDark ? Colors.white54 : scheme.onSurfaceVariant;
 
     return SizedBox(
-      height: 250,
+      height: height,
       child: EmojiPicker(
         onEmojiSelected: (category, emoji) {
           onEmojiSelected(emoji.emoji);
         },
         onBackspacePressed: onBackspace,
         config: Config(
-          height: 256,
+          height: height,
           checkPlatformCompatibility: true,
           emojiViewConfig: EmojiViewConfig(
             emojiSizeMax: 28 * (1.0),

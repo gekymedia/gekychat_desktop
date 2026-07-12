@@ -1,7 +1,10 @@
 import 'dart:async';
 
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:window_manager/window_manager.dart';
 import 'src/core/services/desktop_window_service.dart';
 import 'src/core/services/system_tray_service.dart';
@@ -22,9 +25,16 @@ import 'src/services/background_sync_worker.dart';
 import 'src/widgets/keyboard_shortcuts_dialog.dart';
 import 'src/widgets/livekit_call_overlay.dart';
 import 'src/utils/world_feed_link_navigation.dart';
+import 'src/widgets/desktop_typography.dart';
+import 'src/widgets/desktop_shell_colors.dart';
+import 'src/widgets/desktop_window_title_bar.dart';
+import 'src/widgets/app_update_checker.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Telegram-style Open Sans — preload before first paint.
+  await DesktopTypography.preload();
   
   // Initialize window manager for system tray support
   await windowManager.ensureInitialized();
@@ -34,19 +44,25 @@ Future<void> main(List<String> args) async {
   final initialTheme = await themeService.getThemeMode();
   final initialIsDark = initialTheme.isDark;
 
+  final initialChrome =
+      DesktopShellColors.shellChromeBackgroundStatic(isDark: initialIsDark);
+
   WindowOptions windowOptions = WindowOptions(
     size: Size(1280, 720),
     minimumSize: Size(800, 600),
     center: true,
-    backgroundColor: initialIsDark
-        ? const Color(0xFF111B21)
-        : const Color(0xFFF0F2F5),
+    backgroundColor: initialChrome,
     skipTaskbar: false,
-    titleBarStyle: TitleBarStyle.normal,
+    titleBarStyle: DesktopWindowTitleBar.isSupported
+        ? TitleBarStyle.hidden
+        : TitleBarStyle.normal,
   );
 
   windowManager.waitUntilReadyToShow(windowOptions, () async {
-    await DesktopWindowService.syncTitleBarTheme(initialIsDark);
+    await DesktopWindowService.syncTitleBarTheme(
+      initialIsDark,
+      backgroundColor: initialChrome,
+    );
     await windowManager.show();
     await windowManager.focus();
   });
@@ -86,6 +102,8 @@ class MyApp extends ConsumerStatefulWidget {
 class _MyAppState extends ConsumerState<MyApp> with WindowListener {
   static bool _notificationsInitialized = false;
   static bool _authChecked = false;
+  /// Stable across theme rebuilds so MaterialApp.router never swaps navigators.
+  GoRouter? _router;
 
   @override
   void initState() {
@@ -172,6 +190,7 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
           '/ai',
           '/live-broadcast',
           '/calls',
+          '/settings',
         ];
         if (mainSections.contains(route)) {
           ref.read(currentSectionProvider.notifier).setSection(route);
@@ -274,13 +293,20 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
 
   @override
   Widget build(BuildContext context) {
-    final router = ref.watch(routerProvider);
+    _router ??= ref.read(routerProvider);
+    final router = _router!;
     final customThemeMode = ref.watch(custom_theme.themeModeProvider);
     final themeService = ref.watch(custom_theme.themeServiceProvider);
 
     ref.listen(custom_theme.themeModeProvider, (previous, next) {
       if (previous?.isDark == next.isDark) return;
-      unawaited(DesktopWindowService.syncTitleBarTheme(next.isDark));
+      final chrome = DesktopShellColors.shellChromeBackgroundStatic(
+        isDark: next.isDark,
+      );
+      unawaited(DesktopWindowService.syncTitleBarTheme(
+        next.isDark,
+        backgroundColor: chrome,
+      ));
     });
 
     ref.listen(sidebarUnreadTotalProvider, (previous, next) {
@@ -297,13 +323,34 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
         themeMode: customThemeMode.isDark ? ThemeMode.dark : ThemeMode.light,
         routerConfig: router,
         builder: (context, child) {
-          return Stack(
-            alignment: Alignment.topLeft,
-            clipBehavior: Clip.none,
-            children: [
-              if (child != null) child,
-              const LiveKitCallOverlay(),
-            ],
+          final isDark = Theme.of(context).brightness == Brightness.dark;
+          final chrome = DesktopShellColors.shellChromeBackground(
+            context,
+            isDark: isDark,
+          );
+
+          Widget content = child ?? const SizedBox.shrink();
+          if (DesktopWindowTitleBar.isSupported) {
+            content = ColoredBox(
+              color: chrome,
+              child: Column(
+                children: [
+                  const DesktopWindowTitleBar(),
+                  Expanded(child: content),
+                ],
+              ),
+            );
+          }
+
+          return AppUpdateChecker(
+            child: Stack(
+              alignment: Alignment.topLeft,
+              clipBehavior: Clip.none,
+              children: [
+                content,
+                const LiveKitCallOverlay(),
+              ],
+            ),
           );
         },
       ),

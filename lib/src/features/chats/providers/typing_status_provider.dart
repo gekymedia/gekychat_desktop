@@ -131,6 +131,7 @@ class RecordingStatusNotifier extends StateNotifier<Map<int, bool>> {
 
   PusherService? _pusherService;
   final Set<int> _subscribedConversations = {};
+  final Map<int, Timer> _recordingTimers = {};
 
   Future<void> _initializeListener() async {
     _pusherService = _ref.read(pusherServiceProvider);
@@ -170,9 +171,24 @@ class RecordingStatusNotifier extends StateNotifier<Map<int, bool>> {
           final currentUserAsync = _ref.read(currentUserProvider.future);
           currentUserAsync.then((currentUser) {
             if (userId != null && userId != currentUser.id) {
+              _recordingTimers[conversationId]?.cancel();
               final newState = Map<int, bool>.from(state);
               newState[conversationId] = isRecording;
               state = newState;
+
+              if (isRecording) {
+                _recordingTimers[conversationId] = Timer(
+                  const Duration(seconds: 6),
+                  () {
+                    final updatedState = Map<int, bool>.from(state);
+                    updatedState[conversationId] = false;
+                    state = updatedState;
+                    _recordingTimers.remove(conversationId);
+                  },
+                );
+              } else {
+                _recordingTimers.remove(conversationId);
+              }
             }
           });
         }
@@ -188,6 +204,8 @@ class RecordingStatusNotifier extends StateNotifier<Map<int, bool>> {
 
   void unsubscribeFromConversation(int conversationId) {
     _subscribedConversations.remove(conversationId);
+    _recordingTimers[conversationId]?.cancel();
+    _recordingTimers.remove(conversationId);
     final newState = Map<int, bool>.from(state);
     newState.remove(conversationId);
     state = newState;
@@ -196,6 +214,8 @@ class RecordingStatusNotifier extends StateNotifier<Map<int, bool>> {
   bool isRecording(int conversationId) => state[conversationId] ?? false;
 
   void clearRecording(int conversationId) {
+    _recordingTimers[conversationId]?.cancel();
+    _recordingTimers.remove(conversationId);
     final newState = Map<int, bool>.from(state);
     newState[conversationId] = false;
     state = newState;
@@ -203,6 +223,10 @@ class RecordingStatusNotifier extends StateNotifier<Map<int, bool>> {
 
   @override
   void dispose() {
+    for (final timer in _recordingTimers.values) {
+      timer.cancel();
+    }
+    _recordingTimers.clear();
     _subscribedConversations.clear();
     super.dispose();
   }

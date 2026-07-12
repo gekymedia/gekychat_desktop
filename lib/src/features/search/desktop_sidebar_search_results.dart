@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../chats/chat_providers.dart';
+import '../../utils/snackbar_helper.dart';
 
 /// Normalizes API search payload into section buckets (matches mobile + SearchScreen).
 Map<String, List<Map<String, dynamic>>> normalizeSidebarSearchResults(
@@ -281,10 +282,7 @@ class DesktopSidebarSearchResults extends ConsumerWidget {
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open result: $e')),
-        );
-      }
+                context.showErrorToast('Could not open result: $e');      }
     }
   }
 

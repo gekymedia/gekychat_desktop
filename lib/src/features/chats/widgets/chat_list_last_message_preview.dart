@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../../theme/app_theme.dart';
+import '../../../widgets/desktop_typography.dart';
 
-/// WhatsApp-style chat list subtitle: tick(s) before text when the preview is your message.
+/// WhatsApp/Telegram-style chat list subtitle: tick(s) before text when the preview is your message.
 class ChatListLastMessagePreview extends StatelessWidget {
   const ChatListLastMessagePreview({
     super.key,
@@ -20,35 +21,39 @@ class ChatListLastMessagePreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final secondary = isDark
-        ? AppTheme.textSecondaryDark
-        : AppTheme.textSecondaryLight;
-    final baseStyle = TextStyle(
-      color: secondary,
-      fontSize: 14,
-      fontWeight: hasUnread ? FontWeight.w500 : FontWeight.w400,
+    final baseStyle = DesktopTypography.listSubtitle(
+      isDark: isDark,
+      hasUnread: hasUnread,
     );
 
     final showTicks = fromMe &&
         outgoingStatus != null &&
         outgoingStatus!.isNotEmpty;
     if (!showTicks) {
-      return Text(
-        text,
-        style: baseStyle,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+      // Fill width so AnimatedSwitcher/Stack centering cannot mid-align short text.
+      return SizedBox(
+        width: double.infinity,
+        child: Text(
+          text,
+          style: baseStyle,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.start,
+        ),
       );
     }
 
+    final secondary = isDark
+        ? AppTheme.textSecondaryDark
+        : const Color(0xFF707579);
     final read = outgoingStatus == 'read';
     final tickColor = read ? AppTheme.primaryGreen : secondary;
     final icon = outgoingStatus == 'sent' ? Icons.check : Icons.done_all;
 
     return Row(
       children: [
-        Icon(icon, size: 14, color: tickColor),
-        const SizedBox(width: 4),
+        Icon(icon, size: 13, color: tickColor),
+        const SizedBox(width: 3),
         Expanded(
           child: Text(
             text,

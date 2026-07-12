@@ -8,19 +8,36 @@ import '../status/status_repository.dart';
 import '../../core/providers.dart';
 import '../../core/providers/connectivity_provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../utils/avatar_utils.dart';
+import '../../utils/storage_url.dart';
+import '../../utils/snackbar_helper.dart';
+import '../../widgets/desktop_center_modal.dart';
 
 ImageProvider? _avatarImageProvider(String? url) {
-  if (url == null || url.trim().isEmpty) return null;
-  return CachedNetworkImageProvider(url);
+  final resolved = resolveStorageUrl(url);
+  if (resolved == null || resolved.trim().isEmpty) return null;
+  return CachedNetworkImageProvider(resolved);
 }
 
 class ForwardMessageScreen extends ConsumerStatefulWidget {
   final Message message;
+  final bool forModal;
 
   const ForwardMessageScreen({
     super.key,
     required this.message,
+    this.forModal = false,
   });
+
+  static Future<void> showModal(BuildContext context, Message message) {
+    return showDesktopCenterModal<void>(
+      context: context,
+      title: 'Forward message',
+      maxWidth: 560,
+      maxHeightFraction: 0.85,
+      child: ForwardMessageScreen(message: message, forModal: true),
+    );
+  }
 
   @override
   ConsumerState<ForwardMessageScreen> createState() =>
@@ -38,18 +55,23 @@ class _ForwardMessageScreenState
     super.initState();
     // Clear previous selections when opening forward screen
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       ref.read(_forwardSelectionProvider.notifier).clear();
     });
-    _searchController.addListener(() {
-      setState(() => _searchQuery = _searchController.text.toLowerCase());
-    });
+    _searchController.addListener(_onSearchChanged);
+  }
+
+  void _onSearchChanged() {
+    if (!mounted) return;
+    setState(() => _searchQuery = _searchController.text.toLowerCase());
   }
 
   @override
   void dispose() {
-    // Clear selections when closing forward screen
-    ref.read(_forwardSelectionProvider.notifier).clear();
+    _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
+    // Do not use [ref] here — Riverpod marks the element disposed before
+    // [State.dispose] runs. Selection resets via autoDispose + clear-on-open.
     super.dispose();
   }
 
@@ -61,6 +83,75 @@ class _ForwardMessageScreenState
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     
+    final body = _isLoading
+        ? const Center(child: CircularProgressIndicator())
+        : DefaultTabController(
+            length: 3,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      hintText: 'Search contacts...',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: _searchQuery.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear),
+                              onPressed: () => _searchController.clear(),
+                            )
+                          : null,
+                      filled: true,
+                      fillColor: isDark ? Colors.grey[800] : Colors.grey[200],
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                    ),
+                  ),
+                ),
+                const TabBar(
+                  tabs: [
+                    Tab(text: 'Chats'),
+                    Tab(text: 'Groups & Channels'),
+                    Tab(text: 'Status'),
+                  ],
+                ),
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      _ConversationTab(searchQuery: _searchQuery),
+                      _GroupTab(searchQuery: _searchQuery),
+                      _StatusTab(message: widget.message),
+                    ],
+                  ),
+                ),
+                if (widget.forModal)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    child: FilledButton.icon(
+                      onPressed: (!hasSelection || _isLoading) ? null : _forward,
+                      icon: const Icon(Icons.send),
+                      label: const Text('Forward'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF008069),
+                        minimumSize: const Size.fromHeight(44),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          );
+
+    if (widget.forModal) {
+      return body;
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Forward Message'),
@@ -76,55 +167,7 @@ class _ForwardMessageScreenState
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : DefaultTabController(
-              length: 3,
-              child: Column(
-                children: [
-                  // Search bar
-                  Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: TextField(
-                      controller: _searchController,
-                      decoration: InputDecoration(
-                        hintText: 'Search contacts...',
-                        prefixIcon: const Icon(Icons.search),
-                        suffixIcon: _searchQuery.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.clear),
-                                onPressed: () => _searchController.clear(),
-                              )
-                            : null,
-                        filled: true,
-                        fillColor: isDark ? Colors.grey[800] : Colors.grey[200],
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      ),
-                    ),
-                  ),
-                  const TabBar(
-                    tabs: [
-                      Tab(text: 'Chats'),
-                      Tab(text: 'Groups & Channels'),
-                      Tab(text: 'Status'),
-                    ],
-                  ),
-                  Expanded(
-                    child: TabBarView(
-                      children: [
-                        _ConversationTab(searchQuery: _searchQuery),
-                        _GroupTab(searchQuery: _searchQuery),
-                        _StatusTab(message: widget.message),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
+      body: body,
     );
   }
 
@@ -135,13 +178,7 @@ class _ForwardMessageScreenState
     
     if (!isOnline) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Cannot forward message while offline. Please check your connection and try again.'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
+            context.showInfoToast('Cannot forward message while offline. Please check your connection and try again.');      return;
     }
     
     setState(() => _isLoading = true);
@@ -206,13 +243,7 @@ class _ForwardMessageScreenState
         'groups': selection.groups.toList(),
         'savedMessages': selection.savedMessagesSelected,
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Message forwarded to ${targets.length} ${targets.length == 1 ? 'recipient' : 'recipients'}'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } catch (e) {
+            context.showInfoToast('Message forwarded to ${targets.length} ${targets.length == 1 ? 'recipient' : 'recipients'}');    } catch (e) {
       debugPrint('Error forwarding message: $e');
       if (!mounted) return;
       
@@ -226,13 +257,7 @@ class _ForwardMessageScreenState
         errorMessage = 'You do not have permission to forward this message.';
       }
       
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(errorMessage),
-          backgroundColor: Colors.red,
-        ),
-      );
-    } finally {
+            context.showErrorToast(errorMessage);    } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -336,17 +361,23 @@ class _ConversationTab extends ConsumerWidget {
             final displayName = c.isSavedMessages ? 'Saved Messages (You)' : user.name;
 
             return ListTile(
-              leading: Checkbox(
-                value: checked,
-                onChanged: (v) {
-                  if (c.isSavedMessages) {
-                    ref.read(_forwardSelectionProvider.notifier)
-                        .toggleSavedMessages();
-                  } else {
-                    ref.read(_forwardSelectionProvider.notifier)
-                        .toggleConversation(c.id);
-                  }
-                },
+              leading: CircleAvatar(
+                backgroundColor: c.isSavedMessages
+                    ? Theme.of(context).colorScheme.primary
+                    : AvatarUtils.getColorForName(displayName),
+                backgroundImage: c.isSavedMessages
+                    ? null
+                    : _avatarImageProvider(user.avatarUrl),
+                child: c.isSavedMessages
+                    ? const Icon(Icons.bookmark, color: Colors.white)
+                    : (_avatarImageProvider(user.avatarUrl) == null
+                          ? Text(
+                              displayName.isNotEmpty
+                                  ? displayName[0].toUpperCase()
+                                  : '?',
+                              style: const TextStyle(color: Colors.white),
+                            )
+                          : null),
               ),
               title: Text(displayName),
               subtitle: c.isSavedMessages
@@ -358,13 +389,17 @@ class _ConversationTab extends ConsumerWidget {
                           overflow: TextOverflow.ellipsis,
                         )
                       : null),
-              trailing: CircleAvatar(
-                backgroundColor: c.isSavedMessages 
-                    ? Theme.of(context).colorScheme.primary 
-                    : null,
-                child: c.isSavedMessages
-                    ? const Icon(Icons.bookmark, color: Colors.white)
-                    : Text(user.name.isNotEmpty ? user.name[0].toUpperCase() : '?'),
+              trailing: Checkbox(
+                value: checked,
+                onChanged: (v) {
+                  if (c.isSavedMessages) {
+                    ref.read(_forwardSelectionProvider.notifier)
+                        .toggleSavedMessages();
+                  } else {
+                    ref.read(_forwardSelectionProvider.notifier)
+                        .toggleConversation(c.id);
+                  }
+                },
               ),
               onTap: () {
                 if (c.isSavedMessages) {
@@ -443,25 +478,27 @@ class _GroupTab extends ConsumerWidget {
             }
 
             return ListTile(
-              leading: Checkbox(
+              leading: CircleAvatar(
+                backgroundImage: _avatarImageProvider(g.avatarUrl),
+                backgroundColor: isChannel
+                    ? Theme.of(context).colorScheme.secondary
+                    : AvatarUtils.getColorForName(g.name),
+                child: _avatarImageProvider(g.avatarUrl) == null
+                    ? Icon(
+                        isChannel ? Icons.campaign : Icons.groups,
+                        color: Colors.white,
+                        size: 20,
+                      )
+                    : null,
+              ),
+              title: Text(g.name),
+              subtitle: subtitle != null ? Text(subtitle) : null,
+              trailing: Checkbox(
                 value: checked,
                 onChanged: (v) {
                   ref.read(_forwardSelectionProvider.notifier)
                       .toggleGroup(g.id);
                 },
-              ),
-              title: Text(g.name),
-              subtitle: subtitle != null ? Text(subtitle) : null,
-              trailing: CircleAvatar(
-                backgroundImage: _avatarImageProvider(g.avatarUrl),
-                backgroundColor: isChannel ? Theme.of(context).colorScheme.secondary : null,
-                child: _avatarImageProvider(g.avatarUrl) == null
-                    ? Icon(
-                        isChannel ? Icons.campaign : Icons.groups,
-                        color: isChannel ? Colors.white : null,
-                        size: 20,
-                      )
-                    : null,
               ),
               onTap: () {
                 // Toggle selection when tapped
@@ -481,7 +518,7 @@ class _GroupTab extends ConsumerWidget {
 /* -------------------------------------------------------------------------- */
 
 final _forwardSelectionProvider =
-    StateNotifierProvider<_ForwardSelection, _ForwardSelectionState>(
+    StateNotifierProvider.autoDispose<_ForwardSelection, _ForwardSelectionState>(
   (_) => _ForwardSelection(),
 );
 
@@ -663,22 +700,10 @@ class _StatusTabState extends ConsumerState<_StatusTab> {
       
       if (!mounted) return;
       Navigator.pop(context, {'sharedToStatus': true});
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Shared to your status'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } catch (e) {
+            context.showErrorToast('Shared to your status');    } catch (e) {
       debugPrint('Error sharing to status: $e');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to share: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    } finally {
+            context.showErrorToast('Failed to share: ${e.toString()}');    } finally {
       if (mounted) setState(() => _isPosting = false);
     }
   }

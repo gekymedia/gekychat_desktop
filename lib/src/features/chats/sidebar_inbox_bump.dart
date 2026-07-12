@@ -86,12 +86,79 @@ String sidebarPreviewFromMessage(Message message) {
     return text.length > 120 ? '${text.substring(0, 117)}...' : text;
   }
   if (message.attachments.isNotEmpty) {
-    final hasAudio = message.attachments.any((a) => a.isAudio);
-    if (hasAudio) return '🎤 Voice message';
-    return '📎 Attachment';
+    return sidebarPreviewFromAttachments(message.attachments);
   }
   return 'New message';
 }
+
+/// WhatsApp-style attachment-only last-message preview.
+String sidebarPreviewFromAttachments(List<MessageAttachment> attachments) {
+  if (attachments.isEmpty) return 'New message';
+
+  final imageCount = attachments.where((a) {
+    final mime = a.mimeType.toLowerCase();
+    final name = (a.originalName ?? '').toLowerCase();
+    return a.isImage ||
+        mime.startsWith('image/') ||
+        _looksLikeImageName(name);
+  }).length;
+  final videoCount = attachments.where((a) {
+    final mime = a.mimeType.toLowerCase();
+    final name = (a.originalName ?? '').toLowerCase();
+    return a.isVideo ||
+        mime.startsWith('video/') ||
+        _looksLikeVideoName(name);
+  }).length;
+  final hasAudio = attachments.any((a) {
+    final mime = a.mimeType.toLowerCase();
+    final name = (a.originalName ?? '').toLowerCase();
+    return a.isAudio ||
+        a.isVoicenote ||
+        mime.startsWith('audio/') ||
+        _looksLikeAudioName(name);
+  });
+
+  if (imageCount > 0 && videoCount == 0 && !hasAudio) {
+    return imageCount == 1 ? '📷 Photo' : '📷 $imageCount photos';
+  }
+  if (videoCount > 0 && imageCount == 0 && !hasAudio) {
+    return videoCount == 1 ? '🎬 Video' : '🎬 $videoCount videos';
+  }
+  if (hasAudio && imageCount == 0 && videoCount == 0) {
+    return '🎤 Voice message';
+  }
+  if (imageCount > 0 || videoCount > 0 || hasAudio) {
+    return '📎 ${attachments.length} attachments';
+  }
+  return '📎 Attachment';
+}
+
+bool _looksLikeImageName(String name) =>
+    name.endsWith('.jpg') ||
+    name.endsWith('.jpeg') ||
+    name.endsWith('.png') ||
+    name.endsWith('.gif') ||
+    name.endsWith('.webp') ||
+    name.endsWith('.bmp') ||
+    name.endsWith('.heic') ||
+    name.endsWith('.heif');
+
+bool _looksLikeVideoName(String name) =>
+    name.endsWith('.mp4') ||
+    name.endsWith('.mov') ||
+    name.endsWith('.m4v') ||
+    name.endsWith('.webm') ||
+    name.endsWith('.mkv') ||
+    name.endsWith('.avi');
+
+bool _looksLikeAudioName(String name) =>
+    name.endsWith('.m4a') ||
+    name.endsWith('.aac') ||
+    name.endsWith('.mp3') ||
+    name.endsWith('.ogg') ||
+    name.endsWith('.wav') ||
+    name.endsWith('.opus');
+
 
 /// In-memory sidebar patch for realtime inbox events (local DB already updated).
 void patchConversationSidebarFromInbox(
@@ -150,7 +217,7 @@ void _applyConversationSidebarPatch(
   required DateTime updatedAt,
   required bool fromMe,
   String? outgoingStatus,
-  bool refreshInboxList = true,
+  bool refreshInboxList = false,
 }) {
   ref.read(conversationSidebarPatchesProvider.notifier).update((patches) {
     final next = Map<int, SidebarInboxPatch>.from(patches);
@@ -174,7 +241,7 @@ void _applyGroupSidebarPatch(
   required DateTime updatedAt,
   required bool fromMe,
   String? outgoingStatus,
-  bool refreshInboxList = true,
+  bool refreshInboxList = false,
 }) {
   ref.read(groupSidebarPatchesProvider.notifier).update((patches) {
     final next = Map<int, SidebarInboxPatch>.from(patches);
@@ -196,7 +263,7 @@ Future<void> bumpConversationInSidebar(
   required int conversationId,
   required Message message,
   bool? fromMe,
-  bool refreshInboxList = true,
+  bool refreshInboxList = false,
 }) async {
   final preview = sidebarPreviewFromMessage(message);
   final isFromMe = fromMe ?? true;
@@ -272,7 +339,7 @@ Future<void> bumpGroupInSidebar(
   required int groupId,
   required Message message,
   bool? fromMe,
-  bool refreshInboxList = true,
+  bool refreshInboxList = false,
 }) async {
   final preview = sidebarPreviewFromMessage(message);
   final isFromMe = fromMe ?? true;

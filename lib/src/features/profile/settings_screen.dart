@@ -21,9 +21,14 @@ import '../notifications/notification_settings_screen.dart';
 import '../contacts/contacts_screen.dart';
 import '../settings/language_settings_screen.dart';
 import '../settings/realtime_metrics_screen.dart';
+import '../support/issue_report_flow.dart';
+import '../live/live_analytics_screen.dart';
 import '../../core/theme/theme_provider.dart' as custom_theme;
 import '../../core/theme/app_theme_mode.dart';
 import '../../widgets/keyboard_shortcuts_dialog.dart';
+import '../../utils/snackbar_helper.dart';
+import '../../widgets/settings_detail_modal.dart';
+import '../../widgets/app_about_dialog.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -117,21 +122,22 @@ class SettingsScreen extends ConsumerWidget {
                     icon: Icons.person,
                     title: 'Profile',
                     subtitle: 'Update your name, avatar, and about',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const ProfileEditScreen(),
-                        ),
-                      );
-                    },
+                    onTap: () => ProfileEditScreen.showModal(context),
                   ),
-                  _SettingsTile(
-                    icon: Icons.cake,
-                    title: 'Birthday',
-                    subtitle: 'Set your birth month and day',
-                    onTap: () {
-                      _showBirthdayDialog(context, ref);
+                  Consumer(
+                    builder: (context, ref, _) {
+                      final userAsync = ref.watch(currentUserProvider);
+                      final subtitle =
+                          userAsync.valueOrNull?.birthdayFormatted ??
+                          'Set your birth month, day, and year';
+                      return _SettingsTile(
+                        icon: Icons.cake,
+                        title: 'Birthday',
+                        subtitle: subtitle,
+                        onTap: () {
+                          _showBirthdayDialog(context, ref);
+                        },
+                      );
                     },
                   ),
                 ],
@@ -144,40 +150,31 @@ class SettingsScreen extends ConsumerWidget {
                     icon: Icons.reply,
                     title: 'Quick Replies',
                     subtitle: 'Manage your quick reply messages',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const QuickRepliesScreen(),
-                        ),
-                      );
-                    },
+                    onTap: () => showSettingsDetailModal(
+                      context,
+                      title: 'Quick replies',
+                      child: const QuickRepliesScreen(),
+                    ),
                   ),
                   _SettingsTile(
                     icon: Icons.label,
                     title: 'Labels',
                     subtitle: 'Organize conversations with labels',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const LabelsScreen(),
-                        ),
-                      );
-                    },
+                    onTap: () => showSettingsDetailModal(
+                      context,
+                      title: 'Labels',
+                      child: const LabelsScreen(),
+                    ),
                   ),
                   _SettingsTile(
                     icon: Icons.smart_toy,
                     title: 'Auto-Reply Rules',
                     subtitle: 'Automatically reply to messages with keywords',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const AutoReplyScreen(),
-                        ),
-                      );
-                    },
+                    onTap: () => showSettingsDetailModal(
+                      context,
+                      title: 'Auto replies',
+                      child: const AutoReplyScreen(),
+                    ),
                   ),
                 ],
               ),
@@ -189,14 +186,7 @@ class SettingsScreen extends ConsumerWidget {
                     icon: Icons.contacts,
                     title: 'Manage Contacts',
                     subtitle: 'View and manage your contacts',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const ContactsScreen(),
-                        ),
-                      );
-                    },
+                    onTap: () => ContactsScreen.showModal(context),
                   ),
                 ],
               ),
@@ -208,14 +198,11 @@ class SettingsScreen extends ConsumerWidget {
                     icon: Icons.privacy_tip,
                     title: 'Privacy Settings',
                     subtitle: 'Manage all privacy preferences',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const PrivacySettingsScreen(),
-                        ),
-                      );
-                    },
+                    onTap: () => showSettingsDetailModal(
+                      context,
+                      title: 'Privacy',
+                      child: const PrivacySettingsScreen(),
+                    ),
                   ),
                 ],
               ),
@@ -223,6 +210,12 @@ class SettingsScreen extends ConsumerWidget {
               _SettingsSection(
                 title: 'Help and feedback',
                 children: [
+                  _SettingsTile(
+                    icon: Icons.report_problem_outlined,
+                    title: 'Report a problem',
+                    subtitle: 'Bugs, crashes, and technical issues',
+                    onTap: () => IssueReportFlow.openFromSettings(context),
+                  ),
                   _SettingsTile(
                     icon: Icons.help_outline,
                     title: 'Help center',
@@ -258,46 +251,55 @@ class SettingsScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 24),
               _SettingsSection(
+                title: 'Creator',
+                children: [
+                  _SettingsTile(
+                    icon: Icons.analytics_outlined,
+                    title: 'Live analytics',
+                    subtitle: 'Dashboard for your live broadcasts',
+                    onTap: () => showSettingsDetailModal(
+                      context,
+                      title: 'Live analytics',
+                      maxWidth: 720,
+                      child: const LiveAnalyticsScreen(),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              _SettingsSection(
                 title: 'Security',
                 children: [
                   _SettingsTile(
                     icon: Icons.security,
                     title: 'Two-Step Verification',
                     subtitle: 'Add extra security to your account',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const TwoFactorScreen(),
-                        ),
-                      );
-                    },
+                    onTap: () => showSettingsDetailModal(
+                      context,
+                      title: 'Two-step verification',
+                      child: const TwoFactorScreen(),
+                    ),
                   ),
                   _SettingsTile(
                     icon: Icons.devices,
                     title: 'Linked Devices',
                     subtitle: 'View and manage devices',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const LinkedDevicesScreen(),
-                        ),
-                      );
-                    },
+                    onTap: () => showSettingsDetailModal(
+                      context,
+                      title: 'Linked devices',
+                      child: const LinkedDevicesScreen(),
+                    ),
                   ),
                   _SettingsTile(
                     icon: Icons.swap_horiz,
                     title: 'Switch Account',
                     subtitle: 'Switch between multiple accounts',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const AccountSwitcherScreen(),
-                        ),
-                      );
-                    },
+                    onTap: () => showSettingsDetailModal(
+                      context,
+                      title: 'Switch account',
+                      child: const AccountSwitcherScreen(),
+                      maxWidth: 480,
+                    ),
                   ),
                   _SettingsTile(
                     icon: Icons.logout,
@@ -325,14 +327,11 @@ class SettingsScreen extends ConsumerWidget {
                     icon: Icons.notifications,
                     title: 'Notification Settings',
                     subtitle: 'Manage notification preferences',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const NotificationSettingsScreen(),
-                        ),
-                      );
-                    },
+                    onTap: () => showSettingsDetailModal(
+                      context,
+                      title: 'Notification settings',
+                      child: const NotificationSettingsScreen(),
+                    ),
                   ),
                   _SettingsTile(
                     icon: Icons.volume_up,
@@ -355,27 +354,21 @@ class SettingsScreen extends ConsumerWidget {
                     icon: Icons.storage,
                     title: 'Storage Usage',
                     subtitle: 'View and manage storage',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const StorageUsageScreen(),
-                        ),
-                      );
-                    },
+                    onTap: () => showSettingsDetailModal(
+                      context,
+                      title: 'Storage usage',
+                      child: const StorageUsageScreen(),
+                    ),
                   ),
                   _SettingsTile(
                     icon: Icons.download,
                     title: 'Media Auto-Download',
                     subtitle: 'Control auto-download settings',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const MediaAutoDownloadScreen(),
-                        ),
-                      );
-                    },
+                    onTap: () => showSettingsDetailModal(
+                      context,
+                      title: 'Media auto-download',
+                      child: const MediaAutoDownloadScreen(),
+                    ),
                   ),
                 ],
               ),
@@ -414,15 +407,11 @@ class SettingsScreen extends ConsumerWidget {
                         icon: Icons.language,
                         title: 'App Language',
                         subtitle: _languageDisplayName(selectedLanguage),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) =>
-                                  const LanguageSettingsScreen(),
-                            ),
-                          );
-                        },
+                        onTap: () => showSettingsDetailModal(
+                          context,
+                          title: 'App language',
+                          child: const LanguageSettingsScreen(),
+                        ),
                       );
                     },
                   ),
@@ -430,21 +419,24 @@ class SettingsScreen extends ConsumerWidget {
                     icon: Icons.monitor_heart_outlined,
                     title: 'Realtime Health',
                     subtitle: 'WebSocket delivery metrics',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const RealtimeMetricsScreen(),
-                        ),
-                      );
-                    },
+                    onTap: () => showSettingsDetailModal(
+                      context,
+                      title: 'Realtime health',
+                      child: const RealtimeMetricsScreen(),
+                      maxWidth: 720,
+                    ),
                   ),
                   _SettingsTile(
                     icon: Icons.info,
                     title: 'About',
                     subtitle: 'App version and information',
                     onTap: () {
-                      _showAboutDialog(context);
+                      showAppAboutDialog(
+                        context,
+                        appName: 'GekyChat Desktop',
+                        description:
+                            'A modern chat application for desktop platforms.',
+                      );
                     },
                   ),
                 ],
@@ -466,16 +458,10 @@ class SettingsScreen extends ConsumerWidget {
     try {
       final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
       if (!launched && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open $url')),
-        );
-      }
+                context.showErrorToast('Could not open $url');      }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open link: $e')),
-        );
-      }
+                context.showErrorToast('Could not open link: $e');      }
     }
   }
 
@@ -533,22 +519,10 @@ class SettingsScreen extends ConsumerWidget {
                         }
                         await api.updatePrivacySettings({type: apiValue});
                         if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Privacy setting updated successfully'),
-                              backgroundColor: Colors.green,
-                            ),
-                          );
-                        }
+                                                    context.showSuccessToast('Privacy setting updated successfully');                        }
                       } catch (e) {
                         if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Failed to update privacy setting: $e'),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                        }
+                                                    context.showErrorToast('Failed to update privacy setting: $e');                        }
                       }
                     },
               child: const Text('Save'),
@@ -609,19 +583,10 @@ class SettingsScreen extends ConsumerWidget {
                         await apiService.put('/statuses/privacy', data: {'status_privacy': apiValue});
                         
                         if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Status privacy updated'),
-                              backgroundColor: Colors.green,
-                            ),
-                          );
-                        }
+                                                    context.showSuccessToast('Status privacy updated');                        }
                       } catch (e) {
                         if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Failed to update status privacy: $e')),
-                          );
-                        }
+                                                    context.showErrorToast('Failed to update status privacy: $e');                        }
                       }
                     },
               child: const Text('Save'),
@@ -704,13 +669,7 @@ class SettingsScreen extends ConsumerWidget {
             ref.invalidate(accountsProvider); // Refresh account switcher
             
             if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Account removed. Switched to ${otherAccount['user']?['name'] ?? 'another account'}'),
-                  backgroundColor: Colors.green,
-                ),
-              );
-            }
+                            context.showSuccessToast('Account removed. Switched to ${otherAccount['user']?['name'] ?? 'another account'}');            }
           } catch (e) {
             debugPrint('❌ [LOGOUT] Failed to switch to other account: $e');
             // If switching fails, do full logout
@@ -809,10 +768,7 @@ class SettingsScreen extends ConsumerWidget {
             onPressed: () async {
               final password = passwordController.text.trim();
               if (password.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please enter your password')),
-                );
-                return;
+                                context.showInfoToast('Please enter your password');                return;
               }
 
               Navigator.pop(context);
@@ -857,16 +813,10 @@ class SettingsScreen extends ConsumerWidget {
                 if (context.mounted) {
                   // Navigate to login
                   context.go('/login');
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Account deleted successfully')),
-                  );
-                }
+                                    context.showSuccessToast('Account deleted successfully');                }
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Failed to delete account: $e')),
-                  );
-                }
+                                    context.showErrorToast('Failed to delete account: $e');                }
               }
             },
             style: TextButton.styleFrom(foregroundColor: Colors.red),
@@ -1077,135 +1027,113 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
-  void _showAboutDialog(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
-        title: Text(
-          'About',
-          style: TextStyle(color: isDark ? Colors.white : Colors.black),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'GekyChat Desktop',
-              style: TextStyle(
-                color: isDark ? Colors.white : Colors.black,
-                fontWeight: FontWeight.bold,
-                fontSize: 18,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Version 1.0.0',
-              style: TextStyle(
-                color: isDark ? Colors.white70 : Colors.grey[700],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'A modern chat application for desktop platforms.',
-              style: TextStyle(
-                color: isDark ? Colors.white70 : Colors.grey[700],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _showBirthdayDialog(BuildContext context, WidgetRef ref) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+    final now = DateTime.now();
+
     // Load current birthday first
     int? currentMonth;
     int? currentDay;
-    
+    int? currentYear;
+
     try {
       final api = ref.read(apiServiceProvider);
       final response = await api.getProfile();
-      if (response.data != null) {
-        currentMonth = response.data['dob_month'];
-        currentDay = response.data['dob_day'];
+      final raw = response.data;
+      final Map<String, dynamic>? profile = raw is Map
+          ? (raw['data'] is Map
+                ? Map<String, dynamic>.from(raw['data'] as Map)
+                : Map<String, dynamic>.from(raw))
+          : null;
+      if (profile != null) {
+        final user = UserProfile.fromJson(profile);
+        currentMonth = user.dobMonth;
+        currentDay = user.dobDay;
+        currentYear = user.dobYear;
       }
     } catch (e) {
       debugPrint('Failed to load birthday: $e');
     }
-    
+
     if (!context.mounted) return;
-    
+
     int? selectedMonth = currentMonth;
     int? selectedDay = currentDay;
+    int? selectedYear = currentYear;
     bool saving = false;
-    
+
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
+      builder: (dialogContext) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
           backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
           title: Text(
             'Set Birthday',
             style: TextStyle(color: isDark ? Colors.white : Colors.black),
           ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<int>(
-                      decoration: const InputDecoration(
-                        labelText: 'Month',
-                        border: OutlineInputBorder(),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: DropdownButtonFormField<int>(
+                        decoration: const InputDecoration(
+                          labelText: 'Month',
+                          border: OutlineInputBorder(),
+                        ),
+                        initialValue: selectedMonth,
+                        items: [
+                          for (var m = 1; m <= 12; m++)
+                            DropdownMenuItem(
+                              value: m,
+                              child: Text(_monthName(m)),
+                            ),
+                        ],
+                        onChanged: (value) => setState(() => selectedMonth = value),
                       ),
-                      initialValue: selectedMonth,
-                      items: [
-                        for (var m = 1; m <= 12; m++)
-                          DropdownMenuItem(
-                            value: m,
-                            child: Text(m.toString().padLeft(2, '0')),
-                          ),
-                      ],
-                      onChanged: (value) => setState(() => selectedMonth = value),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: DropdownButtonFormField<int>(
-                      decoration: const InputDecoration(
-                        labelText: 'Day',
-                        border: OutlineInputBorder(),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: DropdownButtonFormField<int>(
+                        decoration: const InputDecoration(
+                          labelText: 'Day',
+                          border: OutlineInputBorder(),
+                        ),
+                        initialValue: selectedDay,
+                        items: [
+                          for (var d = 1; d <= 31; d++)
+                            DropdownMenuItem(
+                              value: d,
+                              child: Text(d.toString().padLeft(2, '0')),
+                            ),
+                        ],
+                        onChanged: (value) => setState(() => selectedDay = value),
                       ),
-                      initialValue: selectedDay,
-                      items: [
-                        for (var d = 1; d <= 31; d++)
-                          DropdownMenuItem(
-                            value: d,
-                            child: Text(d.toString().padLeft(2, '0')),
-                          ),
-                      ],
-                      onChanged: (value) => setState(() => selectedDay = value),
                     ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<int>(
+                  decoration: const InputDecoration(
+                    labelText: 'Year',
+                    border: OutlineInputBorder(),
                   ),
-                ],
-              ),
-            ],
+                  initialValue: selectedYear,
+                  items: [
+                    for (var y = now.year; y >= now.year - 120; y--)
+                      DropdownMenuItem(value: y, child: Text(y.toString())),
+                  ],
+                  onChanged: (value) => setState(() => selectedYear = value),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(dialogContext),
               child: const Text('Cancel'),
             ),
             TextButton(
@@ -1215,19 +1143,20 @@ class SettingsScreen extends ConsumerWidget {
                       setState(() => saving = true);
                       try {
                         final api = ref.read(apiServiceProvider);
-                        await api.updateDob(month: selectedMonth, day: selectedDay);
-                        if (context.mounted) {
-                          Navigator.pop(context);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Birthday updated successfully')),
-                          );
+                        await api.updateDob(
+                          month: selectedMonth,
+                          day: selectedDay,
+                          year: selectedYear,
+                        );
+                        if (dialogContext.mounted) {
+                          ref.invalidate(currentUserProvider);
+                          Navigator.pop(dialogContext);
+                          context.showSuccessToast('Birthday updated successfully');
                         }
                       } catch (e) {
                         setState(() => saving = false);
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Failed: $e')),
-                          );
+                        if (dialogContext.mounted) {
+                          context.showErrorToast('Failed: $e');
                         }
                       }
                     },
@@ -1309,4 +1238,19 @@ class _SettingsTile extends StatelessWidget {
   }
 }
 
+const _monthNames = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
 
+String _monthName(int month) => _monthNames[month - 1];

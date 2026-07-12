@@ -229,7 +229,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
       } else {
         // For network errors, keep the token and try again later
         debugPrint('⚠️ Token validation failed (network error, keeping token): $e');
-        // Token stays in state, will be validated on next check
+        // Still wire Pusher + incoming-call listeners so calls work offline from /me.
+        final userId = prefs.getInt('user_id');
+        if (userId != null) {
+          await bootstrapAfterAuth(_ref);
+        }
       }
     }
   }

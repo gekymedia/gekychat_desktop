@@ -8,6 +8,7 @@ import '../../core/session.dart';
 import 'call_repository.dart';
 import 'livekit_call_screen.dart';
 import 'providers.dart';
+import '../../utils/snackbar_helper.dart';
 
 const _dismissedDeadCallKeysPrefsKey = 'dismissed_dead_call_keys_v1';
 bool _dismissedDeadCallKeysHydrated = false;
@@ -178,9 +179,6 @@ Future<void> joinCallFromChatLink(
         ? e.userMessage
         : 'Unable to join call. Please try again.';
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(friendlyMessage), backgroundColor: Colors.red),
-      );
-    }
+            context.showErrorToast(friendlyMessage);    }
   }
 }

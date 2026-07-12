@@ -81,6 +81,15 @@ class LiveBroadcastRepository {
     await _apiService.endLiveBroadcast(id);
   }
 
+  /// Creator dashboard: total broadcasts, views, watch time, recent list.
+  Future<Map<String, dynamic>> getCreatorAnalytics() async {
+    final response = await _apiService.getLiveCreatorAnalytics();
+    if (response.data is Map && response.data['data'] != null) {
+      return Map<String, dynamic>.from(response.data['data'] as Map);
+    }
+    return {};
+  }
+
   /// Get active broadcasts
   Future<List<Map<String, dynamic>>> getActiveBroadcasts() async {
     final response = await _apiService.getActiveLiveBroadcasts();

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../theme/app_theme.dart';
 import '../chat_providers.dart';
 import '../models.dart';
+import '../../../utils/snackbar_helper.dart';
 
 /// Pick one or more chats/groups and send [shareText] as a message to each.
 class ShareTextToChatsScreen extends ConsumerStatefulWidget {
@@ -74,15 +75,9 @@ class _ShareTextToChatsScreenState extends ConsumerState<ShareTextToChatsScreen>
 
       if (!mounted) return;
       Navigator.pop(context, true);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(widget.successMessage)),
-      );
-    } catch (e) {
+            context.showSuccessToast(widget.successMessage);    } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to share: $e')),
-      );
-    } finally {
+            context.showErrorToast('Failed to share: $e');    } finally {
       if (mounted) {
         setState(() => _isLoading = false);
       }

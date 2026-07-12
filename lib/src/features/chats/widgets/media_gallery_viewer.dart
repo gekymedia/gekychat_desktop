@@ -1,12 +1,18 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
-
 import '../models.dart';
+import '../../../services/download_path_service.dart';
+import '../../../utils/desktop_file_actions.dart';
+import '../../../utils/snackbar_helper.dart';
 
 /// A media item in the gallery, tied to its parent message for actions.
 class GalleryMediaItem {
@@ -49,6 +55,7 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
   late int _currentIndex;
   final Map<int, VideoPlayerController?> _videoControllers = {};
   bool _showControls = true;
+  bool _isDownloading = false;
 
   GalleryMediaItem get _currentItem => widget.items[_currentIndex];
 
@@ -62,9 +69,8 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
   @override
   void dispose() {
     _pageController.dispose();
-    for (final controller in _videoControllers.values) {
-      controller?.dispose();
-    }
+    // Controllers are owned by [_VideoPlayerWidget]; only clear the map.
+    _videoControllers.clear();
     super.dispose();
   }
 
@@ -129,10 +135,118 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
           return;
         } catch (_) {}
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to share: $e')),
+            context.showErrorToast('Failed to share: $e');    }
+  }
+
+  Future<void> _downloadCurrentMedia() async {
+    if (_isDownloading) return;
+
+    final attachment = _currentItem.attachment;
+    setState(() => _isDownloading = true);
+
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final downloadDir = Directory('${directory.path}/Downloads/GekyChat');
+      if (!await downloadDir.exists()) {
+        await downloadDir.create(recursive: true);
+      }
+
+      final fileName = attachment.originalName?.trim().isNotEmpty == true
+          ? attachment.originalName!
+          : 'gekychat_${attachment.id}${_extensionFor(attachment)}';
+      final savePath = '${downloadDir.path}/$fileName';
+
+      final dio = Dio();
+      await dio.download(attachment.displayUrl, savePath);
+
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await DownloadPathService(prefs)
+            .saveDownloadPath(attachment.url, savePath);
+      } catch (_) {}
+
+      if (!mounted) return;
+      SnackbarHelper.showSuccess(
+        context,
+        'Downloaded $fileName',
+        duration: const Duration(seconds: 5),
+        action: SnackBarAction(
+          label: 'Show in folder',
+          onPressed: () {
+            unawaited(DesktopFileActions.revealInFileManager(savePath));
+          },
+        ),
       );
+    } catch (e) {
+      if (!mounted) return;
+      context.showErrorToast('Failed to download: $e');
+    } finally {
+      if (mounted) setState(() => _isDownloading = false);
     }
+  }
+
+  Future<void> _copyCurrentImageToClipboard() async {
+    final attachment = _currentItem.attachment;
+    if (_isVideo(attachment)) {
+      if (!mounted) return;
+      context.showInfoToast('Copy works for images');
+      return;
+    }
+    final ok = await DesktopFileActions.copyNetworkImageToClipboard(
+      attachment.displayUrl,
+    );
+    if (!mounted) return;
+    if (ok) {
+      context.showSuccessToast('Image copied to clipboard');
+    } else {
+      context.showErrorToast('Could not copy image');
+    }
+  }
+
+  void _showImageContextMenu(Offset globalPosition) {
+    final attachment = _currentItem.attachment;
+    if (_isVideo(attachment) || widget.isViewOnce) return;
+
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
+    final overlaySize = overlay?.size ?? MediaQuery.sizeOf(context);
+
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        globalPosition.dx,
+        globalPosition.dy,
+        overlaySize.width - globalPosition.dx,
+        overlaySize.height - globalPosition.dy,
+      ),
+      items: const [
+        PopupMenuItem(
+          value: 'copy',
+          child: Row(
+            children: [
+              Icon(Icons.copy_rounded, size: 18),
+              SizedBox(width: 12),
+              Text('Copy image'),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'download',
+          child: Row(
+            children: [
+              Icon(Icons.download_rounded, size: 18),
+              SizedBox(width: 12),
+              Text('Download'),
+            ],
+          ),
+        ),
+      ],
+    ).then((value) {
+      if (value == 'copy') {
+        unawaited(_copyCurrentImageToClipboard());
+      } else if (value == 'download') {
+        unawaited(_downloadCurrentMedia());
+      }
+    });
   }
 
   String _extensionFor(MessageAttachment attachment) {
@@ -174,6 +288,9 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
   @override
   Widget build(BuildContext context) {
     final totalCount = widget.items.length;
+    const backdrop = Colors.white;
+    const onBackdrop = Color(0xFF111B21);
+    const mutedOnBackdrop = Color(0xFF667781);
 
     return CallbackShortcuts(
       bindings: {
@@ -185,27 +302,43 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
         const SingleActivator(LogicalKeyboardKey.arrowRight): () {
           if (!widget.isViewOnce) _goNext();
         },
+        const SingleActivator(LogicalKeyboardKey.keyC, control: true): () {
+          if (!widget.isViewOnce && !_isVideo(_currentItem.attachment)) {
+            unawaited(_copyCurrentImageToClipboard());
+          }
+        },
       },
       child: Focus(
         autofocus: true,
-        child: Scaffold(
-          backgroundColor: Colors.black,
-          extendBodyBehindAppBar: true,
-          appBar: _showControls
-              ? AppBar(
-                  backgroundColor: Colors.black54,
+        child: ExcludeSemantics(
+          // Windows AXTree frequently errors on fullscreen media; keep UI usable.
+          child: Scaffold(
+          backgroundColor: backdrop,
+          extendBodyBehindAppBar: false,
+          appBar: AppBar(
+                  backgroundColor: backdrop,
+                  foregroundColor: onBackdrop,
+                  surfaceTintColor: backdrop,
                   elevation: 0,
-                  iconTheme: const IconThemeData(color: Colors.white),
+                  scrolledUnderElevation: 0,
+                  automaticallyImplyLeading: true,
+                  leading: IconButton(
+                    icon: const Icon(Icons.arrow_back),
+                    color: onBackdrop,
+                    tooltip: 'Back',
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  ),
+                  iconTheme: const IconThemeData(color: onBackdrop),
                   title: Text(
                     '${_currentIndex + 1} / $totalCount',
-                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                    style: const TextStyle(color: onBackdrop, fontSize: 16),
                   ),
                   centerTitle: true,
                   actions: [
-                    if (!widget.isViewOnce) ...[
+                    if (_showControls && !widget.isViewOnce) ...[
                       if (widget.onReply != null)
                         IconButton(
-                          icon: const Icon(Icons.reply, color: Colors.white),
+                          icon: const Icon(Icons.reply, color: onBackdrop),
                           tooltip: 'Reply',
                           onPressed: _runReply,
                         ),
@@ -213,20 +346,40 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
                         IconButton(
                           icon: Transform.flip(
                             flipX: true,
-                            child: const Icon(Icons.reply, color: Colors.white),
+                            child: const Icon(Icons.reply, color: onBackdrop),
                           ),
                           tooltip: 'Forward',
                           onPressed: _runForward,
                         ),
                       IconButton(
-                        icon: const Icon(Icons.share, color: Colors.white),
+                        icon: _isDownloading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: onBackdrop,
+                                ),
+                              )
+                            : const Icon(Icons.download, color: onBackdrop),
+                        tooltip: 'Download',
+                        onPressed: _isDownloading ? null : _downloadCurrentMedia,
+                      ),
+                      if (!_isVideo(_currentItem.attachment))
+                        IconButton(
+                          icon: const Icon(Icons.copy_rounded, color: onBackdrop),
+                          tooltip: 'Copy image',
+                          onPressed: _copyCurrentImageToClipboard,
+                        ),
+                      IconButton(
+                        icon: const Icon(Icons.share, color: onBackdrop),
                         tooltip: 'Share',
                         onPressed: _shareCurrentMedia,
                       ),
                       if (widget.onDelete != null)
                         PopupMenuButton<String>(
-                          icon: const Icon(Icons.more_vert, color: Colors.white),
-                          color: Colors.grey[900],
+                          icon: const Icon(Icons.more_vert, color: onBackdrop),
+                          color: Colors.white,
                           onSelected: (value) {
                             if (value == 'delete') _runDelete();
                           },
@@ -245,132 +398,203 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
                         ),
                     ],
                   ],
-                )
-              : null,
-          body: GestureDetector(
-            onTap: _toggleControls,
-            child: Stack(
-              children: [
-                PageView.builder(
-                  controller: _pageController,
-                  physics: widget.isViewOnce
-                      ? const NeverScrollableScrollPhysics()
-                      : const PageScrollPhysics(),
-                  onPageChanged: _onPageChanged,
-                  itemCount: widget.items.length,
-                  itemBuilder: (context, index) {
-                    final item = widget.items[index];
-                    if (_isVideo(item.attachment)) {
-                      return _buildVideoPlayer(index, item.attachment);
-                    }
-                    return _buildImageViewer(item.attachment);
-                  },
                 ),
-                if (_showControls && totalCount > 1 && totalCount <= 10)
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 40,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: List.generate(
-                        totalCount,
-                        (index) => Container(
-                          width: 8,
-                          height: 8,
-                          margin: const EdgeInsets.symmetric(horizontal: 4),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: index == _currentIndex
-                                ? Colors.white
-                                : Colors.white.withValues(alpha: 0.4),
-                          ),
+          body: Stack(
+            children: [
+              PageView.builder(
+                controller: _pageController,
+                physics: widget.isViewOnce
+                    ? const NeverScrollableScrollPhysics()
+                    : const PageScrollPhysics(),
+                onPageChanged: _onPageChanged,
+                itemCount: widget.items.length,
+                itemBuilder: (context, index) {
+                  final item = widget.items[index];
+                  if (_isVideo(item.attachment)) {
+                    return _buildPageBackdrop(
+                      child: _buildVideoPlayer(index, item.attachment),
+                    );
+                  }
+                  return _buildImageViewer(item.attachment);
+                },
+              ),
+              if (_showControls && totalCount > 1 && totalCount <= 10)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 40,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(
+                      totalCount,
+                      (index) => Container(
+                        width: 8,
+                        height: 8,
+                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: index == _currentIndex
+                              ? onBackdrop
+                              : mutedOnBackdrop.withValues(alpha: 0.45),
                         ),
                       ),
                     ),
                   ),
-                if (_showControls && totalCount > 1 && !widget.isViewOnce) ...[
-                  if (_currentIndex > 0)
-                    Positioned(
-                      left: 8,
-                      top: 0,
-                      bottom: 0,
-                      child: Center(
-                        child: IconButton(
-                          icon: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: const BoxDecoration(
-                              color: Colors.black45,
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(
-                              Icons.chevron_left,
-                              color: Colors.white,
-                              size: 32,
-                            ),
+                ),
+              if (_showControls && totalCount > 1 && !widget.isViewOnce) ...[
+                if (_currentIndex > 0)
+                  Positioned(
+                    left: 8,
+                    top: 0,
+                    bottom: 0,
+                    child: Center(
+                      child: IconButton(
+                        icon: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: const Color(0xFFE9EDEF)),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.08),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
                           ),
-                          onPressed: _goPrevious,
+                          child: const Icon(
+                            Icons.chevron_left,
+                            color: onBackdrop,
+                            size: 32,
+                          ),
                         ),
+                        onPressed: _goPrevious,
                       ),
                     ),
-                  if (_currentIndex < totalCount - 1)
-                    Positioned(
-                      right: 8,
-                      top: 0,
-                      bottom: 0,
-                      child: Center(
-                        child: IconButton(
-                          icon: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: const BoxDecoration(
-                              color: Colors.black45,
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(
-                              Icons.chevron_right,
-                              color: Colors.white,
-                              size: 32,
-                            ),
+                  ),
+                if (_currentIndex < totalCount - 1)
+                  Positioned(
+                    right: 8,
+                    top: 0,
+                    bottom: 0,
+                    child: Center(
+                      child: IconButton(
+                        icon: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: const Color(0xFFE9EDEF)),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.08),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
                           ),
-                          onPressed: _goNext,
+                          child: const Icon(
+                            Icons.chevron_right,
+                            color: onBackdrop,
+                            size: 32,
+                          ),
                         ),
+                        onPressed: _goNext,
                       ),
                     ),
-                ],
+                  ),
               ],
-            ),
+            ],
           ),
+        ),
         ),
       ),
     );
   }
 
-  Widget _buildImageViewer(MessageAttachment attachment) {
-    return InteractiveViewer(
-      minScale: 0.5,
-      maxScale: 4.0,
-      child: Center(
-        child: CachedNetworkImage(
-          imageUrl: attachment.displayUrl,
-          fit: BoxFit.contain,
-          placeholder: (context, url) => const Center(
-            child: CircularProgressIndicator(color: Colors.white),
-          ),
-          errorWidget: (context, url, error) => const Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.error_outline, color: Colors.white54, size: 48),
-                SizedBox(height: 8),
-                Text(
-                  'Failed to load image',
-                  style: TextStyle(color: Colors.white54),
-                ),
-              ],
-            ),
-          ),
+  /// White backdrop; tap outside the media closes the viewer.
+  Widget _buildPageBackdrop({required Widget child}) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        GestureDetector(
+          onTap: () => Navigator.maybePop(context),
+          behavior: HitTestBehavior.opaque,
+          child: const ColoredBox(color: Colors.white),
         ),
-      ),
+        Center(child: child),
+      ],
+    );
+  }
+
+  Widget _buildImageViewer(MessageAttachment attachment) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        GestureDetector(
+          onTap: () => Navigator.maybePop(context),
+          behavior: HitTestBehavior.opaque,
+          child: const ColoredBox(color: Colors.white),
+        ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            return InteractiveViewer(
+              minScale: 0.5,
+              maxScale: 4.0,
+              boundaryMargin: const EdgeInsets.all(48),
+              child: SizedBox(
+                width: constraints.maxWidth,
+                height: constraints.maxHeight,
+                child: GestureDetector(
+                  onTap: _toggleControls,
+                  onSecondaryTapDown: (details) {
+                    _showImageContextMenu(details.globalPosition);
+                  },
+                  child: CachedNetworkImage(
+                    imageUrl: attachment.displayUrl,
+                    fit: BoxFit.contain,
+                    placeholder: (context, url) => const Center(
+                      child: SizedBox(
+                        width: 120,
+                        height: 120,
+                        child: CircularProgressIndicator(
+                          color: Color(0xFF008069),
+                        ),
+                      ),
+                    ),
+                    errorWidget: (context, url, error) => const Center(
+                      child: SizedBox(
+                        width: 240,
+                        height: 160,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.error_outline,
+                              color: Color(0xFF667781),
+                              size: 48,
+                            ),
+                            SizedBox(height: 8),
+                            Text(
+                              'Failed to load image',
+                              style: TextStyle(color: Color(0xFF667781)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    imageBuilder: (context, imageProvider) => Image(
+                      image: imageProvider,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ],
     );
   }
 
@@ -423,8 +647,13 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> {
 
   @override
   void dispose() {
-    _controller?.removeListener(_onVideoTick);
-    _controller?.dispose();
+    final controller = _controller;
+    _controller = null;
+    if (controller != null) {
+      controller.removeListener(_onVideoTick);
+      // Avoid double-dispose races with async initialize().
+      controller.dispose().catchError((_) {});
+    }
     super.dispose();
   }
 
@@ -444,7 +673,7 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> {
     try {
       await controller.initialize();
       if (!mounted) {
-        await controller.dispose();
+        await controller.dispose().catchError((_) {});
         return;
       }
       controller.addListener(_onVideoTick);
@@ -455,6 +684,7 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> {
       widget.onControllerCreated(controller);
     } catch (e) {
       debugPrint('Video initialization error: $e');
+      await controller.dispose().catchError((_) {});
       if (mounted) {
         setState(() => _error = 'Failed to load video');
       }
@@ -481,9 +711,9 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error_outline, color: Colors.white54, size: 48),
+            const Icon(Icons.error_outline, color: Color(0xFF667781), size: 48),
             const SizedBox(height: 8),
-            Text(_error!, style: const TextStyle(color: Colors.white54)),
+            Text(_error!, style: const TextStyle(color: Color(0xFF667781))),
           ],
         ),
       );
@@ -491,7 +721,7 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> {
 
     if (!_isInitialized) {
       return const Center(
-        child: CircularProgressIndicator(color: Colors.white),
+        child: CircularProgressIndicator(color: Color(0xFF008069)),
       );
     }
 
@@ -500,22 +730,20 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          Center(
-            child: AspectRatio(
-              aspectRatio: _controller!.value.aspectRatio,
-              child: VideoPlayer(_controller!),
-            ),
+          AspectRatio(
+            aspectRatio: _controller!.value.aspectRatio,
+            child: VideoPlayer(_controller!),
           ),
           if (_controller!.value.isBuffering)
             const Center(
-              child: CircularProgressIndicator(color: Colors.white),
+              child: CircularProgressIndicator(color: Color(0xFF008069)),
             ),
           if (!_isPlaying)
             Container(
               width: 72,
               height: 72,
-              decoration: const BoxDecoration(
-                color: Colors.black54,
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.45),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -527,14 +755,14 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> {
           Positioned(
             left: 16,
             right: 16,
-            bottom: 60,
+            bottom: 24,
             child: VideoProgressIndicator(
               _controller!,
               allowScrubbing: true,
               colors: const VideoProgressColors(
-                playedColor: Color(0xFF00A884),
-                bufferedColor: Colors.white24,
-                backgroundColor: Colors.white12,
+                playedColor: Color(0xFF008069),
+                bufferedColor: Color(0xFFB8C2C8),
+                backgroundColor: Color(0xFFE9EDEF),
               ),
             ),
           ),

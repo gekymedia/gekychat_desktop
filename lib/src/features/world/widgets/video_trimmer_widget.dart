@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:video_editor/video_editor.dart';
 import 'package:video_player/video_player.dart';
+import '../../../utils/snackbar_helper.dart';
 
 class VideoTrimmerWidget extends StatefulWidget {
   final File videoFile;
@@ -55,10 +56,7 @@ class _VideoTrimmerWidgetState extends State<VideoTrimmerWidget> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load video: $e')),
-        );
-        widget.onCancel();
+                context.showErrorToast('Failed to load video: $e');        widget.onCancel();
       }
     }
   }
@@ -93,10 +91,7 @@ class _VideoTrimmerWidgetState extends State<VideoTrimmerWidget> {
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to trim video: $e')),
-        );
-        setState(() {
+                context.showErrorToast('Failed to trim video: $e');        setState(() {
           _isTrimming = false;
         });
       }

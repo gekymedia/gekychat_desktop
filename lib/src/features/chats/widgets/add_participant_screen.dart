@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../chat_providers.dart';
 import '../models.dart';
 import '../../../theme/app_theme.dart';
+import '../../../utils/snackbar_helper.dart';
+import '../../../widgets/colored_avatar.dart';
 
 class AddParticipantScreen extends ConsumerStatefulWidget {
   final int groupId;
@@ -50,10 +52,7 @@ class _AddParticipantScreenState extends ConsumerState<AddParticipantScreen> {
 
   Future<void> _addParticipants() async {
     if (_selectedMemberIds.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select at least one person to add')),
-      );
-      return;
+            context.showInfoToast('Select at least one person to add');      return;
     }
 
     setState(() => _isLoading = true);
@@ -63,16 +62,10 @@ class _AddParticipantScreenState extends ConsumerState<AddParticipantScreen> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Participants added successfully')),
-      );
-      Navigator.pop(context, true); // Return true to indicate success
+            context.showSuccessToast('Participants added successfully');      Navigator.pop(context, true); // Return true to indicate success
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to add participants: $e')),
-        );
-      }
+                context.showErrorToast('Failed to add participants: $e');      }
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -211,13 +204,17 @@ class _PeoplePicker extends ConsumerWidget {
             final u = people[i];
             final checked = selectedIds.contains(u.id);
 
+            final displayName = u.name.trim().isNotEmpty ? u.name : 'Unknown';
+
             return CheckboxListTile(
               value: checked,
               onChanged: (v) => onToggle(u.id, v == true),
-              title: Text(u.name),
+              title: Text(displayName),
               subtitle: u.phone != null ? Text(u.phone!) : null,
-              secondary: CircleAvatar(
-                child: Text(u.name[0].toUpperCase()),
+              secondary: ColoredAvatar(
+                name: displayName,
+                imageUrl: u.avatarUrl,
+                radius: 22,
               ),
             );
           },

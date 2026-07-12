@@ -198,10 +198,21 @@ class PusherService {
   }
 
   Channel _openChannel(String storageKey) {
+    // pusher_client_socket defaults subscribe:false — without an explicit
+    // subscribe(), binds never receive events (typing/recording stay silent).
     if (_isPublicChannel(storageKey)) {
-      return _pusher!.channel(storageKey);
+      return _pusher!.channel(storageKey, subscribe: true);
     }
-    return _pusher!.private(storageKey.replaceFirst('private-', ''));
+    return _pusher!.private(
+      storageKey.replaceFirst('private-', ''),
+      subscribe: true,
+    );
+  }
+
+  void _ensureChannelSubscribed(Channel channel) {
+    if (!channel.subscribed) {
+      channel.subscribe();
+    }
   }
 
   Future<Map<String, String>> _getAuthHeaders() async {
@@ -254,6 +265,9 @@ class PusherService {
           debugPrint('⚠️ Error disconnecting old Pusher instance: $e');
         }
         _pusher = null;
+        // Drop stale Channel refs from the old client so reconnect re-opens them.
+        _subscribedChannels.clear();
+        _boundEvents.clear();
       }
 
       // Configure PusherOptions for Reverb or Pusher cloud
@@ -302,7 +316,9 @@ class PusherService {
         _isConnecting = false;
         _reconnectAttempts = 0;
         debugPrint('✅ Connected to Pusher/Reverb - socket-id: ${_pusher!.socketId}');
-        unawaited(_processQueuedListeners());
+        unawaited(
+          _processQueuedListeners().then((_) => _resubscribeExistingChannels()),
+        );
       });
       
       _pusher!.onConnectionError((error) {
@@ -472,7 +488,30 @@ class PusherService {
       _dispatchEventListeners(channelName, eventName, data);
     });
   }
-  
+
+  /// Re-open private/public channels after reconnect (maps were cleared on new client).
+  Future<void> _resubscribeExistingChannels() async {
+    if (!_isConnected || _pusher == null) return;
+    if (_eventListeners.isEmpty) return;
+
+    for (final channelName in _eventListeners.keys.toList()) {
+      if (_subscribedChannels.containsKey(channelName)) continue;
+      try {
+        final ch = _openChannel(channelName);
+        _subscribedChannels[channelName] = ch;
+        _boundEvents.remove(channelName);
+        final events = _eventListeners[channelName];
+        if (events == null) continue;
+        for (final eventName in events.keys) {
+          _bindEventIfNeeded(ch, channelName, eventName);
+        }
+        debugPrint('✅ Resubscribed to $channelName after reconnect');
+      } catch (e) {
+        debugPrint('❌ Resubscribe failed for $channelName: $e');
+      }
+    }
+  }
+
   Future<void> _processQueuedListeners() async {
     if (!_isConnected || _pusher == null) return;
 
@@ -511,6 +550,7 @@ class PusherService {
 
         final channel = _subscribedChannels[channelName];
         if (channel != null) {
+          _ensureChannelSubscribed(channel);
           _bindEventIfNeeded(channel, channelName, eventName);
         }
         
@@ -540,7 +580,10 @@ class PusherService {
         return;
       }
 
-      final pusherChannel = _pusher!.private(channel.replaceFirst('private-', ''));
+      final pusherChannel = _pusher!.private(
+        channel.replaceFirst('private-', ''),
+        subscribe: true,
+      );
       _subscribedChannels[channelName] = pusherChannel;
       _listeners[channelName] = callback;
       debugPrint('✅ Subscribed to $channelName');
@@ -572,7 +615,7 @@ class PusherService {
         return;
       }
 
-      final pusherChannel = _pusher!.channel(channelName);
+      final pusherChannel = _pusher!.channel(channelName, subscribe: true);
       _subscribedChannels[channelName] = pusherChannel;
       _listeners[channelName] = callback;
       debugPrint('✅ Subscribed to public channel: $channelName');
@@ -602,6 +645,7 @@ class PusherService {
     } else {
       final ch = _subscribedChannels[channelName];
       if (ch != null) {
+        _ensureChannelSubscribed(ch);
         _bindEventIfNeeded(ch, channelName, eventName);
       }
     }

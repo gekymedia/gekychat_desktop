@@ -59,11 +59,11 @@ class KeyboardShortcutsDialog extends StatelessWidget {
                   _buildSection(
                     'General',
                     [
-                      _ShortcutItem('Show keyboard shortcuts', 'Ctrl + ?'),
-                      _ShortcutItem('Search', 'Ctrl + F'),
+                      _ShortcutItem('Show keyboard shortcuts', 'Ctrl + Shift + /'),
+                      _ShortcutItem('Search chats', 'Ctrl + K'),
                       _ShortcutItem('New chat', 'Ctrl + N'),
                       _ShortcutItem('Settings', 'Ctrl + ,'),
-                      _ShortcutItem('Close/Cancel', 'Esc'),
+                      _ShortcutItem('Clear search / close chat', 'Esc'),
                     ],
                     isDark,
                   ),

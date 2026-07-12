@@ -144,3 +144,7 @@ final pendingDesktopGroupSelectProvider = StateProvider<int?>((ref) => null);
 
 /// Open a group chat immediately after creation (before `/groups` sync completes).
 final pendingDesktopGroupOpenProvider = StateProvider<GroupSummary?>((ref) => null);
+
+/// Prefill DM composer (e.g. birthday wish).
+final pendingDesktopComposerDraftProvider =
+    StateProvider<DesktopPendingComposerDraft?>((ref) => null);

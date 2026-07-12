@@ -15,12 +15,14 @@ import '../realtime/pusher_service.dart';
 import 'call_busy_helper.dart';
 import 'call_manager.dart';
 import 'call_session.dart';
+import 'joinable_call_message.dart';
 import 'call_waiting_dialog.dart';
 import 'call_navigation.dart';
 import 'join_call_from_link.dart';
 import 'livekit_call_screen.dart';
 import 'providers.dart';
 import '../../services/livekit_call_service.dart';
+import '../../core/providers/connectivity_provider.dart';
 
 /// Global handler for incoming calls. Uses [rootNavigatorKey] so the ring UI
 /// works from any route (settings, calls tab, etc.), not only [DesktopChatScreen].
@@ -45,6 +47,11 @@ class IncomingCallHandler {
   bool _liveKitScreenRouteOpen = false;
   bool _liveKitOnStack = false;
   Timer? _incomingUiFallbackTimer;
+  DateTime? _lastPendingInviteFetch;
+  DateTime? _lastAppResumedAt;
+  bool _pendingInviteFetchInProgress = false;
+  static const Duration _pendingInviteMinInterval = Duration(seconds: 45);
+  static const Duration _appResumeDebounce = Duration(seconds: 3);
 
   bool get isCallUiOnStack =>
       _incomingRingOnStack ||
@@ -98,13 +105,27 @@ class IncomingCallHandler {
     });
 
     unawaited(_pusherService.connect());
-    await _fetchPendingInvite();
+    await _fetchPendingInvite(force: true);
     await tryShowPendingIncomingRing();
   }
 
   /// Fetches pending incoming call from API (offline ring recovery).
-  Future<void> _fetchPendingInvite() async {
+  Future<void> _fetchPendingInvite({bool force = false}) async {
     if (_ref == null || _callManager == null) return;
+
+    if (!force) {
+      if (_pendingInviteFetchInProgress) return;
+      final last = _lastPendingInviteFetch;
+      if (last != null &&
+          DateTime.now().difference(last) < _pendingInviteMinInterval) {
+        return;
+      }
+    }
+
+    if (!_ref!.read(connectivityProvider)) return;
+
+    _pendingInviteFetchInProgress = true;
+    _lastPendingInviteFetch = DateTime.now();
     try {
       final repo = _ref!.read(callRepositoryProvider);
       final data = await repo.getPendingInvite();
@@ -123,6 +144,8 @@ class IncomingCallHandler {
       unawaited(_handleIncomingCall(inviteMap));
     } catch (e) {
       debugPrint('fetchPendingInvite failed: $e');
+    } finally {
+      _pendingInviteFetchInProgress = false;
     }
   }
 
@@ -187,6 +210,14 @@ class IncomingCallHandler {
         payload['action'] == 'ended' ||
         payload['action'] == 'declined') {
       _handleCallCancelled(payload);
+    } else {
+      final type = payload['type']?.toString();
+      if (type == 'video-upgrade-request' ||
+          type == 'video-upgrade-accepted' ||
+          type == 'video-upgrade-declined') {
+        // Backup path: CallManager may early-return when _currentCall is unset.
+        _callManager?.onCallSignal?.call(payload);
+      }
     }
   }
 
@@ -204,6 +235,43 @@ class IncomingCallHandler {
         payload['action'] == 'declined') {
       _handleCallCancelled(payload);
     }
+  }
+
+  /// Fallback when inbox delivers call_data but CallInvite was missed.
+  Future<void> handleInviteFromCallMessage({
+    required Map<String, dynamic> callData,
+    required Map<String, dynamic>? sender,
+    int? conversationId,
+    int? groupId,
+  }) async {
+    if (!isJoinableCallDataStatus(callData['status'] as String?)) return;
+    final sessionId = sessionIdFromCallData(callData);
+    if (sessionId == null) return;
+
+    final callerId =
+        _asInt(callData['caller_id']) ?? _asInt(sender?['id']) ?? 0;
+    if (callerId > 0 && callerId == _currentUserId) return;
+
+    final callerMap = sender != null
+        ? Map<String, dynamic>.from(sender)
+        : <String, dynamic>{
+            if (callerId > 0) 'id': callerId,
+            'name': 'Someone',
+          };
+    if (callerMap['id'] == null && callerId > 0) {
+      callerMap['id'] = callerId;
+    }
+
+    await _handleIncomingCall(<String, dynamic>{
+      'action': 'invite',
+      'session_id': sessionId,
+      'call_id': sessionId,
+      'type': callData['type']?.toString() ?? 'voice',
+      if (conversationId != null && conversationId > 0)
+        'conversation_id': conversationId,
+      if (groupId != null && groupId > 0) 'group_id': groupId,
+      'caller': callerMap,
+    });
   }
 
   Future<void> handleNotificationTap(Map<String, dynamic> data) async {
@@ -242,6 +310,13 @@ class IncomingCallHandler {
 
   Future<void> handleAppResumed() async {
     if (_ref == null) return;
+    final now = DateTime.now();
+    if (_lastAppResumedAt != null &&
+        now.difference(_lastAppResumedAt!) < _appResumeDebounce) {
+      return;
+    }
+    _lastAppResumedAt = now;
+
     _callManager ??= _ref!.read(callManagerProvider);
     await _fetchPendingInvite();
     await ensureIncomingCallUiVisible(_ref!);
@@ -256,9 +331,6 @@ class IncomingCallHandler {
     }
     if (_waitingCall != null) return;
 
-    if (_pendingCall == null) {
-      await _fetchPendingInvite();
-    }
     if (_pendingCall == null) return;
 
     final liveKitBusy = ref.read(liveKitCallServiceProvider).hasActiveCall;

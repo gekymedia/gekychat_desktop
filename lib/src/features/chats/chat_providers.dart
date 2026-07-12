@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'chat_repo.dart';
 import 'models.dart';
@@ -48,22 +50,70 @@ extension KeepAliveExtension<T> on AutoDisposeFutureProvider<T> {
   }
 }
 
-/// Tick counter watched by list providers — incremented on inbox Pusher events.
+/// Tick counter — background inbox refresh (keeps previous list visible).
 final inboxListRefreshTickProvider = StateProvider<int>((ref) => 0);
 
-/// Optimized conversations provider with stale-while-revalidate pattern
-final optimizedConversationsProvider = FutureProvider<List<ConversationSummary>>((ref) async {
-  ref.watch(inboxListRefreshTickProvider);
-  final repo = ref.watch(chatRepositoryProvider);
-  return repo.getConversations();
-});
+/// Sidebar conversations — stale-while-revalidate; tick triggers silent refresh.
+class OptimizedConversationsNotifier
+    extends AsyncNotifier<List<ConversationSummary>> {
+  @override
+  Future<List<ConversationSummary>> build() async {
+    ref.listen(inboxListRefreshTickProvider, (previous, next) {
+      if (previous != next) {
+        unawaited(refreshSilently());
+      }
+    });
+    ref.watch(chatRepositoryProvider);
+    return ref.read(chatRepositoryProvider).getConversations();
+  }
 
-/// Optimized groups provider
-final optimizedGroupsProvider = FutureProvider<List<GroupSummary>>((ref) async {
-  ref.watch(inboxListRefreshTickProvider);
-  final repo = ref.watch(chatRepositoryProvider);
-  return repo.getGroups();
-});
+  /// Refetch without clearing the sidebar (no skeleton flash).
+  Future<void> refreshSilently() async {
+    if (!state.hasValue) return;
+    try {
+      final fresh = await ref.read(chatRepositoryProvider).getConversations();
+      state = AsyncData(fresh);
+    } catch (e, st) {
+      state = AsyncValue<List<ConversationSummary>>.error(
+        e,
+        st,
+      ).copyWithPrevious(state);
+    }
+  }
+}
+
+final optimizedConversationsProvider = AsyncNotifierProvider<
+    OptimizedConversationsNotifier,
+    List<ConversationSummary>>(OptimizedConversationsNotifier.new);
+
+/// Sidebar groups — same silent refresh pattern as conversations.
+class OptimizedGroupsNotifier extends AsyncNotifier<List<GroupSummary>> {
+  @override
+  Future<List<GroupSummary>> build() async {
+    ref.listen(inboxListRefreshTickProvider, (previous, next) {
+      if (previous != next) {
+        unawaited(refreshSilently());
+      }
+    });
+    ref.watch(chatRepositoryProvider);
+    return ref.read(chatRepositoryProvider).getGroups();
+  }
+
+  Future<void> refreshSilently() async {
+    if (!state.hasValue) return;
+    try {
+      final fresh = await ref.read(chatRepositoryProvider).getGroups();
+      state = AsyncData(fresh);
+    } catch (e, st) {
+      state = AsyncValue<List<GroupSummary>>.error(e, st).copyWithPrevious(state);
+    }
+  }
+}
+
+final optimizedGroupsProvider =
+    AsyncNotifierProvider<OptimizedGroupsNotifier, List<GroupSummary>>(
+  OptimizedGroupsNotifier.new,
+);
 
 /// Optimized archived conversations provider
 final optimizedArchivedConversationsProvider = FutureProvider<List<ConversationSummary>>((ref) async {

@@ -5,6 +5,7 @@ import '../../../core/providers.dart';
 import '../../../theme/app_theme.dart';
 import '../../chats/chat_providers.dart';
 import '../../chats/models.dart';
+import '../../../utils/snackbar_helper.dart';
 
 class WorldFeedShareTarget {
   final bool isGroup;
@@ -142,10 +143,7 @@ class _WorldFeedShareDialogState extends ConsumerState<WorldFeedShareDialog> {
       Navigator.pop(context, WorldFeedShareResult.quickSent);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not send: $e')),
-      );
-    } finally {
+            context.showErrorToast('Could not send: $e');    } finally {
       if (mounted) {
         setState(() {
           _quickSendBusyId = null;

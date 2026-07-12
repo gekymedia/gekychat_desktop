@@ -18,8 +18,10 @@ class DesktopNotificationService extends NotificationService {
 
   final PusherService _pusher;
 
-  /// Windows inline-reply actions may omit [NotificationResponse.payload].
+  /// Windows inline-reply actions omit toast launch payload — only action arguments.
   final Map<int, String> _notificationPayloadById = {};
+  final Map<String, String> _payloadByThreadKey = {};
+  String? _lastMessagePayload;
   static const int _maxCachedPayloads = 64;
 
   Function(Map<String, dynamic> payload)? onInboxMessage;
@@ -185,9 +187,10 @@ class DesktopNotificationService extends NotificationService {
         '📬 Desktop notification response: ${response.id}, ${response.actionId}, ${response.input}, data=${response.data}');
 
     final replyText = _extractReplyText(response);
-    final isReplyAction = response.actionId == kDesktopReplyActionId ||
-        response.actionId == 'send-reply' ||
-        response.actionId == 'Send' ||
+    final actionId = response.actionId ?? '';
+    final isReplyAction = isWindowsReplyActionId(actionId) ||
+        actionId == 'send-reply' ||
+        actionId == 'Send' ||
         (replyText != null &&
             replyText.isNotEmpty &&
             response.notificationResponseType ==
@@ -196,10 +199,7 @@ class DesktopNotificationService extends NotificationService {
     if (isReplyAction &&
         replyText != null &&
         replyText.trim().isNotEmpty) {
-      var payload = response.payload ?? '';
-      if (payload.isEmpty && response.id != null) {
-        payload = _notificationPayloadById[response.id] ?? '';
-      }
+      final payload = _resolveReplyPayload(response);
       _handleNotificationReply(payload, replyText.trim());
       return;
     }
@@ -229,6 +229,63 @@ class DesktopNotificationService extends NotificationService {
       if (only != null && only.isNotEmpty) return only;
     }
     return null;
+  }
+
+  void _rememberMessagePayload(
+    String payloadString, {
+    int? conversationId,
+    int? groupId,
+  }) {
+    if (payloadString.isEmpty) return;
+    _lastMessagePayload = payloadString;
+    if (groupId != null && groupId > 0) {
+      _payloadByThreadKey['g:$groupId'] = payloadString;
+    }
+    if (conversationId != null && conversationId > 0) {
+      _payloadByThreadKey['c:$conversationId'] = payloadString;
+    }
+    while (_payloadByThreadKey.length > _maxCachedPayloads) {
+      _payloadByThreadKey.remove(_payloadByThreadKey.keys.first);
+    }
+  }
+
+  String _resolveReplyPayload(NotificationResponse response) {
+    final routing = parseWindowsReplyRouting(response.actionId) ??
+        parseWindowsReplyRouting(response.payload);
+    if (routing != null) {
+      try {
+        return jsonEncode(routing);
+      } catch (_) {}
+    }
+
+    var payload = response.payload?.trim() ?? '';
+    if (payload.isNotEmpty && payload != kDesktopReplyActionId) {
+      return payload;
+    }
+
+    if (response.id != null) {
+      final cached = _notificationPayloadById[response.id];
+      if (cached != null && cached.isNotEmpty) return cached;
+    }
+
+    final threadFromAction = parseWindowsReplyRouting(response.actionId);
+    if (threadFromAction != null) {
+      final groupId = threadFromAction['group_id']?.toString();
+      final conversationId = threadFromAction['conversation_id']?.toString();
+      if (groupId != null) {
+        final cached = _payloadByThreadKey['g:$groupId'];
+        if (cached != null && cached.isNotEmpty) return cached;
+      }
+      if (conversationId != null) {
+        final cached = _payloadByThreadKey['c:$conversationId'];
+        if (cached != null && cached.isNotEmpty) return cached;
+      }
+    }
+
+    final last = _lastMessagePayload;
+    if (last != null && last.isNotEmpty) return last;
+
+    return payload;
   }
 
   Map<String, dynamic>? _parsePayloadString(String raw) {
@@ -288,13 +345,23 @@ class DesktopNotificationService extends NotificationService {
     String? senderAvatarUrl,
     String? subtitle,
   }) async {
-    final conversationId = data?['conversation_id']?.toString() ?? '';
-    final groupId = data?['group_id']?.toString() ?? '';
+    final conversationIdRaw = data?['conversation_id'] ?? data?['conversationId'];
+    final groupIdRaw = data?['group_id'] ?? data?['groupId'];
+    final conversationId = conversationIdRaw?.toString() ?? '';
+    final groupId = groupIdRaw?.toString() ?? '';
+    final conversationIdInt = int.tryParse(conversationId);
+    final groupIdInt = int.tryParse(groupId);
     final messageId = data?['message_id']?.toString() ?? data?['id']?.toString() ?? '';
     final isCall = data?['type'] == 'incoming_call' ||
         data?['action'] == 'incoming_call';
     final isMessage =
         !isCall && (conversationId.isNotEmpty || groupId.isNotEmpty);
+    final windowsReplyArgs = isMessage
+        ? buildWindowsReplyArguments(
+            conversationId: conversationIdInt,
+            groupId: groupIdInt,
+          )
+        : kDesktopReplyActionId;
 
     String payloadString;
     if (isMessage) {
@@ -374,6 +441,7 @@ class DesktopNotificationService extends NotificationService {
         ? buildMessageWindowsDetails(
             images: windowsImages,
             subtitle: subtitle,
+            replyArguments: windowsReplyArgs,
           )
         : const WindowsNotificationDetails();
 
@@ -417,6 +485,13 @@ class DesktopNotificationService extends NotificationService {
       final notificationId = DateTime.now().millisecondsSinceEpoch % 100000;
       if (payloadString.isNotEmpty) {
         _notificationPayloadById[notificationId] = payloadString;
+        if (isMessage) {
+          _rememberMessagePayload(
+            payloadString,
+            conversationId: conversationIdInt,
+            groupId: groupIdInt,
+          );
+        }
         while (_notificationPayloadById.length > _maxCachedPayloads) {
           _notificationPayloadById.remove(_notificationPayloadById.keys.first);
         }
@@ -435,6 +510,13 @@ class DesktopNotificationService extends NotificationService {
         final notificationId = DateTime.now().millisecondsSinceEpoch % 100000;
         if (payloadString.isNotEmpty) {
           _notificationPayloadById[notificationId] = payloadString;
+          if (isMessage) {
+            _rememberMessagePayload(
+              payloadString,
+              conversationId: conversationIdInt,
+              groupId: groupIdInt,
+            );
+          }
         }
         await _localNotifications.show(
           notificationId,
@@ -445,7 +527,10 @@ class DesktopNotificationService extends NotificationService {
             iOS: buildMessageDarwinDetails(subtitle: subtitle),
             macOS: buildMessageDarwinDetails(subtitle: subtitle),
             linux: linuxDetails,
-            windows: kDesktopMessageWindowsDetails,
+            windows: buildMessageWindowsDetails(
+              subtitle: subtitle,
+              replyArguments: windowsReplyArgs,
+            ),
           ),
           payload: payloadString.isEmpty ? null : payloadString,
         );

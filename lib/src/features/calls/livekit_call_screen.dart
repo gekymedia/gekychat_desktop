@@ -3,12 +3,13 @@
 // Desktop LiveKit call screen.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'call_duration_format.dart';
 
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart' show DesktopCapturerSource;
+import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc show DesktopCapturerSource, RTCVideoViewObjectFit;
 import 'package:livekit_client/livekit_client.dart';
 
 import '../../services/livekit_call_service.dart';
@@ -18,6 +19,7 @@ import 'call_rating_sheet.dart';
 import 'providers.dart';
 import 'incoming_call_handler.dart';
 import 'livekit_token_service.dart';
+import '../../utils/snackbar_helper.dart';
 
 class LiveKitCallScreen extends ConsumerStatefulWidget {
   final String? url;
@@ -72,12 +74,27 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
   bool _noAnswer = false;
   bool _awaitingIncomingAccept = false;
   bool _isAcceptingIncoming = false;
+  String? _videoUpgradeRequester;
+  bool _hasRequestedVideoUpgrade = false;
   void Function(CallState)? _callManagerStateBeforeIncoming;
   String? _error;
   DateTime? _connectedAt;
   Timer? _durationTicker;
+  DateTime? _mediaRenegotiationGraceUntil;
+  Timer? _remoteLeftHangupTimer;
 
   bool get _hasRemoteParticipants => _room.remoteParticipants.isNotEmpty;
+
+  bool get _inMediaRenegotiationGrace {
+    final until = _mediaRenegotiationGraceUntil;
+    return until != null && DateTime.now().isBefore(until);
+  }
+
+  void _armMediaRenegotiationGrace([
+    Duration grace = const Duration(seconds: 12),
+  ]) {
+    _mediaRenegotiationGraceUntil = DateTime.now().add(grace);
+  }
 
   bool get _useParticipantGrid =>
       widget.groupId != null && _room.remoteParticipants.length > 1;
@@ -116,7 +133,35 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
       })
       ..on<RoomReconnectedEvent>((_) {
         if (mounted) setState(() {});
-      });
+      })
+      ..on<TrackSubscribedEvent>((_) {
+        if (mounted) setState(() {});
+      })
+      ..on<TrackUnsubscribedEvent>((_) {
+        if (mounted) setState(() {});
+      })
+      ..on<TrackPublishedEvent>((event) {
+        final source = event.publication.source;
+        if (source == TrackSource.screenShareVideo ||
+            source == TrackSource.camera) {
+          _armMediaRenegotiationGrace();
+        }
+        if (mounted) setState(() {});
+      })
+      ..on<LocalTrackPublishedEvent>((event) {
+        final source = event.publication.source;
+        if (source == TrackSource.screenShareVideo ||
+            source == TrackSource.camera) {
+          _armMediaRenegotiationGrace();
+        }
+        if (mounted) setState(() {});
+      })
+      ..on<ParticipantConnectedEvent>((_) {
+        _remoteLeftHangupTimer?.cancel();
+        _remoteLeftHangupTimer = null;
+        if (mounted) setState(() {});
+      })
+      ..on<DataReceivedEvent>(_handleDataMessage);
 
       if (widget.isRestoredFromOverlay) {
       _connecting = false;
@@ -147,6 +192,7 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
       if (!mounted) return;
       final cm = ref.read(callManagerProvider);
       cm.onCallStateChanged = _onManagerCallStateChanged;
+      cm.onCallSignal = _onCallSignalPayload;
       if (widget.isOutgoingCall || widget.groupId == null) {
         unawaited(cm.ensureSignalingSubscribed());
       }
@@ -157,10 +203,7 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
         };
         cm.onError = (message) {
           if (!mounted || _isEnding) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(message)),
-          );
-          final t = message.trim().toLowerCase();
+                    context.showInfoToast(message);          final t = message.trim().toLowerCase();
           if (t == 'call declined' ||
               t == 'no answer' ||
               t == 'the call ended' ||
@@ -173,10 +216,7 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
       } else if (widget.groupId != null) {
         cm.onParticipantLeft = (_) {
           if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('A participant left the call')),
-          );
-          setState(() {});
+                    context.showInfoToast('A participant left the call');          setState(() {});
         };
       }
     });
@@ -204,14 +244,41 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
     }
   }
 
+  void _safePopRoute() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final nav = Navigator.of(context);
+      if (nav.canPop()) nav.pop();
+    });
+  }
+
+  /// Disconnect without throwing — cancelled/never-connected rooms often time out.
+  Future<void> _safeDisconnectRoom({bool disposeOwned = true}) async {
+    try {
+      await _room.disconnect().timeout(const Duration(seconds: 2));
+    } catch (e) {
+      debugPrint('LiveKitCallScreen: disconnect ignored: $e');
+    }
+    if (disposeOwned && _ownsRoom) {
+      try {
+        _room.dispose();
+      } catch (_) {}
+    }
+  }
+
   Future<void> _handleEndedByManager() async {
     if (_isEnding) return;
     _isEnding = true;
     _durationTicker?.cancel();
-    await ref.read(liveKitCallServiceProvider).endCall(disposeRoom: _ownsRoom);
-    if (_ownsRoom) {
-      await _room.disconnect();
+    try {
+      // Service clears overlay state; we disconnect once here (avoid double-disconnect timeout).
+      await ref
+          .read(liveKitCallServiceProvider)
+          .endCall(disposeRoom: false);
+    } catch (e) {
+      debugPrint('LiveKitCallScreen: endCall overlay clear: $e');
     }
+    await _safeDisconnectRoom();
     try {
       final cm = ref.read(callManagerProvider);
       cm.onCallStateChanged = null;
@@ -221,13 +288,13 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
         cm.onError = null;
       }
     } catch (_) {}
-    if (mounted && Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
-    }
+    _safePopRoute();
   }
 
   void _onRoomChanged() {
     if (_room.remoteParticipants.isNotEmpty) {
+      _remoteLeftHangupTimer?.cancel();
+      _remoteLeftHangupTimer = null;
       ref.read(callManagerProvider).notifyRemoteParticipantJoined();
       _connectedAt ??= DateTime.now();
       _durationTicker ??= Timer.periodic(const Duration(seconds: 1), (_) {
@@ -237,8 +304,24 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
         _connectedAt != null &&
         !_isEnding &&
         !_connecting) {
-      // 1:1 call — remote party left LiveKit; close instead of showing "Waiting…".
-      unawaited(_hangUp());
+      if (_inMediaRenegotiationGrace ||
+          _room.connectionState == ConnectionState.reconnecting) {
+        if (mounted) setState(() {});
+        return;
+      }
+      // 1:1 — peer can briefly disappear during ICE renegotiation (screen share / video).
+      _remoteLeftHangupTimer?.cancel();
+      _remoteLeftHangupTimer = Timer(const Duration(seconds: 10), () {
+        if (!mounted || _isEnding) return;
+        if (_inMediaRenegotiationGrace ||
+            _room.connectionState == ConnectionState.reconnecting) {
+          return;
+        }
+        if (_room.remoteParticipants.isEmpty) {
+          unawaited(_hangUp());
+        }
+      });
+      if (mounted) setState(() {});
       return;
     }
     if (mounted) setState(() {});
@@ -281,7 +364,13 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
       await _room.connect(
         url,
         token,
-        roomOptions: const RoomOptions(adaptiveStream: true, dynacast: true),
+        roomOptions: const RoomOptions(
+          adaptiveStream: false,
+          dynacast: true,
+          defaultVideoPublishOptions: VideoPublishOptions(
+            simulcast: true,
+          ),
+        ),
         fastConnectOptions: FastConnectOptions(
           microphone: const TrackOption(enabled: true),
           camera: TrackOption(enabled: widget.videoEnabled),
@@ -289,6 +378,11 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
       );
       if (mounted) {
         setState(() => _connecting = false);
+        final lp = _room.localParticipant;
+        await lp?.setMicrophoneEnabled(true);
+        if (widget.videoEnabled && !_videoOff) {
+          await lp?.setCameraEnabled(true);
+        }
         _registerWithOverlayService();
         try {
           ref.read(callManagerProvider).notifyLiveKitRoomConnected();
@@ -314,9 +408,7 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
     _callManagerStateBeforeIncoming?.call(state);
     if (!mounted) return;
     if (state == CallState.ended) {
-      if (Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
+      _safePopRoute();
     }
   }
 
@@ -328,10 +420,7 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
     if (!mounted) return;
     if (!ok) {
       setState(() => _isAcceptingIncoming = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not join call. Please try again.')),
-      );
-      return;
+            context.showErrorToast('Could not join call. Please try again.');      return;
     }
     setState(() {
       _awaitingIncomingAccept = false;
@@ -358,8 +447,8 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
             groupId: widget.groupId,
           );
     }
-    if (mounted && Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
+    if (mounted) {
+      _safePopRoute();
     }
   }
 
@@ -483,7 +572,7 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
     ref.read(liveKitCallServiceProvider).updateMuteState(_muted);
     ref.read(liveKitCallServiceProvider).updateVideoState(!_videoOff);
     ref.read(liveKitCallServiceProvider).minimizeCall();
-    Navigator.of(context).pop();
+    _safePopRoute();
   }
 
   int? _callDurationSeconds() {
@@ -505,12 +594,16 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
   @override
   void dispose() {
     _durationTicker?.cancel();
+    _remoteLeftHangupTimer?.cancel();
     if (_awaitingIncomingAccept &&
         _callManager.onCallStateChanged == _onIncomingAwaitCallStateChanged) {
       _callManager.onCallStateChanged = _callManagerStateBeforeIncoming;
     }
     if (_callManager.onCallStateChanged == _onManagerCallStateChanged) {
       _callManager.onCallStateChanged = null;
+    }
+    if (_callManager.onCallSignal == _onCallSignalPayload) {
+      _callManager.onCallSignal = null;
     }
     _callManager.onNoAnswerUi = null;
     _callManager.onParticipantLeft = null;
@@ -525,8 +618,14 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
 
     if (!stillActiveInOverlay && !_isEnding) {
       if (_ownsRoom) {
-        _room.disconnect();
-        _room.dispose();
+        unawaited(() async {
+          try {
+            await _room.disconnect().timeout(const Duration(seconds: 2));
+          } catch (_) {}
+          try {
+            _room.dispose();
+          } catch (_) {}
+        }());
       }
       if (_liveKitService.activeCall?.room == _room) {
         unawaited(_liveKitService.endCall(disposeRoom: false));
@@ -546,14 +645,331 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
     ref.read(liveKitCallServiceProvider).updateMuteState(_muted);
   }
 
+  void _onCallSignalPayload(Map<String, dynamic> payload) {
+    final type = payload['type']?.toString();
+    if (type != 'video-upgrade-request' &&
+        type != 'video-upgrade-accepted' &&
+        type != 'video-upgrade-declined') {
+      return;
+    }
+    final sid = int.tryParse(payload['session_id']?.toString() ?? '');
+    if (sid != null && sid != widget.callId) return;
+    if (!mounted) return;
+
+    if (type == 'video-upgrade-request') {
+      final name = payload['requester_name']?.toString();
+      if (_videoUpgradeRequester != null) return;
+      setState(() => _videoUpgradeRequester = (name != null && name.isNotEmpty)
+          ? name
+          : 'Someone');
+    } else if (type == 'video-upgrade-accepted') {
+      if (_hasRequestedVideoUpgrade) {
+        unawaited(_enableCameraAfterVideoUpgradeAccepted());
+      }
+    } else if (type == 'video-upgrade-declined') {
+      if (_hasRequestedVideoUpgrade) {
+        context.showWarningToast('Video call declined');
+        setState(() => _hasRequestedVideoUpgrade = false);
+      }
+    }
+  }
+
+  void _handleDataMessage(DataReceivedEvent event) {
+    try {
+      final data = String.fromCharCodes(event.data);
+      if (data.startsWith('VIDEO_UPGRADE_REQUEST:')) {
+        final senderName = event.participant?.name ??
+            event.participant?.identity ??
+            'Someone';
+        if (!mounted || _videoUpgradeRequester != null) return;
+        setState(() => _videoUpgradeRequester = senderName);
+      } else if (data == 'VIDEO_UPGRADE_ACCEPTED') {
+        if (mounted && _hasRequestedVideoUpgrade) {
+          unawaited(_enableCameraAfterVideoUpgradeAccepted());
+        }
+      } else if (data == 'VIDEO_UPGRADE_DECLINED') {
+        if (mounted && _hasRequestedVideoUpgrade) {
+          context.showWarningToast(
+            '${event.participant?.name ?? 'User'} declined video call',
+          );
+          setState(() => _hasRequestedVideoUpgrade = false);
+        }
+      }
+    } catch (e) {
+      debugPrint('LiveKitCallScreen: data message error: $e');
+    }
+  }
+
+  Future<void> _sendVideoUpgradeSignal(String type, {String? requesterName}) async {
+    try {
+      final map = <String, dynamic>{
+        'type': type,
+        'session_id': widget.callId.toString(),
+      };
+      if (requesterName != null && requesterName.isNotEmpty) {
+        map['requester_name'] = requesterName;
+      }
+      await ref.read(callRepositoryProvider).sendSignal(
+            widget.callId,
+            jsonEncode(map),
+          );
+    } catch (e) {
+      debugPrint('LiveKitCallScreen: $type signal failed: $e');
+    }
+  }
+
+  Future<bool> _confirmSwitchToVideo({String? requesterName}) async {
+    if (!mounted) return false;
+    return await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: const Color(0xFF1F2C34),
+            title: const Text(
+              'Switch to video call?',
+              style: TextStyle(color: Colors.white),
+            ),
+            content: Text(
+              requesterName != null
+                  ? '$requesterName wants to switch to video.'
+                  : 'Ask the other person to switch this voice call to video?',
+              style: const TextStyle(color: Colors.white70),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Switch'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  Future<void> _requestVideoUpgrade() async {
+    final lp = _room.localParticipant;
+    if (lp == null) return;
+    try {
+      setState(() => _hasRequestedVideoUpgrade = true);
+      // Prefer CallSignal — LiveKit data often times out on Windows peers.
+      await _sendVideoUpgradeSignal(
+        'video-upgrade-request',
+        requesterName: lp.name.isNotEmpty ? lp.name : 'Someone',
+      );
+      try {
+        final data = 'VIDEO_UPGRADE_REQUEST:${lp.name}';
+        await lp
+            .publishData(
+              Uint8List.fromList(data.codeUnits),
+              reliable: true,
+            )
+            .timeout(const Duration(seconds: 2));
+      } catch (e) {
+        debugPrint('LiveKitCallScreen: publishData ignored: $e');
+      }
+      if (mounted) {
+        context.showInfoToast('Video call request sent');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _hasRequestedVideoUpgrade = false);
+        context.showErrorToast('Failed to request video: $e');
+      }
+    }
+  }
+
+  Future<void> _enableCameraAfterVideoUpgradeAccepted() async {
+    final lp = _room.localParticipant;
+    if (lp == null) return;
+    try {
+      _armMediaRenegotiationGrace();
+      await lp.setCameraEnabled(true);
+      if (!mounted) return;
+      setState(() {
+        _videoOff = false;
+        _hasRequestedVideoUpgrade = false;
+      });
+      ref.read(liveKitCallServiceProvider).updateVideoState(true);
+      context.showSuccessToast('Switched to video call');
+    } catch (e) {
+      if (mounted) {
+        setState(() => _hasRequestedVideoUpgrade = false);
+        context.showErrorToast('Failed to enable camera: $e');
+      }
+    }
+  }
+
+  Future<void> _acceptVideoUpgrade() async {
+    final lp = _room.localParticipant;
+    if (lp == null) return;
+    try {
+      _armMediaRenegotiationGrace();
+      await lp.setCameraEnabled(true);
+      if (mounted) {
+        setState(() {
+          _videoOff = false;
+          _videoUpgradeRequester = null;
+        });
+      }
+      ref.read(liveKitCallServiceProvider).updateVideoState(true);
+      await _sendVideoUpgradeSignal('video-upgrade-accepted');
+      try {
+        await lp
+            .publishData(
+              Uint8List.fromList('VIDEO_UPGRADE_ACCEPTED'.codeUnits),
+              reliable: true,
+            )
+            .timeout(const Duration(seconds: 2));
+      } catch (_) {}
+    } catch (e) {
+      if (mounted) {
+        context.showErrorToast('Failed to enable camera: $e');
+      }
+    }
+  }
+
+  Future<void> _declineVideoUpgrade() async {
+    final lp = _room.localParticipant;
+    if (lp == null) return;
+    try {
+      await _sendVideoUpgradeSignal('video-upgrade-declined');
+      try {
+        await lp
+            .publishData(
+              Uint8List.fromList('VIDEO_UPGRADE_DECLINED'.codeUnits),
+              reliable: true,
+            )
+            .timeout(const Duration(seconds: 2));
+      } catch (_) {}
+      if (mounted) {
+        setState(() => _videoUpgradeRequester = null);
+      }
+    } catch (e) {
+      debugPrint('LiveKitCallScreen: decline video upgrade: $e');
+      if (mounted) {
+        setState(() => _videoUpgradeRequester = null);
+      }
+    }
+  }
+
   Future<void> _toggleVideo() async {
     final lp = _room.localParticipant;
     if (lp == null) return;
-    _videoOff
-        ? await lp.setCameraEnabled(true)
-        : await lp.setCameraEnabled(false);
+
+    // Voice call → request peer consent before turning camera on (matches iOS).
+    if (_videoOff &&
+        !widget.videoEnabled &&
+        !_hasRequestedVideoUpgrade &&
+        widget.groupId == null) {
+      final confirm = await _confirmSwitchToVideo();
+      if (!confirm || !mounted) return;
+      await _requestVideoUpgrade();
+      return;
+    }
+
+    if (_videoOff) {
+      _armMediaRenegotiationGrace();
+      await lp.setCameraEnabled(true);
+    } else {
+      await lp.setCameraEnabled(false);
+      _hasRequestedVideoUpgrade = false;
+    }
+    if (!mounted) return;
     setState(() => _videoOff = !_videoOff);
     ref.read(liveKitCallServiceProvider).updateVideoState(!_videoOff);
+  }
+
+  Widget _buildVideoUpgradeBanner() {
+    final requester = _videoUpgradeRequester ?? 'Someone';
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 24),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1565C0),
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.35),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.videocam, color: Colors.white),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Video call request',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$requester wants to switch to video',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.9),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => unawaited(_declineVideoUpgrade()),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white70),
+                    ),
+                    child: const Text('Decline'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () => unawaited(_acceptVideoUpgrade()),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: const Color(0xFF1565C0),
+                    ),
+                    child: const Text('Accept'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _toggleScreenShare() async {
@@ -561,37 +977,40 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
     if (lp == null) return;
     try {
       if (_screenSharing) {
+        _armMediaRenegotiationGrace();
         await lp.setScreenShareEnabled(false);
         setState(() => _screenSharing = false);
         return;
       }
 
       if (lkPlatformIsDesktop()) {
-        final source = await showDialog<DesktopCapturerSource>(
+        final source = await showDialog<rtc.DesktopCapturerSource>(
           context: context,
           builder: (context) => ScreenSelectDialog(),
         );
         if (source == null || !mounted) return;
 
+        _armMediaRenegotiationGrace();
         final track = await LocalVideoTrack.createScreenShareTrack(
           ScreenShareCaptureOptions(
             sourceId: source.id,
             maxFrameRate: 15.0,
           ),
         );
-        await lp.publishVideoTrack(track);
+        await lp.publishVideoTrack(
+          track,
+          publishOptions: const VideoPublishOptions(simulcast: false),
+        );
         if (mounted) setState(() => _screenSharing = true);
         return;
       }
 
+      _armMediaRenegotiationGrace();
       await lp.setScreenShareEnabled(true);
       setState(() => _screenSharing = !_screenSharing);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Screen share failed: $e')),
-        );
-      }
+                context.showErrorToast('Screen share failed: $e');      }
     }
   }
 
@@ -608,30 +1027,51 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
         cm.onError = null;
       } catch (_) {}
     }
-    await ref.read(liveKitCallServiceProvider).endCall(disposeRoom: _ownsRoom);
-    if (_ownsRoom) {
-      await _room.disconnect();
+    try {
+      await ref
+          .read(liveKitCallServiceProvider)
+          .endCall(disposeRoom: false);
+    } catch (e) {
+      debugPrint('LiveKitCallScreen: hangUp endCall: $e');
     }
+    await _safeDisconnectRoom();
     final cm = ref.read(callManagerProvider);
     if (_shouldLeaveGroupCallWithoutEnding()) {
       await cm.leaveCall(sessionIdOverride: widget.callId);
     } else {
       await cm.endCall(sessionIdOverride: widget.callId);
     }
-    if (mounted) Navigator.of(context).pop();
-    if (hadPeer) {
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final nav = Navigator.of(context);
+        if (nav.canPop()) nav.pop();
+        if (hadPeer) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _maybePromptRating();
+          });
+        }
+      });
+    } else if (hadPeer) {
       _maybePromptRating();
     }
   }
 
   String _statusText() {
     if (_noAnswer) return 'No answer';
+    if (_room.connectionState == ConnectionState.reconnecting) {
+      return 'Reconnecting…';
+    }
     if (_connecting) {
       return widget.isOutgoingCall ? 'Calling…' : 'Connecting…';
     }
     if (_error != null) return 'Connection failed';
     if (!_hasRemoteParticipants) {
       return widget.isOutgoingCall ? 'Calling…' : 'Waiting…';
+    }
+    final remotes = _room.remoteParticipants.values.toList();
+    if (remotes.isNotEmpty && _remoteVideoPending(remotes.first)) {
+      return 'Connecting video…';
     }
     final start = _connectedAt;
     if (start != null) {
@@ -640,14 +1080,46 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
     return 'Connected';
   }
 
+  bool _remoteVideoPending(Participant participant) {
+    for (final source in [TrackSource.screenShareVideo, TrackSource.camera]) {
+      final pub = participant.getTrackPublicationBySource(source);
+      if (pub != null && !pub.muted && pub.track == null) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  VideoTrack? _videoTrackFor(Participant participant, TrackSource source) {
+    final pub = participant.getTrackPublicationBySource(source);
+    if (pub == null) return null;
+    if (pub.muted) return null;
+    final track = pub.track;
+    return track is VideoTrack ? track : null;
+  }
+
+  VideoTrack? _primaryVideoFor(Participant participant) {
+    return _videoTrackFor(participant, TrackSource.screenShareVideo) ??
+        _videoTrackFor(participant, TrackSource.camera);
+  }
+
+  Widget _videoRenderer(VideoTrack track, {bool screenShare = false}) {
+    return VideoTrackRenderer(
+      track,
+      fit: screenShare
+          ? rtc.RTCVideoViewObjectFit.RTCVideoViewObjectFitContain
+          : rtc.RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+    );
+  }
+
   Widget _participantTile(Participant participant, {bool compact = false}) {
     final name = participant.name.isNotEmpty
         ? participant.name
         : (participant.identity.isNotEmpty ? participant.identity : 'Guest');
-    final video = participant.getTrackPublicationBySource(TrackSource.camera)
-            ?.track as VideoTrack? ??
-        participant.getTrackPublicationBySource(TrackSource.screenShareVideo)
-            ?.track as VideoTrack?;
+    final screenShare =
+        _videoTrackFor(participant, TrackSource.screenShareVideo);
+    final camera = _videoTrackFor(participant, TrackSource.camera);
+    final video = screenShare ?? camera;
 
     return Container(
       decoration: BoxDecoration(
@@ -660,7 +1132,7 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
         fit: StackFit.expand,
         children: [
           if (video != null)
-            VideoTrackRenderer(video)
+            _videoRenderer(video, screenShare: screenShare != null)
           else
             Center(
               child: Column(
@@ -738,24 +1210,25 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
   Widget _buildSingleParticipantView() {
     final remotes = _room.remoteParticipants.values.toList();
     final remote = remotes.isNotEmpty ? remotes.first : null;
-    final remoteVideo = remote != null
-        ? (remote.getTrackPublicationBySource(TrackSource.camera)?.track
-                as VideoTrack? ??
-            remote
-                .getTrackPublicationBySource(TrackSource.screenShareVideo)
-                ?.track as VideoTrack?)
+    final remoteVideo =
+        remote != null ? _primaryVideoFor(remote) : null;
+    final remoteScreenShare = remote != null
+        ? _videoTrackFor(remote, TrackSource.screenShareVideo)
         : null;
     final localVideo = _room.localParticipant != null && !_videoOff
-        ? _room.localParticipant!
-                .getTrackPublicationBySource(TrackSource.camera)
-                ?.track as VideoTrack?
+        ? _videoTrackFor(_room.localParticipant!, TrackSource.camera)
         : null;
     final avatarUrl = _safePeerAvatar;
 
     return Stack(
       children: [
         if (remoteVideo != null)
-          Positioned.fill(child: VideoTrackRenderer(remoteVideo))
+          Positioned.fill(
+            child: _videoRenderer(
+              remoteVideo,
+              screenShare: remoteScreenShare != null,
+            ),
+          )
         else
           Positioned.fill(
             child: Center(
@@ -812,7 +1285,7 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: VideoTrackRenderer(localVideo),
+                child: _videoRenderer(localVideo),
               ),
             ),
           ),
@@ -913,7 +1386,27 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
               bottom: 0,
               left: 0,
               right: 0,
-              child: Container(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_videoUpgradeRequester != null) ...[
+                    _buildVideoUpgradeBanner(),
+                    const SizedBox(height: 16),
+                  ] else if (_hasRequestedVideoUpgrade) ...[
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Text(
+                        'Waiting for video response…',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.85),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  Container(
                 padding: const EdgeInsets.all(32),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
@@ -935,9 +1428,11 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
                     ),
                     const SizedBox(width: 16),
                     _ControlBtn(
-                      icon: _videoOff ? Icons.videocam_off : Icons.videocam,
+                      icon: _hasRequestedVideoUpgrade
+                          ? Icons.hourglass_top
+                          : (_videoOff ? Icons.videocam_off : Icons.videocam),
                       bg: _videoOff ? Colors.red : Colors.grey[800]!,
-                      onTap: _toggleVideo,
+                      onTap: _hasRequestedVideoUpgrade ? () {} : _toggleVideo,
                     ),
                     if (_canUpgradeToVideo || widget.groupId != null) ...[
                       const SizedBox(width: 16),
@@ -959,6 +1454,8 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
                     ),
                   ],
                 ),
+                  ),
+                ],
               ),
             ),
             if (_error != null)

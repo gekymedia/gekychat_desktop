@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../services/livekit_call_service.dart';
+import '../../utils/snackbar_helper.dart';
 import 'call_manager.dart';
 import 'call_repository.dart';
 import 'providers.dart';
@@ -73,16 +74,12 @@ Future<void> reconcileLocalCallStateWithServer(
 }
 
 void showAlreadyInCallSnackBar(BuildContext context) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(content: Text(kAlreadyInCallUserMessage)),
-  );
+  context.showInfoToast(kAlreadyInCallUserMessage);
 }
 
 bool showCallStartFailureIfAny(BuildContext context, Object error) {
   if (error is CallStartException) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(error.userMessage)),
-    );
+    context.showErrorToast(error.userMessage);
     return true;
   }
   return false;

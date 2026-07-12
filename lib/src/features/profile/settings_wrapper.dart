@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../widgets/desktop_shell_colors.dart';
 import '../../widgets/side_nav.dart';
 import 'settings_screen.dart';
 
@@ -10,14 +11,19 @@ class SettingsWrapper extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final shellBackground =
+        DesktopShellColors.shellChromeBackground(context, isDark: isDark);
     
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
+      backgroundColor: shellBackground,
       body: Row(
         children: [
           // Side Nav - keep visible
           RepaintBoundary(
-            child: SideNav(currentRoute: '/settings'),
+            child: SideNav(
+              currentRoute: '/settings',
+              backgroundColor: shellBackground,
+            ),
           ),
           // Settings content
           const Expanded(

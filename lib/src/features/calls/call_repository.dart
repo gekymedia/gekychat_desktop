@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../core/api_service.dart';
+import '../../services/product_analytics_service.dart';
 import 'call_phone_guard.dart';
 import 'models.dart';
 
@@ -41,7 +42,18 @@ class CallRepository {
       if (conversationId != null) data['conversation_id'] = conversationId;
 
       final response = await _api.post('/calls/start', data: data);
-      return response.data;
+      final result = response.data as Map<String, dynamic>;
+      if (result['status'] == 'success') {
+        ProductAnalytics.action(
+          'call_started',
+          feature: 'calls',
+          properties: {
+            'type': type,
+            if (result['session_id'] != null) 'session_id': result['session_id'],
+          },
+        );
+      }
+      return result;
     } on DioException catch (e) {
       final status = e.response?.statusCode;
       final body = e.response?.data;

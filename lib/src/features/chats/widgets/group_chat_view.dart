@@ -35,7 +35,7 @@ import '../../../core/services/taskbar_badge_service.dart';
 import '../../../core/providers/connectivity_provider.dart';
 import '../forward_message_screen.dart';
 import 'message_bubble.dart';
-import 'emoji_picker_widget.dart';
+import 'desktop_emoji_picker_popup.dart';
 import 'desktop_media_preview_dialog.dart';
 import 'desktop_voice_recording.dart';
 import '../../../theme/app_theme.dart';
@@ -55,14 +55,23 @@ import 'text_formatting_toolbar.dart';
 import '../../../utils/text_formatting.dart';
 import '../../../widgets/skeleton_loader.dart';
 import '../../../widgets/gekychat_doodle_background.dart';
+import '../../../widgets/desktop_shell_colors.dart';
+import '../../../widgets/desktop_typography.dart';
+import '../../../widgets/desktop_voice_permission.dart';
+import '../../../widgets/desktop_microphone_permission_dialog.dart';
 import '../../realtime/pusher_service.dart';
 import '../../../utils/mention_utils.dart';
 import '../../../utils/clipboard_media_helper.dart';
 import 'chat_attachment_menu_sheet.dart';
 import 'poll_composer_sheet.dart';
+import 'desktop_composer_trailing_action.dart';
+import 'desktop_message_composer_pill.dart';
+import 'desktop_chat_metrics.dart';
+import 'date_divider.dart';
 import '../../embedded_apps/embedded_app_launcher.dart';
 import '../../sika/sika_send_coins_sheet.dart';
 import '../../../utils/snackbar_helper.dart';
+import '../../../widgets/batch_selection_mode.dart';
 import 'chat_attachment_thumb.dart';
 
 class _SendMessageIntent extends Intent {
@@ -76,6 +85,11 @@ class _NewLineIntent extends Intent {
 class _PasteIntent extends Intent {
   const _PasteIntent();
 }
+
+bool _sameMessageDay(DateTime earlier, DateTime later) =>
+    earlier.year == later.year &&
+    earlier.month == later.month &&
+    earlier.day == later.day;
 
 class GroupChatView extends ConsumerStatefulWidget {
   final int groupId;
@@ -111,7 +125,6 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
   bool _isLoading = false;
   bool _isSending = false;
   double _uploadProgress = 0.0;
-  bool _showEmojiPicker = false;
   bool _isTyping = false;
   int? _currentUserId;
   bool _hasMoreOlder = true;
@@ -146,6 +159,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
   
   // Drag and drop
   bool _isDragging = false;
+  bool _joiningChannel = false;
 
   void _setDragging(bool dragging) {
     if (_isDragging == dragging) return;
@@ -156,6 +170,8 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
   
   // Text formatting
   bool _showFormattingToolbar = false;
+  bool _composerShowSend = false;
+  final _messageSelection = BatchSelectionManager<int>();
 
   @override
   void initState() {
@@ -172,10 +188,42 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
     });
     // Listen for selection changes
     _messageController.addListener(_checkTextSelection);
+    _messageController.addListener(_syncComposerTrailing);
+    _messageSelection.addListener(_onMessageSelectionChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       unawaited(ref.read(groupInfoProvider(widget.groupId).future));
     });
+  }
+
+  void _onMessageSelectionChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _enterMessageSelection(Message message) {
+    _messageSelection.enterSelectionMode();
+    _messageSelection.toggleSelection(message.id);
+  }
+
+  Future<void> _pinMessage(Message message, bool pin) async {
+    try {
+      final chatRepo = ref.read(chatRepositoryProvider);
+      if (pin) {
+        await chatRepo.pinMessageInGroup(widget.groupId, message.id);
+        if (mounted) {
+          context.showSuccessToast('Message pinned');
+        }
+      } else {
+        await chatRepo.unpinMessageInGroup(widget.groupId);
+        if (mounted) {
+          context.showSuccessToast('Message unpinned');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        context.showErrorToast('Failed to pin message: $e');
+      }
+    }
   }
 
   static bool _contactNameMapsEqual(Map<int, String> a, Map<int, String> b) {
@@ -720,7 +768,10 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
     _groupTypingHideTimer?.cancel();
     _groupRecordingHideTimer?.cancel();
     _markReadDebounce?.cancel();
+    _messageSelection.removeListener(_onMessageSelectionChanged);
+    _messageSelection.dispose();
     _pusherListeners.removeAll(_pusherService);
+    _messageController.removeListener(_syncComposerTrailing);
     _messageController.dispose();
     _audioRecorder.dispose();
     _audioPlayer.dispose();
@@ -776,10 +827,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
       setState(() {
         _isLoading = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load messages: $e')),
-      );
-    }
+            context.showErrorToast('Failed to load messages: $e');    }
   }
 
   Future<void> _applyPostLoadSidebarEffects() async {
@@ -821,16 +869,30 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
   void _applyRealtimeMessageModel(Message message, {String? clientId}) {
     if (!mounted) return;
     setState(() {
-      final existingIdx = _messages.indexWhere((m) =>
-          m.id == message.id ||
-          (clientId != null &&
-              clientId.isNotEmpty &&
-              m.clientId == clientId));
+      final effectiveClientId =
+          (clientId != null && clientId.isNotEmpty) ? clientId : message.clientId;
+      var existingIdx = _messages.indexWhere((m) =>
+          (message.id > 0 && m.id == message.id) ||
+          (effectiveClientId != null &&
+              effectiveClientId.isNotEmpty &&
+              m.clientId != null &&
+              m.clientId == effectiveClientId));
+      if (existingIdx < 0 &&
+          message.id > 0 &&
+          _currentUserId != null &&
+          message.senderId == _currentUserId) {
+        existingIdx = _messages.indexWhere((m) =>
+            m.id == 0 &&
+            m.status == 'sending' &&
+            m.senderId == _currentUserId &&
+            (m.body ?? '') == (message.body ?? ''));
+      }
       if (existingIdx == -1) {
         _messages.add(message);
       } else {
         _messages[existingIdx] = message;
       }
+      _dedupeMessagesInPlace();
     });
     _scrollToBottom();
     unawaited(
@@ -839,6 +901,22 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
       ]),
     );
     unawaited(_refreshContactNames());
+  }
+
+  void _dedupeMessagesInPlace() {
+    if (_messages.length < 2) return;
+    final seen = <int>{};
+    final kept = <Message>[];
+    for (final m in _messages.reversed) {
+      if (m.id > 0) {
+        if (seen.contains(m.id)) continue;
+        seen.add(m.id);
+      }
+      kept.add(m);
+    }
+    _messages
+      ..clear()
+      ..addAll(kept.reversed);
   }
 
   Future<void> _refreshAfterBackgroundSync() async {
@@ -1069,14 +1147,60 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
     });
   }
 
+  List<MessageAttachment> _messageAttachmentsFromFiles(List<File> files) {
+    return files.map<MessageAttachment>((file) {
+      final path = file.path.toLowerCase();
+      final isImage = ClipboardMediaHelper.isImagePath(path);
+      final isVideo = ClipboardMediaHelper.isVideoPath(path);
+      final isAudio = path.endsWith('.m4a') ||
+          path.endsWith('.aac') ||
+          path.endsWith('.mp3') ||
+          path.endsWith('.wav') ||
+          path.endsWith('.ogg');
+      return MessageAttachment(
+        id: 0,
+        url: file.path,
+        mimeType: isImage
+            ? 'image/jpeg'
+            : isVideo
+                ? 'video/mp4'
+                : isAudio
+                    ? 'audio/mpeg'
+                    : 'application/octet-stream',
+        isImage: isImage,
+        isVideo: isVideo,
+        isAudio: isAudio,
+        isDocument: !isImage && !isVideo && !isAudio,
+      );
+    }).toList();
+  }
+
+  void _mergeSentMessage(Message serverMessage, {required String clientUuid}) {
+    final idx = _messages.indexWhere(
+      (m) =>
+          (m.clientId != null && m.clientId == clientUuid) ||
+          (serverMessage.id > 0 && m.id == serverMessage.id),
+    );
+    if (idx >= 0) {
+      _messages[idx] = serverMessage;
+    } else if (serverMessage.id > 0 &&
+        !_messages.any((m) => m.id == serverMessage.id)) {
+      _messages.add(serverMessage);
+    }
+    _dedupeMessagesInPlace();
+    _messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+  }
+
+  void _markOptimisticSendFailed(String clientUuid) {
+    final idx = _messages.indexWhere((m) => m.clientId == clientUuid);
+    if (idx >= 0) {
+      _messages[idx] = _messages[idx].copyWith(status: 'failed');
+    }
+  }
+
   Future<void> _sendMessage() async {
     final message = _messageController.text.trim();
     if (message.isEmpty && _attachments.isEmpty) return;
-
-    setState(() {
-      _isSending = true;
-      _uploadProgress = 0.0;
-    });
 
     final isOnline = ref.read(connectivityProvider);
     final messageQueue = ref.read(messageQueueServiceProvider);
@@ -1149,24 +1273,28 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
         return;
       }
 
-      final chatRepo = ref.read(chatRepositoryProvider);
-      final newMessage = await chatRepo.sendMessageToGroup(
+      const uuid = Uuid();
+      final clientUuid = uuid.v4();
+      final replyToId = _replyingToId;
+      final attachmentsCopy = List<File>.from(_attachments);
+      final viewOnce = _attachmentsViewOnce && _attachments.isNotEmpty;
+
+      final optimisticMessage = Message(
+        id: 0,
+        clientId: clientUuid,
         groupId: widget.groupId,
-        body: message.isEmpty ? null : message,
-        attachments: _attachments.isNotEmpty ? _attachments : null,
-        replyToId: _replyingToId,
-        viewOnce: _attachmentsViewOnce && _attachments.isNotEmpty,
-        onProgress: (progress) {
-          if (mounted) {
-            setState(() {
-              _uploadProgress = progress;
-            });
-          }
-        },
+        senderId: _currentUserId ?? 0,
+        body: message,
+        createdAt: DateTime.now(),
+        replyToId: replyToId,
+        attachments: _messageAttachmentsFromFiles(attachmentsCopy),
+        reactions: const [],
+        status: 'sending',
+        isViewOnce: viewOnce,
       );
 
       setState(() {
-        _messages.add(newMessage);
+        _messages.add(optimisticMessage);
         _messageController.clear();
         _attachments.clear();
         _attachmentsViewOnce = false;
@@ -1177,27 +1305,40 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
       unawaited(bumpGroupInSidebar(
         ref,
         groupId: widget.groupId,
-        message: newMessage,
+        message: optimisticMessage,
       ));
+
+      final chatRepo = ref.read(chatRepositoryProvider);
+      try {
+        final newMessage = await chatRepo.sendMessageToGroup(
+          groupId: widget.groupId,
+          body: message.isEmpty ? null : message,
+          attachments: attachmentsCopy.isNotEmpty ? attachmentsCopy : null,
+          replyToId: replyToId,
+          viewOnce: viewOnce,
+          clientUuid: clientUuid,
+        );
+
+        if (!mounted) return;
+        setState(() => _mergeSentMessage(newMessage, clientUuid: clientUuid));
+        _scrollToBottom();
+        unawaited(bumpGroupInSidebar(
+          ref,
+          groupId: widget.groupId,
+          message: newMessage,
+        ));
+      } catch (e) {
+        debugPrint('Error sending message: $e');
+        if (mounted) {
+          setState(() => _markOptimisticSendFailed(clientUuid));
+          final errorMessage = e.toString().replaceAll('Exception: ', '');
+                    context.showErrorToast('Failed to send message: $errorMessage');        }
+      }
     } catch (e) {
       debugPrint('Error sending message: $e');
       if (mounted) {
         final errorMessage = e.toString().replaceAll('Exception: ', '');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to send message: $errorMessage'),
-            duration: const Duration(seconds: 5),
-            action: SnackBarAction(
-              label: 'Dismiss',
-              onPressed: () {},
-            ),
-          ),
-        );
-      }
-    } finally {
-      setState(() {
-        _isSending = false;
-      });
+                context.showErrorToast('Failed to send message: $errorMessage');      }
     }
   }
 
@@ -1237,11 +1378,6 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
 
   Future<void> _sendMediaPreviewResult(DesktopMediaPreviewResult result) async {
     if (result.files.isEmpty) return;
-
-    setState(() {
-      _isSending = true;
-      _uploadProgress = 0.0;
-    });
 
     final isOnline = ref.read(connectivityProvider);
     final messageQueue = ref.read(messageQueueServiceProvider);
@@ -1307,29 +1443,55 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
           return;
         }
 
-        final newMessage = await chatRepo.sendMessageToGroup(
+        const uuid = Uuid();
+        final clientUuid = uuid.v4();
+        final optimisticMessage = Message(
+          id: 0,
+          clientId: clientUuid,
           groupId: widget.groupId,
-          body: body,
-          attachments: files,
+          senderId: _currentUserId ?? 0,
+          body: body ?? '',
+          createdAt: DateTime.now(),
           replyToId: attachReply ? replyToId : null,
-          viewOnce: viewOnce,
-          onProgress: (progress) {
-            if (mounted) setState(() => _uploadProgress = progress);
-          },
+          attachments: _messageAttachmentsFromFiles(files),
+          reactions: const [],
+          status: 'sending',
+          isViewOnce: viewOnce,
         );
 
         if (!mounted) return;
-        setState(() {
-          if (!_messages.any((m) => m.id == newMessage.id)) {
-            _messages.add(newMessage);
-          }
-        });
+        setState(() => _messages.add(optimisticMessage));
         _scrollToBottom();
         unawaited(bumpGroupInSidebar(
           ref,
           groupId: widget.groupId,
-          message: newMessage,
+          message: optimisticMessage,
         ));
+
+        try {
+          final newMessage = await chatRepo.sendMessageToGroup(
+            groupId: widget.groupId,
+            body: body,
+            attachments: files,
+            replyToId: attachReply ? replyToId : null,
+            viewOnce: viewOnce,
+            clientUuid: clientUuid,
+          );
+
+          if (!mounted) return;
+          setState(() => _mergeSentMessage(newMessage, clientUuid: clientUuid));
+          _scrollToBottom();
+          unawaited(bumpGroupInSidebar(
+            ref,
+            groupId: widget.groupId,
+            message: newMessage,
+          ));
+        } catch (e) {
+          if (mounted) {
+            setState(() => _markOptimisticSendFailed(clientUuid));
+          }
+          rethrow;
+        }
       }
 
       if (result.sendAsAlbum && result.files.length > 1) {
@@ -1360,31 +1522,12 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
       });
 
       if (!isOnline && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Messages queued. Will be sent when you\'re online.'),
-            duration: Duration(seconds: 2),
-          ),
-        );
-      }
+                context.showSuccessToast('Messages queued. Will be sent when you\'re online.');      }
     } catch (e) {
       debugPrint('Error sending media: $e');
       if (mounted) {
         final errorMessage = e.toString().replaceAll('Exception: ', '');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to send media: $errorMessage'),
-            duration: const Duration(seconds: 5),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSending = false;
-          _uploadProgress = 0.0;
-        });
-      }
+                context.showErrorToast('Failed to send media: $errorMessage');      }
     }
   }
 
@@ -1419,6 +1562,8 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
               .map((f) => File(f.path!))
               .toList(),
         );
+        _composerShowSend =
+            _messageController.text.trim().isNotEmpty || _attachments.isNotEmpty;
       });
     }
   }
@@ -1454,11 +1599,13 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
               .map((f) => File(f.path!))
               .toList(),
         );
+        _composerShowSend =
+            _messageController.text.trim().isNotEmpty || _attachments.isNotEmpty;
       });
     }
   }
 
-  void _showAttachmentMenu() {
+  void _showAttachmentMenu(BuildContext anchorContext) {
     ChatAttachmentMenuSheet.show(
       context,
       ref,
@@ -1473,6 +1620,31 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
         onBlackTask: _openBlackTask,
         onSika: _openSikaWallet,
       ),
+      anchorContext: anchorContext,
+    );
+  }
+
+  void _showEmojiPickerMenu(BuildContext anchorContext) {
+    DesktopEmojiPickerPopup.show(
+      context,
+      anchorContext: anchorContext,
+      onEmojiSelected: (emoji) {
+        final currentText = _messageController.text;
+        _messageController.text = currentText + emoji;
+        _messageController.selection = TextSelection.fromPosition(
+          TextPosition(offset: _messageController.text.length),
+        );
+      },
+      onBackspace: () {
+        final currentText = _messageController.text;
+        if (currentText.isNotEmpty) {
+          _messageController.text =
+              currentText.substring(0, currentText.length - 1);
+          _messageController.selection = TextSelection.fromPosition(
+            TextPosition(offset: _messageController.text.length),
+          );
+        }
+      },
     );
   }
 
@@ -1576,23 +1748,23 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
   }
 
   Future<void> _recordAudio() async {
-    // Request microphone permission
-    final status = await Permission.microphone.request();
-    if (!status.isGranted) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Microphone permission is required to record audio')),
-        );
-      }
+    if (_isRecording) {
+      await _stopRecording();
       return;
     }
 
-    if (_isRecording) {
-      // Stop recording
-      await _stopRecording();
-    } else {
-      // Start recording
+    final allowed = await ensureDesktopMicrophoneForRecording(context);
+    if (!allowed || !mounted) return;
+
+    try {
       await _startRecording();
+    } catch (e) {
+      if (!mounted) return;
+      if (desktopMicrophoneNotFoundError(e)) {
+        await showDesktopMicrophoneNotFoundDialog(context);
+      } else {
+        context.showErrorToast('Failed to start recording: $e');
+      }
     }
   }
 
@@ -1638,16 +1810,16 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
         _updateRecordingDuration();
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Microphone permission denied')),
-          );
+          await showDesktopMicrophoneNotFoundDialog(context);
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to start recording: $e')),
-        );
+        if (desktopMicrophoneNotFoundError(e)) {
+          await showDesktopMicrophoneNotFoundDialog(context);
+        } else {
+          context.showErrorToast('Failed to start recording: $e');
+        }
       }
     }
   }
@@ -1667,10 +1839,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
         final file = File(audioPath);
         if (!await file.exists() || await file.length() < 512) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Recording was too short or empty. Try again.')),
-            );
-          }
+                        context.showInfoToast('Recording was too short or empty. Try again.');          }
           return;
         }
 
@@ -1696,35 +1865,58 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
       _recordingDuration = Duration.zero;
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to stop recording: $e')),
-        );
-      }
+                context.showErrorToast('Failed to stop recording: $e');      }
     }
   }
 
   Future<void> _sendVoiceMessage(String audioPath) async {
+    const uuid = Uuid();
+    final clientUuid = uuid.v4();
+    final replyToId = _replyingToId;
+    final optimisticMessage = Message(
+      id: 0,
+      clientId: clientUuid,
+      groupId: widget.groupId,
+      senderId: _currentUserId ?? 0,
+      body: '',
+      createdAt: DateTime.now(),
+      status: 'sending',
+      replyToId: replyToId,
+      attachments: [
+        MessageAttachment(
+          id: 0,
+          url: audioPath,
+          mimeType: 'audio/mpeg',
+          isImage: false,
+          isVideo: false,
+          isAudio: true,
+          isDocument: false,
+        ),
+      ],
+      reactions: const [],
+    );
+
     setState(() {
-      _isSending = true;
+      _messages.add(optimisticMessage);
+      _replyingToId = null;
+      _replyingToMessage = null;
     });
+    _scrollToBottom();
 
     try {
       final chatRepo = ref.read(chatRepositoryProvider);
-      // Send voice message with no compression
       final newMessage = await chatRepo.sendMessageToGroup(
         groupId: widget.groupId,
         body: null,
-        replyToId: _replyingToId,
+        replyToId: replyToId,
         attachments: [File(audioPath)],
-        skipCompression: true, // Voice messages shouldn't be compressed
+        skipCompression: true,
         voiceNote: true,
+        clientUuid: clientUuid,
       );
       
-      setState(() {
-        _messages.add(newMessage);
-        _replyingToId = null;
-        _replyingToMessage = null;
-      });
+      if (!mounted) return;
+      setState(() => _mergeSentMessage(newMessage, clientUuid: clientUuid));
       _scrollToBottom();
       unawaited(bumpGroupInSidebar(
         ref,
@@ -1734,14 +1926,8 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
     } catch (e) {
       debugPrint('Error sending voice message: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to send voice message: $e')),
-        );
-      }
-    } finally {
-      setState(() {
-        _isSending = false;
-      });
+        setState(() => _markOptimisticSendFailed(clientUuid));
+                context.showErrorToast('Failed to send voice message: $e');      }
     }
   }
 
@@ -1856,10 +2042,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
     } catch (e) {
       if (mounted) {
         if (!showCallStartFailureIfAny(context, e)) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to start call: $e')),
-          );
-        }
+                    context.showErrorToast('Failed to start call: $e');        }
       }
     }
   }
@@ -1869,10 +2052,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Location services are disabled. Please enable location services.')),
-        );
-      }
+                context.showInfoToast('Location services are disabled. Please enable location services.');      }
       return;
     }
 
@@ -1881,20 +2061,14 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Location permissions are denied')),
-          );
-        }
+                    context.showErrorToast('Location permissions are denied');        }
         return;
       }
     }
 
     if (permission == LocationPermission.deniedForever) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Location permissions are permanently denied. Please enable them in settings.')),
-        );
-      }
+                context.showErrorToast('Location permissions are permanently denied. Please enable them in settings.');      }
       return;
     }
 
@@ -1972,10 +2146,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
     } catch (e) {
       if (mounted) {
         Navigator.pop(context); // Close loading dialog if still open
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to get location: $e')),
-        );
-      }
+                context.showErrorToast('Failed to get location: $e');      }
     } finally {
       if (mounted) {
         setState(() {
@@ -2076,10 +2247,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
         _scrollToBottom();
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to share contact: $e')),
-          );
-        }
+                    context.showErrorToast('Failed to share contact: $e');        }
       } finally {
         setState(() {
           _isSending = false;
@@ -2094,6 +2262,8 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
       if (_attachments.isEmpty) {
         _attachmentsViewOnce = false;
       }
+      _composerShowSend =
+          _messageController.text.trim().isNotEmpty || _attachments.isNotEmpty;
     });
   }
 
@@ -2256,10 +2426,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to reply privately: $e')),
-        );
-      }
+                context.showErrorToast('Failed to reply privately: $e');      }
     }
   }
 
@@ -2300,20 +2467,12 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
         });
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to react: $e')),
-        );
-      }
+                context.showErrorToast('Failed to react: $e');      }
     }
   }
 
   Future<void> _forwardMessage(Message message) async {
-    await Navigator.push<void>(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ForwardMessageScreen(message: message),
-      ),
-    );
+    await ForwardMessageScreen.showModal(context, message);
   }
 
   Future<void> _markViewOnceOpened(Message message) async {
@@ -2411,20 +2570,12 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
       });
       
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(deleteForEveryone 
+                context.showSuccessToast(deleteForEveryone 
               ? 'Message deleted for everyone'
-              : 'Message deleted'),
-          ),
-        );
-      }
+              : 'Message deleted');      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to delete message: $e')),
-        );
-      }
+                context.showErrorToast('Failed to delete message: $e');      }
     }
   }
 
@@ -2439,16 +2590,19 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
         }
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Message updated')),
-        );
-      }
+                context.showSuccessToast('Message updated');      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to edit message: $e')),
-        );
-      }
+                context.showErrorToast('Failed to edit message: $e');      }
+    }
+  }
+
+  void _syncComposerTrailing() {
+    if (!mounted) return;
+    final next =
+        _messageController.text.trim().isNotEmpty || _attachments.isNotEmpty;
+    if (next != _composerShowSend) {
+      setState(() => _composerShowSend = next);
     }
   }
 
@@ -2486,6 +2640,86 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
     });
   }
 
+  Widget _buildAdminOnlyMessagingNotice(BuildContext context, bool isDark) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF202C33) : Colors.white,
+        border: Border(
+          top: BorderSide(
+            color: isDark ? const Color(0xFF2A3942) : const Color(0xFFD1D7DB),
+          ),
+        ),
+      ),
+      child: Text(
+        'Only Admins can send messages to group.',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontSize: 13,
+          color: isDark ? Colors.white70 : Colors.grey[700],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildJoinChannelBar(BuildContext context, bool isDark) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF202C33) : Colors.white,
+        border: Border(
+          top: BorderSide(
+            color: isDark ? const Color(0xFF2A3942) : const Color(0xFFD1D7DB),
+          ),
+        ),
+      ),
+      child: FilledButton(
+        onPressed: _joiningChannel ? null : _followChannelFromPreview,
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(double.infinity, 44),
+          backgroundColor: const Color(0xFF008069),
+        ),
+        child: _joiningChannel
+            ? const SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : const Text(
+                'Join Channel',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+              ),
+      ),
+    );
+  }
+
+  Future<void> _followChannelFromPreview() async {
+    if (_joiningChannel) return;
+    setState(() => _joiningChannel = true);
+    try {
+      final api = ref.read(apiServiceProvider);
+      await api.followChannel(widget.groupId);
+      ref.invalidate(groupInfoProvider(widget.groupId));
+      _refreshGroupsSidebar();
+      if (mounted) {
+                context.showInfoToast('You joined the channel');      }
+    } catch (e) {
+      if (mounted) {
+                context.showErrorToast('Could not join channel: $e');      }
+    } finally {
+      if (mounted) setState(() => _joiningChannel = false);
+    }
+  }
+
+  void _refreshGroupsSidebar() {
+    unawaited(ref.read(optimizedGroupsProvider.notifier).refreshSilently());
+  }
+
   Widget _buildGroupAvatar() {
     if (widget.groupAvatarUrl == null || widget.groupAvatarUrl!.isEmpty) {
       return const CircleAvatar(
@@ -2516,10 +2750,23 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final groupAsync = ref.watch(groupInfoProvider(widget.groupId));
+    final groupData = groupAsync.valueOrNull;
     final isChannel = groupAsync.maybeWhen(
       data: (group) => group['type'] == 'channel',
       orElse: () => false,
     );
+    final canSendMessages = groupAsync.maybeWhen(
+      data: (group) {
+        final canManage =
+            group['is_owner'] == true || group['is_admin'] == true;
+        final channel = group['type'] == 'channel';
+        final locked = group['message_lock'] == true;
+        return canManage || (!channel && !locked);
+      },
+      orElse: () => true,
+    );
+    final isChannelGuest =
+        isChannel && groupData?['is_member'] == false;
     final sidebarGroupTyping =
         ref.watch(groupTypingStatusProvider)[widget.groupId] ?? false;
     final memberSubtitle = isChannel
@@ -2534,7 +2781,10 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
       if (next == null || next.groupId != widget.groupId) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        _applyRealtimeMessageModel(next.message);
+        _applyRealtimeMessageModel(
+          next.message,
+          clientId: next.message.clientId,
+        );
         if (_currentUserId != null &&
             next.message.senderId != null &&
             next.message.senderId != _currentUserId) {
@@ -2574,7 +2824,55 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
               ),
             ),
           ),
-          child: Row(
+          child: _messageSelection.isSelectionMode
+              ? Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      color: isDark ? Colors.white70 : Colors.black87,
+                      onPressed: _messageSelection.exitSelectionMode,
+                    ),
+                    Expanded(
+                      child: Text(
+                        '${_messageSelection.selectedCount} selected',
+                        style: TextStyle(
+                          fontFamily: DesktopTypography.fontFamily,
+                          color: isDark ? Colors.white : Colors.black,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
+                    if (_messageSelection.selectedCount == 1)
+                      IconButton(
+                        icon: const Icon(Icons.push_pin_outlined),
+                        color: isDark ? Colors.white70 : Colors.black87,
+                        tooltip: 'Pin',
+                        onPressed: () {
+                          final id = _messageSelection.selectedItems.first;
+                          final msg = _messages.firstWhere((m) => m.id == id);
+                          unawaited(_pinMessage(msg, true));
+                          _messageSelection.exitSelectionMode();
+                        },
+                      ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline),
+                      color: Colors.red,
+                      tooltip: 'Delete',
+                      onPressed: () {
+                        final ids = _messageSelection.selectedItems.toSet();
+                        final toDelete = _messages
+                            .where((m) => ids.contains(m.id))
+                            .toList();
+                        _messageSelection.exitSelectionMode();
+                        for (final msg in toDelete) {
+                          unawaited(_deleteMessage(msg));
+                        }
+                      },
+                    ),
+                  ],
+                )
+              : Row(
             children: [
               Expanded(
                 child: InkWell(
@@ -2595,7 +2893,10 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                             children: [
                               Text(
                                 widget.groupName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
+                                  fontFamily: DesktopTypography.fontFamily,
                                   color: isDark ? Colors.white : Colors.black,
                                   fontWeight: FontWeight.w600,
                                   fontSize: 16,
@@ -2603,6 +2904,8 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                               ),
                               Text(
                                 headerSubtitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                   color: headerSubtitleIsActivity
                                       ? const Color(0xFF008069)
@@ -2672,26 +2975,17 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                         // For now, mute for 24 hours
                         await chatRepo.muteGroup(widget.groupId, minutes: 1440);
                         if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Group muted for 24 hours')),
-                          );
-                        }
+                                                    context.showSuccessToast('Group muted for 24 hours');                        }
                       } catch (e) {
                         if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Failed to mute group: $e')),
-                          );
-                        }
+                                                    context.showErrorToast('Failed to mute group: $e');                        }
                       }
                       break;
                     case 'archive':
                       // Groups don't have archive endpoints - only conversations do
                       // Remove this option or show info message
                       if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Group archiving is not available. You can leave the group instead.')),
-                        );
-                      }
+                                                context.showErrorToast('Group archiving is not available. You can leave the group instead.');                      }
                       break;
                   }
                 },
@@ -2748,6 +3042,15 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
           child: Stack(
             fit: StackFit.expand,
             children: [
+              if (!isDark)
+                Positioned.fill(
+                  child: ColoredBox(
+                    color: DesktopShellColors.chatThreadBackground(
+                      context,
+                      isDark: false,
+                    ),
+                  ),
+                ),
               GekyChatDoodleBackground(isDark: isDark),
               Positioned.fill(
                 child: DropTarget(
@@ -2760,6 +3063,9 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                         .toList(),
                   );
                   _isDragging = false;
+                  _composerShowSend =
+                      _messageController.text.trim().isNotEmpty ||
+                          _attachments.isNotEmpty;
                 });
               },
               onDragEntered: (detail) => _setDragging(true),
@@ -2817,11 +3123,16 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                         : ScrollablePositionedList.builder(
                             itemScrollController: _itemScrollController,
                             itemPositionsListener: _itemPositionsListener,
-                            padding: const EdgeInsets.all(16),
+                            padding: DesktopChatMetrics.messageListPadding,
                             physics: const AlwaysScrollableScrollPhysics(),
                             itemCount: _messages.length,
                             itemBuilder: (context, index) {
                               final message = _messages[index];
+                              final showDateDivider = index == 0 ||
+                                  !_sameMessageDay(
+                                    _messages[index - 1].createdAt,
+                                    message.createdAt,
+                                  );
                               // Get group info to check if it's a channel and if sender is admin
                               final group = groupAsync.value;
                               final isChannel = group?['type'] == 'channel';
@@ -2832,7 +3143,12 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                               final senderIsAdmin = admins.contains(message.senderId);
                               final channelName = isChannel ? (group?['name'] as String?) : null;
                               
-                              return MessageBubble(
+                              return Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (showDateDivider)
+                                    DateDivider(date: message.createdAt),
+                                  MessageBubble(
                                 key: ValueKey(
                                   message.id > 0
                                       ? 'group-msg-${widget.groupId}-${message.id}'
@@ -2841,6 +3157,11 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                                 message: message,
                                 currentUserId: _currentUserId ?? 0,
                                 allMessages: _messages,
+                                previousMessage:
+                                    index > 0 ? _messages[index - 1] : null,
+                                nextMessage: index < _messages.length - 1
+                                    ? _messages[index + 1]
+                                    : null,
                                 isGroupMessage: true,
                                 contactNames: _contactNames,
                                 onReply: () => _setReply(message),
@@ -2859,10 +3180,18 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                                 onForwardToMessage: _forwardMessage,
                                 onDeleteMessage: _deleteMessage,
                                 onEdit: (newBody) => _editMessage(message, newBody),
+                                onPin: (pin) => _pinMessage(message, pin),
+                                isSelectionMode: _messageSelection.isSelectionMode,
+                                isSelected: _messageSelection.isSelected(message.id),
+                                onSelectMode: () => _enterMessageSelection(message),
+                                onSelectionToggle: () =>
+                                    _messageSelection.toggleSelection(message.id),
                                 isChannel: isChannel,
                                 channelName: channelName,
                                 senderIsAdmin: senderIsAdmin,
                                 onViewOnceOpened: (msg) => _markViewOnceOpened(msg),
+                              ),
+                                ],
                               );
                             },
                           ),
@@ -2916,7 +3245,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
             ),
           ),
 
-        if (_replyingToMessage != null)
+        if (_replyingToMessage != null && canSendMessages)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
@@ -2973,6 +3302,13 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
             ),
           ),
 
+        if (isChannelGuest)
+          _buildJoinChannelBar(context, isDark)
+        else if (!canSendMessages && isChannel)
+          const SizedBox.shrink()
+        else if (!canSendMessages)
+          _buildAdminOnlyMessagingNotice(context, isDark)
+        else ...[
         // Message Input
         if (_isRecording)
           DesktopVoiceRecordingBar(
@@ -2982,40 +3318,16 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
             onDone: _stopRecording,
           ),
         Container(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF202C33) : Colors.white,
-            border: Border(
-              top: BorderSide(
-                color: isDark ? const Color(0xFF2A3942) : const Color(0xFFD1D7DB),
-                width: 1,
-              ),
-            ),
+            color: isDark
+                ? const Color(0xFF202C33).withValues(alpha: 0.92)
+                : DesktopShellColors.chatThreadBackground(context, isDark: false)
+                    .withValues(alpha: 0.98),
           ),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              IconButton(
-                icon: Icon(Icons.emoji_emotions_outlined,
-                    color: isDark ? Colors.white70 : Colors.grey[600]),
-                onPressed: () {
-                  setState(() {
-                    _showEmojiPicker = !_showEmojiPicker;
-                  });
-                },
-              ),
-              IconButton(
-                icon: Icon(_isRecording ? Icons.mic : Icons.mic_none_outlined,
-                    color: _isRecording
-                        ? Colors.red
-                        : (isDark ? Colors.white70 : Colors.grey[600])),
-                onPressed: _isRecording ? _stopRecording : _recordAudio,
-                tooltip: _isRecording ? 'Finish recording' : 'Record voice message',
-              ),
-              IconButton(
-                icon: Icon(Icons.attach_file, color: isDark ? Colors.white70 : Colors.grey[600]),
-                onPressed: _showAttachmentMenu,
-                tooltip: 'Attach',
-              ),
               Expanded(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -3051,10 +3363,9 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                           ),
                         ),
                       ),
-                    // Formatting toolbar (shown when text is selected)
                     if (_showFormattingToolbar)
                       Container(
-                        margin: const EdgeInsets.only(bottom: 4),
+                        margin: const EdgeInsets.only(bottom: 6),
                         child: TextFormattingToolbar(
                           onFormat: (formatType) {
                             _applyTextFormatting(formatType);
@@ -3062,181 +3373,117 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                           onClose: () {
                             setState(() {
                               _showFormattingToolbar = false;
-                              // Clear selection
-                              _messageController.selection = TextSelection.collapsed(
-                                offset: _messageController.selection.baseOffset,
+                              _messageController.selection =
+                                  TextSelection.collapsed(
+                                offset:
+                                    _messageController.selection.baseOffset,
                               );
                             });
                           },
                         ),
                       ),
-                    // Text field
-                    SelectionArea(
-                      child: Shortcuts(
-                        shortcuts: {
-                          LogicalKeySet(LogicalKeyboardKey.enter):
-                              const _SendMessageIntent(),
-                          LogicalKeySet(
-                            LogicalKeyboardKey.shift,
-                            LogicalKeyboardKey.enter,
-                          ): const _NewLineIntent(),
-                          LogicalKeySet(
-                            LogicalKeyboardKey.control,
-                            LogicalKeyboardKey.keyV,
-                          ): const _PasteIntent(),
-                          LogicalKeySet(
-                            LogicalKeyboardKey.meta,
-                            LogicalKeyboardKey.keyV,
-                          ): const _PasteIntent(),
-                        },
-                        child: Actions(
-                          actions: {
-                            _SendMessageIntent:
-                                CallbackAction<_SendMessageIntent>(
-                              onInvoke: (_) {
-                                if (_messageController.text
-                                    .trim()
-                                    .isNotEmpty) {
-                                  _sendMessage();
-                                }
-                                return null;
-                              },
-                            ),
-                            _NewLineIntent: CallbackAction<_NewLineIntent>(
-                              onInvoke: (_) => null,
-                            ),
-                            _PasteIntent: CallbackAction<_PasteIntent>(
-                              onInvoke: (_) {
-                                unawaited(_handleClipboardPaste());
-                                return null;
-                              },
-                            ),
+                    DesktopMessageComposerPill(
+                      isDark: isDark,
+                      onEmoji: _showEmojiPickerMenu,
+                      onAttach: _showAttachmentMenu,
+                      textField: SelectionArea(
+                        child: Shortcuts(
+                          shortcuts: {
+                            LogicalKeySet(LogicalKeyboardKey.enter):
+                                const _SendMessageIntent(),
+                            LogicalKeySet(
+                              LogicalKeyboardKey.shift,
+                              LogicalKeyboardKey.enter,
+                            ): const _NewLineIntent(),
+                            LogicalKeySet(
+                              LogicalKeyboardKey.control,
+                              LogicalKeyboardKey.keyV,
+                            ): const _PasteIntent(),
+                            LogicalKeySet(
+                              LogicalKeyboardKey.meta,
+                              LogicalKeyboardKey.keyV,
+                            ): const _PasteIntent(),
                           },
-                          child: Focus(
-                            child: TextField(
-                              controller: _messageController,
-                              minLines: 1,
-                              maxLines: 4,
-                              onChanged: (text) {
-                                _broadcastGroupTyping(text.trim().isNotEmpty);
-                              },
-                              style: TextStyle(
-                                  color: isDark ? Colors.white : Colors.black),
-                              decoration: InputDecoration(
-                                hintText:
-                                    'Type a message (Enter to send, Shift+Enter for new line)',
-                                hintStyle: TextStyle(
-                                    color: isDark
-                                        ? Colors.white38
-                                        : Colors.grey[500]),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(24),
-                                  borderSide: BorderSide.none,
-                                ),
-                                filled: true,
-                                fillColor: isDark
-                                    ? const Color(0xFF2A3942)
-                                    : const Color(0xFFF0F2F5),
-                                contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 16, vertical: 8),
+                          child: Actions(
+                            actions: {
+                              _SendMessageIntent:
+                                  CallbackAction<_SendMessageIntent>(
+                                onInvoke: (_) {
+                                  if (_messageController.text
+                                      .trim()
+                                      .isNotEmpty) {
+                                    _sendMessage();
+                                  }
+                                  return null;
+                                },
                               ),
-                              onSubmitted: (_) {
-                                if (_messageController.text
-                                    .trim()
-                                    .isNotEmpty) {
-                                  _sendMessage();
-                                }
-                              },
-                              textInputAction: TextInputAction.newline,
-                              keyboardType: TextInputType.multiline,
-                              onTap: () {
-                                Future.delayed(
-                                    const Duration(milliseconds: 50), () {
-                                  _checkTextSelection();
-                                });
-                              },
+                              _NewLineIntent:
+                                  CallbackAction<_NewLineIntent>(
+                                onInvoke: (_) => null,
+                              ),
+                              _PasteIntent: CallbackAction<_PasteIntent>(
+                                onInvoke: (_) {
+                                  unawaited(_handleClipboardPaste());
+                                  return null;
+                                },
+                              ),
+                            },
+                            child: Focus(
+                              child: TextField(
+                                controller: _messageController,
+                                minLines: 1,
+                                maxLines: 4,
+                                textAlignVertical: TextAlignVertical.center,
+                                onChanged: (text) {
+                                  _broadcastGroupTyping(
+                                      text.trim().isNotEmpty);
+                                },
+                                style: TextStyle(
+                                  fontFamily: DesktopTypography.fontFamily,
+                                  color: isDark
+                                      ? Colors.white
+                                      : Colors.black87,
+                                  fontSize: DesktopTypography.messageBodySize,
+                                ),
+                                decoration:
+                                    DesktopMessageComposerPill.fieldDecoration(
+                                        isDark),
+                                onSubmitted: (_) {
+                                  if (_messageController.text
+                                      .trim()
+                                      .isNotEmpty) {
+                                    _sendMessage();
+                                  }
+                                },
+                                textInputAction: TextInputAction.newline,
+                                keyboardType: TextInputType.multiline,
+                                onTap: () {
+                                  Future.delayed(
+                                    const Duration(milliseconds: 50),
+                                    () => _checkTextSelection(),
+                                  );
+                                },
+                              ),
                             ),
                           ),
                         ),
+                      ),
+                      trailing: DesktopComposerTrailingAction(
+                        showSend: _composerShowSend,
+                        isRecording: _isRecording,
+                        onSend: _sendMessage,
+                        onMicPress: _recordAudio,
+                        isDark: isDark,
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              if (!_isRecording)
-                CircleAvatar(
-                  backgroundColor: const Color(0xFF008069),
-                  child: IconButton(
-                    icon: _isSending
-                        ? SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: _uploadProgress > 0 && _uploadProgress < 1.0
-                                ? Stack(
-                                    alignment: Alignment.center,
-                                    children: [
-                                      CircularProgressIndicator(
-                                        value: _uploadProgress,
-                                        strokeWidth: 2,
-                                        valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
-                                        backgroundColor: Colors.white30,
-                                      ),
-                                      Text(
-                                        '${(_uploadProgress * 100).toInt()}%',
-                                        style: const TextStyle(
-                                          fontSize: 8,
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ],
-                                  )
-                                : const CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                  ),
-                          )
-                        : const Icon(Icons.send, color: Colors.white),
-                    onPressed: _isSending ? null : _sendMessage,
-                  ),
-                ),
             ],
           ),
         ),
 
-        // Emoji Picker
-        if (_showEmojiPicker)
-          Container(
-            height: 250,
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF202C33) : Colors.white,
-              border: Border(
-                top: BorderSide(
-                  color: isDark ? const Color(0xFF2A3942) : const Color(0xFFD1D7DB),
-                  width: 1,
-                ),
-              ),
-            ),
-            child: EmojiPickerWidget(
-              onEmojiSelected: (emoji) {
-                final currentText = _messageController.text;
-                _messageController.text = currentText + emoji;
-                _messageController.selection = TextSelection.fromPosition(
-                  TextPosition(offset: _messageController.text.length),
-                );
-              },
-              onBackspace: () {
-                final currentText = _messageController.text;
-                if (currentText.isNotEmpty) {
-                  _messageController.text = currentText.substring(0, currentText.length - 1);
-                  _messageController.selection = TextSelection.fromPosition(
-                    TextPosition(offset: _messageController.text.length),
-                  );
-                }
-              },
-            ),
-          ),
+        ],
       ],
     ),
     );

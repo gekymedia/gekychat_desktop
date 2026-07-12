@@ -7,9 +7,23 @@ import 'contacts_repository.dart';
 import '../chats/models.dart';
 import '../chats/chat_providers.dart';
 import '../../widgets/skeleton_loader.dart';
+import '../../utils/snackbar_helper.dart';
+import '../../widgets/desktop_center_modal.dart';
 
 class ContactsScreen extends ConsumerStatefulWidget {
-  const ContactsScreen({super.key});
+  final bool forModal;
+
+  const ContactsScreen({super.key, this.forModal = false});
+
+  static Future<void> showModal(BuildContext context) {
+    return showDesktopCenterModal<void>(
+      context: context,
+      title: 'Contacts',
+      maxWidth: 520,
+      maxHeightFraction: 0.85,
+      child: const ContactsScreen(forModal: true),
+    );
+  }
 
   @override
   ConsumerState<ContactsScreen> createState() => _ContactsScreenState();
@@ -82,10 +96,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
         _isLoading = false;
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading contacts: $e')),
-        );
-      }
+                context.showErrorToast('Error loading contacts: $e');      }
     }
   }
 
@@ -104,13 +115,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
       
       if (userId == null) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('User ID not available for this contact'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
+                    context.showErrorToast('User ID not available for this contact');        }
         return;
       }
       
@@ -134,36 +139,24 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
       
       // Navigate back to chats - the conversation will be in the list
       if (context.mounted) {
-        if (context.canPop()) {
+        if (widget.forModal) {
+          Navigator.of(context).pop();
+        } else if (context.canPop()) {
           context.pop();
         } else {
           context.go('/chats');
         }
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Conversation started! Find it in your chats.'),
-            duration: Duration(seconds: 2),
-          ),
-        );
+        context.showInfoToast('Conversation started! Find it in your chats.');
       }
     } catch (error) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to start conversation: $error'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+                context.showErrorToast('Failed to start conversation: $error');      }
     }
   }
 
   Future<void> _inviteContact(BuildContext context, GekyContact contact) async {
     if (contact.phone == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Contact has no phone number')),
-      );
-      return;
+            context.showInfoToast('Contact has no phone number');      return;
     }
 
     final inviteMessage = 'Hi! Join me on GekyChat - a secure messaging app. Download it here: https://gekychat.com';
@@ -205,96 +198,75 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            if (context.canPop()) {
-              context.pop();
-            } else {
-              context.go('/chats');
-            }
-          },
-        ),
-        title: const Text('Contacts'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => _loadContacts(reset: true),
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(8),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: 'Search contacts...',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _searchQuery.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          setState(() {
-                            _searchController.clear();
-                            _searchQuery = '';
-                          });
-                        },
-                      )
-                    : null,
-                border: const OutlineInputBorder(),
-              ),
-              onChanged: (value) {
-                setState(() {
-                  _searchQuery = value.toLowerCase();
-                });
-              },
+    final body = Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(8),
+          child: TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: 'Search contacts...',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: _searchQuery.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        setState(() {
+                          _searchController.clear();
+                          _searchQuery = '';
+                        });
+                      },
+                    )
+                  : null,
+              border: const OutlineInputBorder(),
             ),
+            onChanged: (value) {
+              setState(() {
+                _searchQuery = value.toLowerCase();
+              });
+            },
           ),
-          Expanded(
-            child: _allContacts.isEmpty && _isLoading
-                ? const SkeletonList(
-                    skeletonItem: SkeletonContactItem(),
-                    itemCount: 10,
-                  )
-                : Builder(
-                    builder: (context) {
-                      final filtered = _searchQuery.isEmpty
-                          ? _allContacts
-                          : _allContacts.where((c) {
-                              return c.name.toLowerCase().contains(_searchQuery) ||
-                                  (c.phone ?? '').toLowerCase().contains(_searchQuery);
-                            }).toList();
+        ),
+        Expanded(
+          child: _allContacts.isEmpty && _isLoading
+              ? const SkeletonList(
+                  skeletonItem: SkeletonContactItem(),
+                  itemCount: 10,
+                )
+              : Builder(
+                  builder: (context) {
+                    final filtered = _searchQuery.isEmpty
+                        ? _allContacts
+                        : _allContacts.where((c) {
+                            return c.name.toLowerCase().contains(_searchQuery) ||
+                                (c.phone ?? '').toLowerCase().contains(_searchQuery);
+                          }).toList();
 
-                      if (filtered.isEmpty && !_isLoading) {
-                        return Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                _searchQuery.isEmpty ? Icons.contacts_outlined : Icons.search_off,
-                                size: 80,
-                                color: Colors.grey[400],
+                    if (filtered.isEmpty && !_isLoading) {
+                      return Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              _searchQuery.isEmpty ? Icons.contacts_outlined : Icons.search_off,
+                              size: 80,
+                              color: Colors.grey[400],
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              _searchQuery.isEmpty
+                                  ? 'No contacts yet'
+                                  : 'No contacts found',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w500,
+                                color: isDark ? Colors.white70 : Colors.grey[700],
                               ),
-                              const SizedBox(height: 16),
-                              Text(
-                                _searchQuery.isEmpty 
-                                    ? 'No contacts yet'
-                                    : 'No contacts found',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w500,
-                                  color: isDark ? Colors.white70 : Colors.grey[700],
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                _searchQuery.isEmpty
-                                    ? 'Contacts you add will appear here'
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _searchQuery.isEmpty
+                                  ? 'Contacts you add will appear here'
                                     : 'Try a different search term',
                                 style: TextStyle(
                                   fontSize: 14,
@@ -364,14 +336,41 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                       onTap: contact.isRegistered
                           ? () => _startConversation(context, contact)
                           : () => _inviteContact(context, contact),
-                          );
-                        },
-                      );
-                    },
-                  ),
+                    );
+                  },
+                );
+              },
+            ),
+        ),
+      ],
+    );
+
+    if (widget.forModal) {
+      return body;
+    }
+
+    return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/chats');
+            }
+          },
+        ),
+        title: const Text('Contacts'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () => _loadContacts(reset: true),
           ),
         ],
       ),
+      body: body,
     );
   }
 }

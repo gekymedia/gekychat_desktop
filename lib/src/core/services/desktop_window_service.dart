@@ -5,12 +5,18 @@ import 'package:window_manager/window_manager.dart';
 class DesktopWindowService {
   DesktopWindowService._();
 
-  /// Match the native title bar (min/max/close) to the in-app light/dark theme.
-  static Future<void> syncTitleBarTheme(bool isDark) async {
+  /// Match the native title bar brightness and window backdrop to app chrome.
+  static Future<void> syncTitleBarTheme(
+    bool isDark, {
+    Color? backgroundColor,
+  }) async {
     try {
       await windowManager.setBrightness(
         isDark ? Brightness.dark : Brightness.light,
       );
+      final bg = backgroundColor ??
+          (isDark ? const Color(0xFF0B141A) : const Color(0xFFECE5DD));
+      await windowManager.setBackgroundColor(bg);
     } catch (e) {
       debugPrint('syncTitleBarTheme failed: $e');
     }

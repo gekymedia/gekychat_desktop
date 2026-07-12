@@ -12,6 +12,7 @@ import '../live/live_broadcast_repository.dart';
 import '../live/broadcast_streaming_screen.dart';
 import '../contacts/contact_display_service.dart';
 import '../../utils/phone_formatter.dart';
+import '../../utils/snackbar_helper.dart';
 
 final callLogsProvider = FutureProvider<List<CallLog>>((ref) async {
   final repo = ref.read(callRepositoryProvider);
@@ -172,19 +173,22 @@ class _CallLogItem extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (call.otherUser == null) {
+    final group = call.group;
+    if (!call.isGroupCall && call.otherUser == null) {
       return const SizedBox.shrink();
     }
 
-    final user = call.otherUser!;
+    final user = call.otherUser;
     final displayService = ref.read(contactDisplayServiceProvider);
-    final displayName = displayService.resolve(
-      userId: user.id,
-      phone: user.phone,
-      apiName: user.name,
-    );
-    final formattedPhone = (user.phone != null &&
-            user.phone!.isNotEmpty &&
+    final displayName = group?.name ??
+        displayService.resolve(
+          userId: user?.id,
+          phone: user?.phone,
+          apiName: user?.name ?? 'Unknown',
+        );
+    final avatarUrl = group?.avatarUrl ?? user?.avatarUrl;
+    final formattedPhone = (user?.phone != null &&
+            user!.phone!.isNotEmpty &&
             displayName != user.phone)
         ? PhoneFormatter.format(user.phone)
         : null;
@@ -192,10 +196,10 @@ class _CallLogItem extends ConsumerWidget {
     return ListTile(
       leading: CircleAvatar(
         radius: 28,
-        backgroundImage: user.avatarUrl != null
-            ? CachedNetworkImageProvider(user.avatarUrl!)
+        backgroundImage: avatarUrl != null
+            ? CachedNetworkImageProvider(avatarUrl)
             : null,
-        child: user.avatarUrl == null
+        child: avatarUrl == null
             ? Text(
                 displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
                 style: const TextStyle(fontSize: 20),
@@ -305,10 +309,39 @@ class _CallLogItem extends ConsumerWidget {
   }
 
   Future<void> _initiateCallback(BuildContext context, WidgetRef ref) async {
-    if (call.otherUser == null) return;
+    if (!call.isGroupCall && call.otherUser == null) return;
 
     try {
       final callManager = ref.read(callManagerProvider);
+
+      if (call.isGroupCall && call.groupId != null) {
+        await callManager.startCall(
+          groupId: call.groupId,
+          type: call.type,
+        );
+        final callSession = callManager.currentCall;
+        if (callSession != null && context.mounted) {
+          final roomName = 'call_${callSession.id}';
+          final tokenResult = await ref
+              .read(liveKitTokenServiceProvider)
+              .fetchToken(roomName: roomName, displayName: 'User');
+          if (context.mounted) {
+            await pushLiveKitCallScreenOnRoot(
+              url: tokenResult.url,
+              token: tokenResult.token,
+              roomName: roomName,
+              callId: callSession.id,
+              videoEnabled: call.type == 'video',
+              peerName: call.group?.name ?? 'Group call',
+              peerAvatar: call.group?.avatarUrl,
+              groupId: call.groupId,
+              isOutgoingCall: true,
+            );
+          }
+        }
+        return;
+      }
+
       final user = call.otherUser!;
       final displayService = ref.read(contactDisplayServiceProvider);
       final peerDisplayName = displayService.resolve(
@@ -343,13 +376,7 @@ class _CallLogItem extends ConsumerWidget {
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to start call: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+                context.showErrorToast('Failed to start call: $e');      }
     }
   }
 }
@@ -387,13 +414,7 @@ class _LiveBroadcastsSection extends ConsumerWidget {
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to start broadcast: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+                context.showErrorToast('Failed to start broadcast: $e');      }
     }
   }
 

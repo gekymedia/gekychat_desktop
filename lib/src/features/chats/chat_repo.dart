@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import '../../core/api_service.dart';
 import '../../core/database/local_storage_service.dart';
+import '../../services/product_analytics_service.dart';
 import 'models.dart';
 import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ChatRepository {
   final ApiService apiService;
@@ -571,7 +574,13 @@ class ChatRepository {
     }
 
     try {
-      final params = <String, dynamic>{'limit': _initialMessagesLimit};
+      final params = <String, dynamic>{
+        'limit': _initialMessagesLimit,
+        // Newest page first (WhatsApp-style). Without this, long threads only
+        // return the oldest messages and notification replies never appear.
+        // Laravel boolean validation accepts 0/1, not the string "true".
+        'recent': 1,
+      };
       if (updatedSince != null) {
         params['after_timestamp'] = updatedSince.toIso8601String();
       }
@@ -823,7 +832,15 @@ class ChatRepository {
       final map = (raw is Map && raw['data'] is Map)
           ? raw['data'] as Map
           : (raw as Map);
-      return Message.fromJson(Map<String, dynamic>.from(map));
+      ProductAnalytics.action(
+        'message_sent',
+        feature: 'chats',
+        properties: {'conversation_id': conversationId},
+      );
+      final message = Message.fromJson(Map<String, dynamic>.from(map));
+      // Ensure non-UI senders (notification reply, share, etc.) update local history.
+      unawaited(persistConversationMessages(conversationId, [message]));
+      return message;
     } catch (e) {
       throw Exception('Failed to send message: $e');
     }
@@ -1105,7 +1122,9 @@ class ChatRepository {
       final map = (raw is Map && raw['data'] is Map)
           ? raw['data'] as Map
           : (raw as Map);
-      return Message.fromJson(Map<String, dynamic>.from(map));
+      final message = Message.fromJson(Map<String, dynamic>.from(map));
+      unawaited(persistGroupMessages(groupId, [message]));
+      return message;
     } catch (e) {
       throw Exception('Failed to send group message: $e');
     }
@@ -1404,6 +1423,36 @@ class ChatRepository {
     } catch (e) {
       throw Exception('Failed to unpin group: $e');
     }
+  }
+
+  Future<void> pinMessageInConversation(
+    int conversationId,
+    int messageId,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('pinned_msg_conv_$conversationId', messageId);
+    try {
+      await apiService.post(
+        '/conversations/$conversationId/pinned-message',
+        data: {'message_id': messageId},
+      );
+    } catch (_) {}
+  }
+
+  Future<void> unpinMessageInConversation(int conversationId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('pinned_msg_conv_$conversationId');
+    try {
+      await apiService.delete('/conversations/$conversationId/pinned-message');
+    } catch (_) {}
+  }
+
+  Future<void> pinMessageInGroup(int groupId, int messageId) async {
+    await apiService.pinGroupMessage(groupId, messageId);
+  }
+
+  Future<void> unpinMessageInGroup(int groupId) async {
+    await apiService.unpinGroupMessage(groupId);
   }
 
   Future<void> muteGroup(int groupId, {int? minutes, DateTime? until}) async {

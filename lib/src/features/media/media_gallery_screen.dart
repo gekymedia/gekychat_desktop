@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:video_player/video_player.dart';
 
 import '../chats/models.dart';
+import '../chats/widgets/media_gallery_viewer.dart';
 import 'media_gallery_parser.dart';
 import 'media_repository.dart';
 
@@ -424,105 +424,26 @@ IconData _docIcon(String mime) {
 }
 
 void _openViewer(BuildContext context, MessageAttachment att, bool isDark) {
+  final stubMessage = Message(
+    id: att.id,
+    senderId: 0,
+    body: '',
+    createdAt: DateTime.now(),
+    attachments: [att],
+    reactions: const [],
+  );
   Navigator.of(context).push(
     MaterialPageRoute(
-      builder: (_) => _MediaViewerScreen(attachment: att, isDark: isDark),
+      builder: (_) => MediaGalleryViewer(
+        items: [
+          GalleryMediaItem(
+            attachment: att,
+            message: stubMessage,
+            isSent: false,
+          ),
+        ],
+        initialIndex: 0,
+      ),
     ),
   );
-}
-
-class _MediaViewerScreen extends StatefulWidget {
-  final MessageAttachment attachment;
-  final bool isDark;
-
-  const _MediaViewerScreen({
-    required this.attachment,
-    required this.isDark,
-  });
-
-  @override
-  State<_MediaViewerScreen> createState() => _MediaViewerScreenState();
-}
-
-class _MediaViewerScreenState extends State<_MediaViewerScreen> {
-  VideoPlayerController? _videoController;
-  bool _isPlaying = false;
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.attachment.isVideo) {
-      _videoController =
-          VideoPlayerController.networkUrl(Uri.parse(widget.attachment.displayUrl));
-      _videoController!.initialize().then((_) {
-        if (mounted) setState(() {});
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _videoController?.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final att = widget.attachment;
-
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black87,
-        foregroundColor: Colors.white,
-        title: Text(att.originalName ?? 'Media'),
-      ),
-      body: Center(
-        child: att.isImage
-            ? InteractiveViewer(
-                child: CachedNetworkImage(
-                  imageUrl: att.displayUrl,
-                  fit: BoxFit.contain,
-                ),
-              )
-            : _videoController != null && _videoController!.value.isInitialized
-                ? Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      AspectRatio(
-                        aspectRatio: _videoController!.value.aspectRatio,
-                        child: VideoPlayer(_videoController!),
-                      ),
-                      VideoProgressIndicator(
-                        _videoController!,
-                        allowScrubbing: true,
-                        colors: const VideoProgressColors(
-                          playedColor: Colors.white,
-                          bufferedColor: Colors.white38,
-                          backgroundColor: Colors.white24,
-                        ),
-                      ),
-                      IconButton(
-                        icon: Icon(
-                          _isPlaying ? Icons.pause : Icons.play_arrow,
-                          color: Colors.white,
-                          size: 48,
-                        ),
-                        onPressed: () {
-                          setState(() {
-                            if (_isPlaying) {
-                              _videoController!.pause();
-                            } else {
-                              _videoController!.play();
-                            }
-                            _isPlaying = !_isPlaying;
-                          });
-                        },
-                      ),
-                    ],
-                  )
-                : const CircularProgressIndicator(color: Colors.white),
-      ),
-    );
-  }
 }

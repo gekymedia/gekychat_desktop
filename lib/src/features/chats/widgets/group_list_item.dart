@@ -6,12 +6,18 @@ import '../../../utils/text_sanitize.dart';
 import '../models.dart';
 import '../providers/group_typing_status_provider.dart';
 import '../../../theme/app_theme.dart';
+import '../../../widgets/desktop_typography.dart';
+import '../../../widgets/desktop_chat_list_item_shell.dart';
+import '../../../widgets/desktop_whatsapp_hover_chevron.dart';
 import 'chat_list_last_message_preview.dart';
 
 class GroupListItem extends ConsumerWidget {
   final GroupSummary group;
   final bool isSelected;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final void Function(TapDownDetails details)? onSecondaryTapDown;
+  final void Function(Offset globalPosition)? onMenuTap;
   final bool forceUnreadBadge;
 
   const GroupListItem({
@@ -19,8 +25,13 @@ class GroupListItem extends ConsumerWidget {
     required this.group,
     required this.isSelected,
     required this.onTap,
+    this.onLongPress,
+    this.onSecondaryTapDown,
+    this.onMenuTap,
     this.forceUnreadBadge = false,
   });
+
+  static const double _avatarSize = DesktopTypography.listAvatarSize;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -42,157 +53,176 @@ class GroupListItem extends ConsumerWidget {
     final isTyping = groupTypingStatus[group.id] ?? false;
     final isRecording = groupRecordingStatus[group.id] ?? false;
 
-    return Material(
-      color: isSelected
-          ? (isDark ? const Color(0xFF2A3942) : const Color(0xFFE9EDEF))
-          : (isDark ? const Color(0xFF111B21) : Colors.white),
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(
-                color: isDark ? const Color(0xFF2A3942) : const Color(0xFFD1D7DB),
-                width: 0.5,
+    return DesktopChatListItemShell(
+      isSelected: isSelected,
+      hasUnread: hasUnread,
+      onTap: onTap,
+      onLongPress: onLongPress,
+      onSecondaryTapDown: onSecondaryTapDown,
+      builder: (isHovered) => Row(
+        children: [
+          DesktopListAvatar(
+            isSelected: isSelected,
+            size: _avatarSize,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isDark ? AppTheme.darkSurface : AppTheme.lightBorder,
               ),
+              child: group.avatarUrl != null
+                  ? CachedNetworkImage(
+                      imageUrl: group.avatarUrl!,
+                      fit: BoxFit.cover,
+                      width: _avatarSize,
+                      height: _avatarSize,
+                      placeholder: (context, url) =>
+                          const Icon(Icons.group, size: 24),
+                      errorWidget: (context, url, error) =>
+                          const Icon(Icons.group, size: 24),
+                    )
+                  : const Icon(Icons.group, size: 24),
             ),
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: isDark ? AppTheme.darkSurface : AppTheme.lightBorder,
-                ),
-                child: group.avatarUrl != null
-                    ? ClipOval(
-                        child: CachedNetworkImage(
-                          imageUrl: group.avatarUrl!,
-                          fit: BoxFit.cover,
-                          placeholder: (context, url) => const Icon(Icons.group, size: 28),
-                          errorWidget: (context, url, error) => const Icon(Icons.group, size: 28),
-                        ),
-                      )
-                    : const Icon(Icons.group, size: 28),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          const SizedBox(width: DesktopTypography.listAvatarGap + 2),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    Row(
-                      children: [
-                        if (group.isPinned)
-                          Icon(
-                            Icons.push_pin,
-                            size: 14,
-                            color: AppTheme.primaryGreen,
-                          ),
-                        if (group.isPinned) const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            displayName,
-                            style: TextStyle(
-                              color: isDark
-                                  ? AppTheme.textPrimaryDark
-                                  : AppTheme.textPrimaryLight,
-                              fontSize: 16,
-                              fontWeight: hasUnread ? FontWeight.w600 : FontWeight.w500,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                    if (group.isPinned) ...[
+                      const Icon(
+                        Icons.push_pin,
+                        size: 12,
+                        color: AppTheme.primaryGreen,
+                      ),
+                      const SizedBox(width: 4),
+                    ],
+                    Expanded(
+                      child: Text(
+                        displayName,
+                        style: DesktopTypography.listTitle(
+                          isDark: isDark,
+                          hasUnread: hasUnread,
                         ),
-                        const SizedBox(width: 8),
-                        if (group.updatedAt != null)
-                          Text(
-                            _formatTime(group.updatedAt!),
-                            style: TextStyle(
-                              color: hasUnread
-                                  ? AppTheme.primaryGreen
-                                  : (isDark
-                                      ? AppTheme.textSecondaryDark
-                                      : AppTheme.textSecondaryLight),
-                              fontSize: 12,
-                              fontWeight: hasUnread ? FontWeight.w600 : FontWeight.w400,
-                            ),
-                          ),
-                      ],
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: isRecording
-                              ? Text(
-                                  'recording audio...',
-                                  style: TextStyle(
-                                    color: AppTheme.primaryGreen,
-                                    fontSize: 14,
-                                    fontStyle: FontStyle.italic,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                )
-                              : isTyping
-                                  ? Text(
-                                      'typing...',
-                                      style: TextStyle(
-                                        color: AppTheme.primaryGreen,
-                                        fontSize: 14,
-                                        fontStyle: FontStyle.italic,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    )
-                                  : ChatListLastMessagePreview(
-                                      text: group.lastMessage ?? 'No messages yet',
-                                      isDark: isDark,
-                                      hasUnread: hasUnread,
-                                      fromMe: group.lastMessageFromMe,
-                                      outgoingStatus: group.lastMessageOutgoingStatus,
-                                    ),
+                    const SizedBox(width: 6),
+                    if (group.updatedAt != null)
+                      DesktopChatListTimeMenuColumn(
+                        time: _formatTime(group.updatedAt!),
+                        timeStyle: DesktopTypography.listTime(
+                          isDark: isDark,
+                          hasUnread: hasUnread,
                         ),
-                        if (hasUnread) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: const BoxDecoration(
-                              color: AppTheme.secondaryGreen,
-                              shape: BoxShape.circle,
-                            ),
-                            constraints: const BoxConstraints(
-                              minWidth: 24,
-                              minHeight: 24,
-                            ),
-                            child: Center(
-                              child: Text(
-                                group.unreadCount > 999
-                                    ? '999+'
-                                    : group.unreadCount.toString(),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
+                        isHovered: isHovered,
+                        isDark: isDark,
+                        onMenuTap: onMenuTap,
+                      ),
                   ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 3),
+                Row(
+                  children: [
+                    Expanded(
+                      child: isRecording
+                          ? SizedBox(
+                              width: double.infinity,
+                              child: Text(
+                                'recording audio...',
+                                style: DesktopTypography.listSubtitle(
+                                  isDark: isDark,
+                                  hasUnread: true,
+                                ).copyWith(
+                                  color: AppTheme.primaryGreen,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.start,
+                              ),
+                            )
+                          : isTyping
+                              ? SizedBox(
+                                  width: double.infinity,
+                                  child: Text(
+                                    'typing...',
+                                    style: DesktopTypography.listSubtitle(
+                                      isDark: isDark,
+                                      hasUnread: true,
+                                    ).copyWith(
+                                      color: AppTheme.primaryGreen,
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    textAlign: TextAlign.start,
+                                  ),
+                                )
+                              : AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 180),
+                                  switchInCurve: Curves.easeOut,
+                                  layoutBuilder: (currentChild, previousChildren) {
+                                    return Stack(
+                                      alignment: Alignment.centerLeft,
+                                      children: <Widget>[
+                                        ...previousChildren,
+                                        if (currentChild != null) currentChild,
+                                      ],
+                                    );
+                                  },
+                                  child: ChatListLastMessagePreview(
+                                    key: ValueKey(
+                                      '${group.lastMessage}_'
+                                      '${group.lastMessageOutgoingStatus}',
+                                    ),
+                                    text: group.lastMessage ?? 'No messages yet',
+                                    isDark: isDark,
+                                    hasUnread: hasUnread,
+                                    fromMe: group.lastMessageFromMe,
+                                    outgoingStatus:
+                                        group.lastMessageOutgoingStatus,
+                                  ),
+                                ),
+                    ),
+                    if (hasUnread) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: const BoxDecoration(
+                          color: AppTheme.secondaryGreen,
+                          shape: BoxShape.circle,
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 20,
+                          minHeight: 20,
+                        ),
+                        child: Center(
+                          child: Text(
+                            group.unreadCount > 999
+                                ? '999+'
+                                : group.unreadCount.toString(),
+                            style: TextStyle(
+                              fontFamily: DesktopTypography.fontFamily,
+                              color: Colors.white,
+                              fontSize: DesktopTypography.listBadgeSize,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

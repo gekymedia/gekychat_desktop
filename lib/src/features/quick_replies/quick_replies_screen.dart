@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'quick_replies_repository.dart';
+import '../../utils/snackbar_helper.dart';
 
 class QuickRepliesScreen extends ConsumerStatefulWidget {
   const QuickRepliesScreen({super.key});
@@ -100,20 +101,12 @@ class _QuickRepliesScreenState extends ConsumerState<QuickRepliesScreen> {
         }
         _loadQuickReplies();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(quickReply == null
+                    context.showSuccessToast(quickReply == null
                   ? 'Quick reply added'
-                  : 'Quick reply updated'),
-            ),
-          );
-        }
+                  : 'Quick reply updated');        }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed: $e')),
-          );
-        }
+                    context.showErrorToast('Failed: $e');        }
       }
     }
   }
@@ -144,16 +137,10 @@ class _QuickRepliesScreenState extends ConsumerState<QuickRepliesScreen> {
         await repo.deleteQuickReply(quickReply.id);
         _loadQuickReplies();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Quick reply deleted')),
-          );
-        }
+                    context.showSuccessToast('Quick reply deleted');        }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to delete: $e')),
-          );
-        }
+                    context.showErrorToast('Failed to delete: $e');        }
       }
     }
   }

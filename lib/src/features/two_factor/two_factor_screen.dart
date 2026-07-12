@@ -5,6 +5,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'two_factor_repository.dart';
 import 'models.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/snackbar_helper.dart';
 
 final twoFactorStatusProvider =
     FutureProvider<TwoFactorStatus>((ref) async {
@@ -261,27 +262,17 @@ class _TwoFactorScreenState extends ConsumerState<TwoFactorScreen> {
               });
               ref.invalidate(twoFactorStatusProvider);
               if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                      content: Text('Two-step verification enabled!')),
-                );
-              }
+                                context.showInfoToast('Two-step verification enabled!');              }
             } catch (e) {
               if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Failed to enable: $e')),
-                );
-              }
+                                context.showErrorToast('Failed to enable: $e');              }
             }
           },
         ),
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to setup: $e')),
-        );
-      }
+                context.showErrorToast('Failed to setup: $e');      }
     }
   }
 
@@ -330,17 +321,10 @@ class _TwoFactorScreenState extends ConsumerState<TwoFactorScreen> {
                   _showRecoveryCodes = true;
                 });
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text('Recovery codes regenerated')),
-                  );
-                }
+                                    context.showInfoToast('Recovery codes regenerated');                }
               } catch (e) {
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Failed: $e')),
-                  );
-                }
+                                    context.showErrorToast('Failed: $e');                }
               }
             },
             child: const Text('Regenerate'),
@@ -392,17 +376,10 @@ class _TwoFactorScreenState extends ConsumerState<TwoFactorScreen> {
                 if (!mounted) return;
                 ref.invalidate(twoFactorStatusProvider);
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text('Two-step verification disabled')),
-                  );
-                }
+                                    context.showInfoToast('Two-step verification disabled');                }
               } catch (e) {
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Failed: $e')),
-                  );
-                }
+                                    context.showErrorToast('Failed: $e');                }
               }
             },
             style: ElevatedButton.styleFrom(foregroundColor: Colors.red),

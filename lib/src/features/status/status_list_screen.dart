@@ -4,7 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'models.dart';
 import 'status_repository.dart';
 import 'widgets/status_ring.dart';
-import 'status_viewer_screen.dart';
+import 'desktop_status_viewer.dart';
 import 'create_status_screen.dart';
 import '../../core/session.dart';
 import '../../theme/app_theme.dart';
@@ -81,28 +81,18 @@ class StatusListScreen extends ConsumerWidget {
                             );
                             
                             if (context.mounted) {
-                              Navigator.push(
+                              showDesktopStatusViewer(
                                 context,
-                                MaterialPageRoute(
-                                  builder: (context) => StatusViewerScreen(
-                                    statusSummary: statusSummary,
-                                    startIndex: 0,
-                                    isOwnStatus: true,
-                                  ),
-                                ),
+                                statusSummary: statusSummary,
+                                startIndex: 0,
+                                isOwnStatus: true,
                               ).then((_) {
                                 ref.invalidate(myStatusProvider);
                                 ref.invalidate(statusListProvider);
                               });
                             }
                           } else {
-                            // Create new status
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => const CreateStatusScreen(),
-                              ),
-                            ).then((_) {
+                            CreateStatusScreen.showModal(context).then((_) {
                               ref.invalidate(myStatusProvider);
                               ref.invalidate(statusListProvider);
                             });
@@ -168,12 +158,7 @@ class StatusListScreen extends ConsumerWidget {
                                     size: 28,
                                   ),
                                   onPressed: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) => const CreateStatusScreen(),
-                                      ),
-                                    ).then((_) {
+                                    CreateStatusScreen.showModal(context).then((_) {
                                       ref.invalidate(myStatusProvider);
                                       ref.invalidate(statusListProvider);
                                     });
@@ -224,20 +209,19 @@ class StatusListScreen extends ConsumerWidget {
               }
               
               return Column(
-                children: statuses.map((status) {
+                children: statuses.asMap().entries.map((entry) {
+                  final status = entry.value;
                   final activeUpdates = status.activeUpdates;
                   if (activeUpdates.isEmpty) return const SizedBox.shrink();
                   
                   return InkWell(
                     onTap: () {
-                      Navigator.push(
+                      showDesktopStatusViewer(
                         context,
-                        MaterialPageRoute(
-                          builder: (context) => StatusViewerScreen(
-                            statusSummary: status,
-                            startIndex: 0,
-                          ),
-                        ),
+                        statusSummary: status,
+                        startIndex: 0,
+                        allSummaries: statuses,
+                        summaryIndex: entry.key,
                       );
                     },
                     child: Padding(

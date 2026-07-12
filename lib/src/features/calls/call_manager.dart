@@ -309,14 +309,16 @@ class CallManager {
 
   void handleSignal(dynamic data) {
     try {
-      if (_currentCall == null) return;
-
       final signalData = data is String ? jsonDecode(data) : data;
       final payload = signalData['payload'] is String
           ? jsonDecode(signalData['payload'] as String)
           : signalData['payload'] as Map<String, dynamic>;
 
+      // Deliver before the active-call gate so in-call UI (e.g. video upgrade)
+      // still receives signals if session bookkeeping lags.
       onCallSignal?.call(payload);
+
+      if (_currentCall == null) return;
 
       if (payload['action'] == 'invite' && !_isCaller) {
         _emitCallState(CallState.ringing);

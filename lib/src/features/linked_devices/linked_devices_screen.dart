@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'linked_devices_repository.dart';
 import 'models.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/snackbar_helper.dart';
 
 final linkedDevicesProvider = FutureProvider<List<LinkedDevice>>((ref) async {
   final repo = ref.read(linkedDevicesRepositoryProvider);
@@ -257,17 +258,11 @@ class LinkedDevicesScreen extends ConsumerWidget {
               try {
                 await ref.read(linkedDevicesRepositoryProvider).deleteDevice(device.id);
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Device removed')),
-                  );
-                }
+                                    context.showSuccessToast('Device removed');                }
                 ref.invalidate(linkedDevicesProvider);
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Failed: $e')),
-                  );
-                }
+                                    context.showErrorToast('Failed: $e');                }
               }
             },
             style: ElevatedButton.styleFrom(foregroundColor: Colors.red),
@@ -300,18 +295,11 @@ class LinkedDevicesScreen extends ConsumerWidget {
                     .read(linkedDevicesRepositoryProvider)
                     .deleteOtherDevices();
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                        content: Text('Logged out from $count device${count == 1 ? '' : 's'}')),
-                  );
-                }
+                                    context.showSuccessToast('Logged out from $count device${count == 1 ? '' : 's'}');                }
                 ref.invalidate(linkedDevicesProvider);
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Failed: $e')),
-                  );
-                }
+                                    context.showErrorToast('Failed: $e');                }
               }
             },
             style: ElevatedButton.styleFrom(foregroundColor: Colors.red),

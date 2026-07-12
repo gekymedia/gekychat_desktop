@@ -322,6 +322,24 @@ class ApiService {
         if (isFavorite != null) 'is_favorite': isFavorite,
       });
 
+  /// Update a contact's display name, phone, or note.
+  Future<Response> updateContact(
+    int contactId, {
+    String? displayName,
+    String? phone,
+    String? note,
+    bool? isFavorite,
+  }) =>
+      put(
+        '/contacts/$contactId',
+        data: {
+          if (displayName != null) 'display_name': displayName,
+          if (phone != null) 'phone': phone,
+          if (note != null) 'note': note,
+          if (isFavorite != null) 'is_favorite': isFavorite,
+        },
+      );
+
   // ---------------------------------------------------------------------------
   // Messages
   // ---------------------------------------------------------------------------
@@ -343,10 +361,11 @@ class ApiService {
     );
   }
 
-  Future<Response> updateDob({int? month, int? day}) =>
+  Future<Response> updateDob({int? month, int? day, int? year}) =>
       put('/me', data: {
-        if (month != null) 'month': month,
-        if (day != null) 'day': day,
+        if (month != null) 'dob_month': month,
+        if (day != null) 'dob_day': day,
+        if (year != null) 'dob_year': year,
       });
 
   // PHASE 1: Delete message with optional "delete for everyone" option
@@ -443,6 +462,7 @@ class ApiService {
     String? bio,
     int? dobMonth,
     int? dobDay,
+    int? dobYear,
     File? avatar,
   }) async {
     if (avatar != null) {
@@ -455,6 +475,7 @@ class ApiService {
         if (bio != null) 'bio': bio,
         if (dobMonth != null) 'dob_month': dobMonth,
         if (dobDay != null) 'dob_day': dobDay,
+        if (dobYear != null) 'dob_year': dobYear,
         'avatar': await MultipartFile.fromFile(
           avatar.path,
           filename: avatar.path.split(Platform.pathSeparator).last,
@@ -471,6 +492,7 @@ class ApiService {
       if (bio != null) data['bio'] = bio;
       if (dobMonth != null) data['dob_month'] = dobMonth;
       if (dobDay != null) data['dob_day'] = dobDay;
+      if (dobYear != null) data['dob_year'] = dobYear;
       return put('/me', data: data.isEmpty ? null : data);
     }
   }
@@ -650,6 +672,11 @@ class ApiService {
   // Group Actions
   Future<Response> pinGroup(int groupId) => post('/groups/$groupId/pin');
   Future<Response> unpinGroup(int groupId) => delete('/groups/$groupId/pin');
+
+  Future<Response> pinGroupMessage(int groupId, int messageId) =>
+      post('/groups/$groupId/messages/$messageId/pin');
+  Future<Response> unpinGroupMessage(int groupId) =>
+      delete('/groups/$groupId/messages/pin');
 
   Future<Response> markGroupUnread(int groupId) =>
       post('/groups/$groupId/mark-unread');
@@ -873,6 +900,20 @@ class ApiService {
     post('/live/$broadcastId/end');
   Future<Response> getActiveLiveBroadcasts() => get('/live/active');
   Future<Response> getLiveBroadcastStats(int id) => get('/live/$id/stats');
+  Future<Response> getLiveCreatorAnalytics() => get('/live/creator/analytics');
+
+  Future<Response> getAppVersion({
+    required String platform,
+    String? currentVersion,
+  }) =>
+      get(
+        '/app/version',
+        queryParameters: {
+          'platform': platform,
+          if (currentVersion != null && currentVersion.isNotEmpty)
+            'current_version': currentVersion,
+        },
+      );
   Future<Response> sendLiveBroadcastChat(int broadcastId, {required String message}) =>
     post('/live/$broadcastId/chat', data: {'message': message});
   Future<Response> getLiveKitToken({required String roomName, required String role}) =>
@@ -902,11 +943,21 @@ class ApiService {
     delete('/auth/accounts/$accountId?device_id=$deviceId&device_type=$deviceType');
 
   // ---------------------------------------------------------------------------
-  // Group Message Lock
+  // Group Message Lock / lookup / channels
   // ---------------------------------------------------------------------------
 
-  Future<Response> toggleGroupMessageLock(int groupId) =>
-    put('/groups/$groupId/toggle-message-lock');
+  Future<Response> toggleGroupMessageLock(int groupId, bool enabled) =>
+      put('/groups/$groupId/message-lock', data: {'enabled': enabled});
+
+  Future<Response> lookupGroup({int? id, String? inviteCode}) => get(
+    '/groups/lookup',
+    queryParameters: {
+      if (id != null) 'id': id,
+      if (inviteCode != null && inviteCode.isNotEmpty) 'invite_code': inviteCode,
+    },
+  );
+
+  Future<Response> followChannel(int id) => post('/channels/$id/follow');
 
   // ---------------------------------------------------------------------------
   // Mentions

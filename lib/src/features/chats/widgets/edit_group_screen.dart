@@ -6,6 +6,7 @@ import 'dart:io';
 import '../../../core/providers.dart';
 import '../chat_providers.dart';
 import '../../../theme/app_theme.dart';
+import '../../../utils/snackbar_helper.dart';
 
 final groupDetailsProvider = FutureProvider.family<Map<String, dynamic>, int>((ref, groupId) async {
   final api = ref.read(apiServiceProvider);
@@ -78,16 +79,10 @@ class _EditGroupScreenState extends ConsumerState<EditGroupScreen> {
       
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Group updated successfully')),
-        );
-      }
+                context.showSuccessToast('Group updated successfully');      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update group: $e')),
-        );
-      }
+                context.showErrorToast('Failed to update group: $e');      }
     } finally {
       if (mounted) {
         setState(() => _saving = false);

@@ -12,6 +12,7 @@ import '../../core/session.dart';
 import 'live_broadcast_repository.dart';
 import 'live_broadcast_screen.dart' show liveBroadcastsProvider;
 import 'live_broadcast_social_overlay.dart';
+import '../../utils/snackbar_helper.dart';
 
 /// PHASE 2: Broadcast Streaming Screen for Desktop
 /// Allows broadcaster to stream their video with realtime social overlay.
@@ -268,10 +269,7 @@ class _BroadcastStreamingScreenState extends ConsumerState<BroadcastStreamingScr
       setState(() {});
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to toggle camera: $e')),
-        );
-      }
+                context.showErrorToast('Failed to toggle camera: $e');      }
     }
   }
 
@@ -284,10 +282,7 @@ class _BroadcastStreamingScreenState extends ConsumerState<BroadcastStreamingScr
       setState(() {});
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to toggle microphone: $e')),
-        );
-      }
+                context.showErrorToast('Failed to toggle microphone: $e');      }
     }
   }
 
@@ -377,10 +372,7 @@ class _BroadcastStreamingScreenState extends ConsumerState<BroadcastStreamingScr
       ));
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not send: $e')),
-        );
-      }
+                context.showErrorToast('Could not send: $e');      }
     }
   }
 
@@ -714,13 +706,7 @@ class _BroadcastStreamingScreenState extends ConsumerState<BroadcastStreamingScr
                         LiveGlassIconButton(
                           icon: Icons.more_horiz,
                           onPressed: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Stream settings'),
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
-                          },
+                                                        context.showInfoToast('Stream settings');                          },
                         ),
                       ],
                     ),

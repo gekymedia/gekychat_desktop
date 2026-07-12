@@ -136,7 +136,10 @@ class LiveKitCallService extends ChangeNotifier {
 
     if (cs == livekit.ConnectionState.disconnected) {
       _disconnectEndTimer?.cancel();
-      _disconnectEndTimer = Timer(const Duration(milliseconds: 600), () {
+      final delay = _hasConnectedPeer
+          ? const Duration(seconds: 12)
+          : const Duration(milliseconds: 600);
+      _disconnectEndTimer = Timer(delay, () {
         _disconnectEndTimer = null;
         if (_activeCall == null) return;
         if (_activeCall!.room.connectionState ==
@@ -189,8 +192,16 @@ class LiveKitCallService extends ChangeNotifier {
     if (_activeCall != null) {
       _activeCall!.room.removeListener(_onRoomChanged);
       if (disposeRoom) {
-        await _activeCall!.room.disconnect();
-        _activeCall!.room.dispose();
+        try {
+          await _activeCall!.room
+              .disconnect()
+              .timeout(const Duration(seconds: 2));
+        } catch (e) {
+          debugPrint('LiveKitCallService: disconnect ignored: $e');
+        }
+        try {
+          _activeCall!.room.dispose();
+        } catch (_) {}
       }
     }
 

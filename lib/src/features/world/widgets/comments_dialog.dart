@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
 import '../world_feed_repository.dart';
 import '../../search/search_screen.dart';
+import '../../../utils/snackbar_helper.dart';
 
 class CommentsDialog extends ConsumerStatefulWidget {
   final int postId;
@@ -60,10 +61,7 @@ class _CommentsDialogState extends ConsumerState<CommentsDialog> {
     } catch (e) {
       setState(() => _isLoading = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load comments: $e')),
-        );
-      }
+                context.showErrorToast('Failed to load comments: $e');      }
     }
   }
 
@@ -95,10 +93,7 @@ class _CommentsDialogState extends ConsumerState<CommentsDialog> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to post comment: $e')),
-        );
-      }
+                context.showErrorToast('Failed to post comment: $e');      }
     } finally {
       if (mounted) {
         setState(() => _isPosting = false);

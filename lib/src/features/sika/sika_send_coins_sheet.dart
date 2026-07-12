@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers.dart';
 import 'sika_providers.dart';
 import 'sika_repository.dart';
+import '../../utils/snackbar_helper.dart';
 
 class SikaSendCoinsSheet extends ConsumerStatefulWidget {
   final bool isGift;
@@ -468,18 +469,11 @@ class _SikaSendCoinsSheetState extends ConsumerState<SikaSendCoinsSheet> {
 
       Navigator.pop(context);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
+            context.showSuccessToast(
             widget.isGift
                 ? 'Gift of $coins coins sent to $_selectedUserName!'
                 : '$coins coins sent to $_selectedUserName!',
-          ),
-          backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } catch (e) {
+          );    } catch (e) {
       if (!mounted) return;
 
       String errorMessage = 'Failed to send coins. Please try again.';
@@ -502,15 +496,7 @@ class _SikaSendCoinsSheetState extends ConsumerState<SikaSendCoinsSheet> {
         errorMessage = 'You cannot send coins to yourself.';
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(errorMessage),
-          backgroundColor: backgroundColor,
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 4),
-        ),
-      );
-    } finally {
+            context.showErrorToast(errorMessage);    } finally {
       if (mounted) {
         setState(() {
           _isSending = false;

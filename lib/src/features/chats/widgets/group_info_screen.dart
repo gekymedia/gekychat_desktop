@@ -16,6 +16,7 @@ import 'search_in_chat_screen.dart';
 import 'edit_group_screen.dart';
 import 'add_participant_screen.dart';
 import 'share_group_link_screen.dart';
+import '../../../utils/snackbar_helper.dart';
 
 final groupInfoProvider = FutureProvider.family<Map<String, dynamic>, int>((ref, groupId) async {
   final api = ref.read(apiServiceProvider);
@@ -352,19 +353,17 @@ class GroupInfoScreen extends ConsumerWidget {
                             onChanged: (bool value) async {
                               try {
                                 final api = ref.read(apiServiceProvider);
-                                await api.put('/groups/$groupId/toggle-message-lock');
+                                await api.toggleGroupMessageLock(groupId, value);
                                 ref.invalidate(groupInfoProvider(groupId));
                                 if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('Message lock ${value ? 'enabled' : 'disabled'}')),
-                                  );
-                                }
+                                                                    context.showInfoToast(
+                                        value
+                                            ? 'Only admins can send messages now'
+                                            : 'All members can send messages now',
+                                      );                                }
                               } catch (e) {
                                 if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('Failed to toggle message lock: $e')),
-                                  );
-                                }
+                                                                    context.showErrorToast('Failed to toggle message lock: $e');                                }
                               }
                             },
                             secondary: Icon(group['message_lock'] == true ? Icons.lock : Icons.lock_open),
@@ -473,16 +472,10 @@ class GroupInfoScreen extends ConsumerWidget {
       }
       ref.invalidate(groupInfoProvider(groupId));
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Member ${action}d successfully')),
-        );
-      }
+                context.showSuccessToast('Member ${action}d successfully');      }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed: $e')),
-        );
-      }
+                context.showErrorToast('Failed: $e');      }
     }
   }
 
@@ -523,26 +516,17 @@ class GroupInfoScreen extends ConsumerWidget {
       
       if (channelLink == null || channelLink.isEmpty) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Unable to get channel link')),
-          );
-        }
+                    context.showErrorToast('Unable to get channel link');        }
         return;
       }
       
       // Copy to clipboard
       await Clipboard.setData(ClipboardData(text: channelLink));
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Channel link copied to clipboard')),
-        );
-      }
+                context.showSuccessToast('Channel link copied to clipboard');      }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to copy channel link: $e')),
-        );
-      }
+                context.showErrorToast('Failed to copy channel link: $e');      }
     }
   }
 
@@ -570,17 +554,11 @@ class GroupInfoScreen extends ConsumerWidget {
                 final chatRepo = ref.read(chatRepositoryProvider);
                 await chatRepo.leaveGroup(groupId);
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(isChannel ? 'Unfollowed channel successfully' : 'Left group successfully')),
-                  );
-                  Navigator.pop(context); // Go back to chat list
+                                    context.showSuccessToast(isChannel ? 'Unfollowed channel successfully' : 'Left group successfully');                  Navigator.pop(context); // Go back to chat list
                 }
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Failed to ${isChannel ? 'unfollow channel' : 'leave group'}: $e')),
-                  );
-                }
+                                    context.showErrorToast('Failed to ${isChannel ? 'unfollow channel' : 'leave group'}: $e');                }
               }
             },
             style: ElevatedButton.styleFrom(foregroundColor: Colors.red),
@@ -624,10 +602,7 @@ class GroupInfoScreen extends ConsumerWidget {
       
       if (inviteLink == null || inviteLink.isEmpty) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Unable to get invite link. Only admins and owners can generate invite links.')),
-          );
-        }
+                    context.showErrorToast('Unable to get invite link. Only admins and owners can generate invite links.');        }
         return;
       }
       
@@ -674,10 +649,7 @@ class GroupInfoScreen extends ConsumerWidget {
                   Navigator.pop(context);
                   await Clipboard.setData(ClipboardData(text: inviteLink!));
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Link copied to clipboard')),
-                    );
-                  }
+                                        context.showSuccessToast('Link copied to clipboard');                  }
                 },
               ),
               ListTile(
@@ -703,10 +675,7 @@ class GroupInfoScreen extends ConsumerWidget {
       );
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to share invite link: $e')),
-        );
-      }
+                context.showErrorToast('Failed to share invite link: $e');      }
     }
   }
 }

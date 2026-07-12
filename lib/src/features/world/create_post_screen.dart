@@ -6,6 +6,7 @@ import 'dart:io';
 import '../../core/providers.dart';
 import '../audio/audio_search_screen.dart';
 import 'widgets/video_trimmer_widget.dart';
+import '../../utils/snackbar_helper.dart';
 
 class CreatePostScreen extends ConsumerStatefulWidget {
   const CreatePostScreen({super.key});
@@ -103,10 +104,7 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to check video: $e')),
-        );
-      }
+                context.showErrorToast('Failed to check video: $e');      }
     }
   }
 
@@ -155,10 +153,7 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to pick media: $e')),
-        );
-      }
+                context.showErrorToast('Failed to pick media: $e');      }
     }
   }
 
@@ -173,10 +168,7 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
   Future<void> _createPost() async {
     // Media is required - World feed is like TikTok (no text-only posts)
     if (_selectedMedia == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please add a photo or video to post')),
-      );
-      return;
+            context.showInfoToast('Please add a photo or video to post');      return;
     }
 
     setState(() {
@@ -197,16 +189,10 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
 
       if (mounted) {
         Navigator.of(context).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Post created successfully')),
-        );
-      }
+                context.showSuccessToast('Post created successfully');      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to create post: $e')),
-        );
-      }
+                context.showErrorToast('Failed to create post: $e');      }
     } finally {
       if (mounted) {
         setState(() {

@@ -7,6 +7,7 @@ import '../auth/auth_provider.dart';
 import '../chats/chat_providers.dart';
 import '../../core/session.dart';
 import 'account_repository.dart';
+import '../../utils/snackbar_helper.dart';
 
 class AccountSwitcherScreen extends ConsumerStatefulWidget {
   const AccountSwitcherScreen({super.key});
@@ -309,13 +310,7 @@ class _AccountSwitcherScreenState extends ConsumerState<AccountSwitcherScreen> {
   Future<void> _switchAccount(int accountId) async {
     if (accountId == 0) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Cannot switch to this account. Please remove it and add again.'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
+                context.showInfoToast('Cannot switch to this account. Please remove it and add again.');      }
       return;
     }
     try {
@@ -327,25 +322,11 @@ class _AccountSwitcherScreenState extends ConsumerState<AccountSwitcherScreen> {
       ref.invalidate(chatRepositoryProvider);
       if (mounted) {
         context.go('/chats');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Account switched successfully'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 2),
-          ),
-        );
-      }
+                context.showSuccessToast('Account switched successfully');      }
     } catch (e, stackTrace) {
       debugPrint('Error switching account: $e\n$stackTrace');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to switch account: $e'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 5),
-          ),
-        );
-      }
+                context.showErrorToast('Failed to switch account: $e');      }
     }
   }
 
@@ -377,24 +358,11 @@ class _AccountSwitcherScreenState extends ConsumerState<AccountSwitcherScreen> {
         await repository.removeAccount(accountId);
         ref.invalidate(accountsProvider);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Account removed successfully'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
+                    context.showSuccessToast('Account removed successfully');        }
       } catch (e, stackTrace) {
         debugPrint('Error removing account: $e\n$stackTrace');
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to remove account: $e'),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 5),
-            ),
-          );
-        }
+                    context.showErrorToast('Failed to remove account: $e');        }
       }
     }
   }

@@ -8,6 +8,7 @@ import '../../core/providers.dart';
 import '../chats/chat_providers.dart';
 import '../../utils/search_history_manager.dart';
 import '../../widgets/skeleton_loader.dart';
+import '../../utils/snackbar_helper.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
   final String? initialQuery;
@@ -113,10 +114,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         _isLoading = false;
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Search failed: $e')),
-        );
-      }
+                context.showErrorToast('Search failed: $e');      }
     }
   }
 
@@ -453,13 +451,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to load filters: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+                context.showErrorToast('Failed to load filters: $e');      }
     }
   }
 
@@ -496,10 +488,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         _startConversation(context, ref, userId, _itemName(item));
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to navigate: $e')),
-      );
-    }
+            context.showErrorToast('Failed to navigate: $e');    }
   }
 
   int? _asInt(dynamic value) {
@@ -564,10 +553,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to start conversation: $e')),
-        );
-      }
+                context.showErrorToast('Failed to start conversation: $e');      }
     }
   }
 
@@ -594,10 +580,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       });
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to navigate to group: $e')),
-        );
-      }
+                context.showErrorToast('Failed to navigate to group: $e');      }
     }
   }
 

@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -42,7 +44,7 @@ class _AttachItem {
   });
 }
 
-/// Compact attachment picker — small popup above the composer (desktop).
+/// Compact attachment picker — popup anchored above the composer attach button.
 class ChatAttachmentMenuSheet extends ConsumerWidget {
   final ChatAttachmentMenuCallbacks callbacks;
 
@@ -51,33 +53,62 @@ class ChatAttachmentMenuSheet extends ConsumerWidget {
     required this.callbacks,
   });
 
+  static const double _panelWidth = 300;
+  static const double _gapAboveAnchor = 8;
+
   static Future<void> show(
     BuildContext context,
     WidgetRef ref,
-    ChatAttachmentMenuCallbacks callbacks,
-  ) {
+    ChatAttachmentMenuCallbacks callbacks, {
+    required BuildContext anchorContext,
+  }) {
+    final anchorBox = anchorContext.findRenderObject() as RenderBox?;
+    final screenSize = MediaQuery.sizeOf(context);
+
+    double left = 12;
+    double bottom = 76;
+
+    if (anchorBox != null && anchorBox.hasSize) {
+      final anchorTopLeft = anchorBox.localToGlobal(Offset.zero);
+      final anchorSize = anchorBox.size;
+      final anchorCenterX = anchorTopLeft.dx + anchorSize.width / 2;
+
+      left = (anchorCenterX - _panelWidth / 2)
+          .clamp(8.0, screenSize.width - _panelWidth - 8);
+      // Bottom edge of panel sits [_gapAboveAnchor] above the attach button top.
+      bottom = screenSize.height - anchorTopLeft.dy + _gapAboveAnchor;
+    }
+
     return showGeneralDialog<void>(
       context: context,
       barrierDismissible: true,
       barrierLabel: 'Dismiss',
-      barrierColor: Colors.black26,
+      barrierColor: Colors.transparent,
       transitionDuration: const Duration(milliseconds: 120),
       pageBuilder: (dialogContext, _, __) {
-        return SafeArea(
-          child: Align(
-            alignment: Alignment.bottomLeft,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 76),
-              child: Material(
-                elevation: 8,
-                shadowColor: Colors.black38,
-                borderRadius: BorderRadius.circular(14),
-                clipBehavior: Clip.antiAlias,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 300),
-                  child: ChatAttachmentMenuSheet(callbacks: callbacks),
+        return GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTap: () => Navigator.pop(dialogContext),
+          child: Material(
+            type: MaterialType.transparency,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned(
+                  left: left,
+                  bottom: bottom,
+                  child: GestureDetector(
+                    onTap: () {},
+                    child: _GlassAttachmentPanel(
+                      isDark: Theme.of(dialogContext).brightness == Brightness.dark,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: _panelWidth),
+                        child: ChatAttachmentMenuSheet(callbacks: callbacks),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
           ),
         );
@@ -89,7 +120,7 @@ class ChatAttachmentMenuSheet extends ConsumerWidget {
             scale: Tween<double>(begin: 0.96, end: 1).animate(
               CurvedAnimation(parent: animation, curve: Curves.easeOut),
             ),
-            alignment: Alignment.bottomLeft,
+            alignment: Alignment.bottomCenter,
             child: child,
           ),
         );
@@ -100,8 +131,6 @@ class ChatAttachmentMenuSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final surface = Theme.of(context).dialogTheme.backgroundColor ??
-        Theme.of(context).colorScheme.surface;
     final primary = Theme.of(context).colorScheme.primary;
 
     void popThen(Future<void> Function() action) {
@@ -186,7 +215,7 @@ class ChatAttachmentMenuSheet extends ConsumerWidget {
     }
 
     return Container(
-      color: surface,
+      color: Colors.transparent,
       padding: const EdgeInsets.fromLTRB(10, 10, 10, 12),
       child: GridView.count(
         crossAxisCount: 4,
@@ -231,6 +260,45 @@ class ChatAttachmentMenuSheet extends ConsumerWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _GlassAttachmentPanel extends StatelessWidget {
+  const _GlassAttachmentPanel({required this.isDark, required this.child});
+
+  final bool isDark;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final fill = isDark
+        ? Colors.white.withValues(alpha: 0.10)
+        : Colors.white.withValues(alpha: 0.82);
+    final border = isDark
+        ? Colors.white.withValues(alpha: 0.14)
+        : Colors.white.withValues(alpha: 0.65);
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 28, sigmaY: 28),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: fill,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: border),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.12),
+                blurRadius: 24,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: child,
+        ),
       ),
     );
   }

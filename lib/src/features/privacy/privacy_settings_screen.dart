@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'privacy_repository.dart';
 import '../../core/providers.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/snackbar_helper.dart';
 
 final privacySettingsProvider = FutureProvider<Map<String, dynamic>>((ref) async {
   final repo = ref.read(privacyRepositoryProvider);
@@ -181,17 +182,11 @@ class _PrivacySettingsScreenState extends ConsumerState<PrivacySettingsScreen> {
       };
       await ref.read(privacyRepositoryProvider).updatePrivacySettings(settings);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Privacy settings updated')),
-        );
-      }
+                context.showSuccessToast('Privacy settings updated');      }
       ref.invalidate(privacySettingsProvider);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save: $e')),
-        );
-      }
+                context.showErrorToast('Failed to save: $e');      }
     } finally {
       if (mounted) {
         setState(() => _saving = false);

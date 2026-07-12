@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../theme/app_theme.dart';
 import '../chat_providers.dart';
 import '../models.dart';
+import '../../../utils/snackbar_helper.dart';
 
 class ShareGroupLinkScreen extends ConsumerStatefulWidget {
   final String shareText;
@@ -60,15 +61,9 @@ class _ShareGroupLinkScreenState extends ConsumerState<ShareGroupLinkScreen> {
 
       if (!mounted) return;
       Navigator.pop(context, true);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Link shared successfully')),
-      );
-    } catch (e) {
+            context.showSuccessToast('Link shared successfully');    } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to share: $e')),
-      );
-    } finally {
+            context.showErrorToast('Failed to share: $e');    } finally {
       if (mounted) {
         setState(() => _isLoading = false);
       }

@@ -7,6 +7,7 @@ import 'live_broadcast_repository.dart';
 import 'live_broadcast_social_overlay.dart';
 import 'live_broadcast_screen.dart' show liveBroadcastsProvider;
 import '../../core/providers.dart';
+import '../../utils/snackbar_helper.dart';
 
 /// PHASE 2: Broadcast Viewer Screen for Desktop
 /// Shows the live broadcast stream and chat with LiveKit integration
@@ -67,13 +68,7 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
     setState(() {
       _broadcaster = null;
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('This live has ended'),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-    Future<void>.delayed(const Duration(seconds: 2), () {
+        context.showInfoToast('This live has ended');    Future<void>.delayed(const Duration(seconds: 2), () {
       if (mounted && Navigator.of(context).canPop()) {
         Navigator.of(context).pop();
       }
@@ -291,13 +286,7 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
       _chatController.clear();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to send message: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+                context.showErrorToast('Failed to send message: $e');      }
     }
   }
 

@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/api_service.dart';
+import '../../services/product_analytics_service.dart';
 import 'models.dart';
 
 /// Custom exception for Sika API errors with error codes
@@ -185,6 +186,16 @@ class SikaRepository {
         'idempotency_key': key,
       });
       
+      ProductAnalytics.action(
+        'gift_sent',
+        feature: 'wallet',
+        properties: {
+          'coins': coins,
+          if (toUserId != null) 'to_user_id': toUserId,
+          if (postId != null) 'post_id': postId,
+        },
+      );
+
       return GiftResult.fromJson(response.data['data']);
     } on DioException catch (e) {
       _handleApiError(e);

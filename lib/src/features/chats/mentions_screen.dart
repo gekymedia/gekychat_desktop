@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api_service.dart';
 import '../../utils/date_formatter.dart';
+import '../../utils/snackbar_helper.dart';
 
 /// Screen that displays all @mentions for the current user
 class MentionsScreen extends ConsumerStatefulWidget {
@@ -62,10 +63,7 @@ class _MentionsScreenState extends ConsumerState<MentionsScreen> {
       });
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to mark as read: $e')),
-        );
-      }
+                context.showErrorToast('Failed to mark as read: $e');      }
     }
   }
 
@@ -83,16 +81,10 @@ class _MentionsScreenState extends ConsumerState<MentionsScreen> {
       });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('All mentions marked as read')),
-        );
-      }
+                context.showSuccessToast('All mentions marked as read');      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to mark all as read: $e')),
-        );
-      }
+                context.showErrorToast('Failed to mark all as read: $e');      }
     }
   }
 

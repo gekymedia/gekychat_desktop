@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers.dart';
 import '../notifications/desktop_inbox_notification.dart';
+import '../../utils/snackbar_helper.dart';
 
 final notificationSettingsProvider =
     FutureProvider<Map<String, dynamic>>((ref) async {
@@ -130,17 +131,11 @@ class _NotificationSettingsScreenState
       await prefs.setBool('desktop_notifications_enabled', _desktopEnabled ?? true);
       await prefs.setBool('notification_preview_enabled', _previewEnabled ?? true);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Settings updated')),
-        );
-      }
+                context.showSuccessToast('Settings updated');      }
       ref.invalidate(notificationSettingsProvider);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save: $e')),
-        );
-      }
+                context.showErrorToast('Failed to save: $e');      }
     } finally {
       if (mounted) {
         setState(() => _saving = false);

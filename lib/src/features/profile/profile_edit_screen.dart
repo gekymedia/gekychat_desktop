@@ -6,9 +6,23 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/providers.dart';
 import '../../core/session.dart';
+import '../../utils/snackbar_helper.dart';
+import '../../widgets/desktop_center_modal.dart';
 
 class ProfileEditScreen extends ConsumerStatefulWidget {
-  const ProfileEditScreen({super.key});
+  final bool forModal;
+
+  const ProfileEditScreen({super.key, this.forModal = false});
+
+  static Future<void> showModal(BuildContext context) {
+    return showDesktopCenterModal<void>(
+      context: context,
+      title: 'Edit profile',
+      maxWidth: 560,
+      maxHeightFraction: 0.88,
+      child: const ProfileEditScreen(forModal: true),
+    );
+  }
 
   @override
   ConsumerState<ProfileEditScreen> createState() => _ProfileEditScreenState();
@@ -28,6 +42,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
   Map<String, dynamic>? _userData;
   int? _selectedMonth;
   int? _selectedDay;
+  int? _selectedYear;
 
   @override
   void initState() {
@@ -54,7 +69,10 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
     try {
       final apiService = ref.read(apiServiceProvider);
       final response = await apiService.getProfile();
-      final userData = response.data as Map<String, dynamic>;
+      final raw = response.data;
+      final userData = raw is Map && raw['data'] is Map
+          ? Map<String, dynamic>.from(raw['data'] as Map)
+          : Map<String, dynamic>.from(raw as Map);
       
       setState(() {
         _userData = userData;
@@ -64,8 +82,15 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
         _phoneController.text = userData['phone'] ?? '';
         _usernameController.text = userData['username'] ?? '';
         _bioController.text = userData['bio'] ?? '';
-        _selectedMonth = userData['dob_month'];
-        _selectedDay = userData['dob_day'];
+        _selectedMonth = userData['dob_month'] is int
+            ? userData['dob_month'] as int
+            : int.tryParse('${userData['dob_month'] ?? ''}');
+        _selectedDay = userData['dob_day'] is int
+            ? userData['dob_day'] as int
+            : int.tryParse('${userData['dob_day'] ?? ''}');
+        _selectedYear = userData['dob_year'] is int
+            ? userData['dob_year'] as int
+            : int.tryParse('${userData['dob_year'] ?? ''}');
         _currentAvatarUrl = userData['avatar_url'];
         _isLoading = false;
       });
@@ -74,10 +99,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
         _isLoading = false;
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load profile: $e')),
-        );
-      }
+                context.showErrorToast('Failed to load profile: $e');      }
     }
   }
 
@@ -96,10 +118,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
 
   Future<void> _saveProfile() async {
     if (_nameController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Name cannot be empty')),
-      );
-      return;
+            context.showInfoToast('Name cannot be empty');      return;
     }
 
     setState(() {
@@ -117,6 +136,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
         bio: _bioController.text.trim().isEmpty ? null : _bioController.text.trim(),
         dobMonth: _selectedMonth,
         dobDay: _selectedDay,
+        dobYear: _selectedYear,
         avatar: _selectedAvatar,
       );
 
@@ -124,17 +144,11 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
         // Invalidate the current user provider to refresh profile data
         ref.invalidate(currentUserProvider);
         
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profile updated successfully')),
-        );
-        Navigator.pop(context);
+                context.showSuccessToast('Profile updated successfully');        Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update profile: $e')),
-        );
-      }
+                context.showErrorToast('Failed to update profile: $e');      }
     } finally {
       if (mounted) {
         setState(() {
@@ -148,42 +162,15 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            if (context.canPop()) {
-              context.pop();
-            } else {
-              context.go('/chats');
-            }
-          },
-        ),
-        title: const Text('Edit Profile'),
-        actions: [
-          TextButton(
-            onPressed: _isSaving ? null : _saveProfile,
-            child: _isSaving
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('Save'),
-          ),
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: Center(
-                child: Container(
-                  constraints: const BoxConstraints(maxWidth: 600),
-                  child: Column(
-                    children: [
+    final body = _isLoading
+        ? const Center(child: CircularProgressIndicator())
+        : SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Center(
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 600),
+                child: Column(
+                  children: [
                       // Avatar
                       GestureDetector(
                         onTap: _pickImage,
@@ -285,6 +272,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
                       Row(
                         children: [
                           Expanded(
+                            flex: 2,
                             child: DropdownButtonFormField<int>(
                               initialValue: _selectedMonth,
                               decoration: const InputDecoration(
@@ -331,6 +319,26 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
                           ),
                         ],
                       ),
+                      const SizedBox(height: 24),
+                      DropdownButtonFormField<int>(
+                        initialValue: _selectedYear,
+                        decoration: const InputDecoration(
+                          labelText: 'Birth Year',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: List.generate(121, (i) {
+                          final year = DateTime.now().year - i;
+                          return DropdownMenuItem(
+                            value: year,
+                            child: Text(year.toString()),
+                          );
+                        }),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedYear = value;
+                          });
+                        },
+                      ),
                       const SizedBox(height: 32),
                       
                       // Save button
@@ -359,7 +367,40 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
                   ),
                 ),
               ),
-            ),
+            );
+
+    if (widget.forModal) {
+      return body;
+    }
+
+    return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/chats');
+            }
+          },
+        ),
+        title: const Text('Edit Profile'),
+        actions: [
+          TextButton(
+            onPressed: _isSaving ? null : _saveProfile,
+            child: _isSaving
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Save'),
+          ),
+        ],
+      ),
+      body: body,
     );
   }
 }

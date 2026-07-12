@@ -15,10 +15,13 @@ import '../chats/chat_providers.dart';
 import '../chats/sidebar_inbox_bump.dart';
 import '../../realtime/pusher_message_payload.dart';
 import '../realtime/pusher_service.dart';
+import '../../services/inbox_realtime_sync.dart';
 import '../../utils/world_feed_link_navigation.dart';
 import 'desktop_inbox_notification.dart';
+import 'desktop_notification_constants.dart';
 import 'desktop_notification_service.dart';
 import 'notification_service.dart';
+import 'package:uuid/uuid.dart';
 
 class NotificationManager {
   final NotificationService _service;
@@ -186,6 +189,26 @@ class NotificationManager {
   void _setupHandlers() {
     _service.onForegroundNotification = (data) {
       debugPrint('📨 Foreground notification: $data');
+      if (_ref == null) return;
+
+      final type = data['type']?.toString() ?? data['action']?.toString();
+      final isIncomingCall = type == 'invite' ||
+          type == 'incoming_call' ||
+          type == 'call_invite' ||
+          (data['session_id'] != null && data['caller'] is Map);
+
+      if (!isIncomingCall) return;
+
+      try {
+        final handler = (_ref as dynamic).read(incomingCallHandlerProvider)
+            as IncomingCallHandler;
+        handler.handleIncomingCallFromConversation(
+          {'payload': Map<String, dynamic>.from(data)},
+          int.tryParse(data['conversation_id']?.toString() ?? ''),
+        );
+      } catch (e) {
+        debugPrint('⚠️ Foreground call invite forward failed: $e');
+      }
     };
 
     _service.onNotificationTap = (data) async {
@@ -303,9 +326,16 @@ class NotificationManager {
       final rawPayload = data['payload']?.toString() ??
           data['data']?.toString();
       if (rawPayload != null && rawPayload.isNotEmpty) {
-        final parsed = _parsePayloadString(rawPayload);
-        conversationId ??= _parseId(parsed?['conversation_id']);
-        groupId ??= _parseId(parsed?['group_id']);
+        final routing = parseWindowsReplyRouting(rawPayload);
+        if (routing != null) {
+          conversationId ??= _parseId(routing['conversation_id']);
+          groupId ??= _parseId(routing['group_id']);
+        }
+        if (conversationId == null && groupId == null) {
+          final parsed = _parsePayloadString(rawPayload);
+          conversationId ??= _parseId(parsed?['conversation_id']);
+          groupId ??= _parseId(parsed?['group_id']);
+        }
       }
     }
 
@@ -317,9 +347,22 @@ class NotificationManager {
     try {
       if (_ref != null) {
         final chatRepo = (_ref as dynamic).read(chatRepositoryProvider);
+        const uuid = Uuid();
+        final clientUuid = uuid.v4();
         if (groupId != null) {
           debugPrint('💬 Sending reply to group $groupId: $replyText');
-          await chatRepo.sendMessageToGroup(groupId: groupId, body: replyText);
+          final sent = await chatRepo.sendMessageToGroup(
+            groupId: groupId,
+            body: replyText,
+            clientUuid: clientUuid,
+          );
+          (_ref as dynamic).read(inboxLiveMessageProvider.notifier).state =
+              InboxLiveMessage(
+            conversationId: null,
+            groupId: groupId,
+            message: sent,
+            nonce: DateTime.now().microsecondsSinceEpoch,
+          );
           await clearGroupUnreadInSidebar(_ref as WidgetRef, groupId);
           try {
             await chatRepo.markGroupAsRead(groupId);
@@ -329,10 +372,27 @@ class NotificationManager {
         } else {
           debugPrint(
               '💬 Sending reply to conversation $conversationId: $replyText');
-          await chatRepo.sendMessageToConversation(
+          final sent = await chatRepo.sendMessageToConversation(
             conversationId: conversationId!,
             body: replyText,
+            clientUuid: clientUuid,
           );
+          (_ref as dynamic).read(inboxLiveMessageProvider.notifier).state =
+              InboxLiveMessage(
+            conversationId: conversationId,
+            groupId: null,
+            message: sent,
+            nonce: DateTime.now().microsecondsSinceEpoch,
+          );
+          try {
+            await bumpConversationInSidebar(
+              _ref as WidgetRef,
+              conversationId: conversationId,
+              message: sent,
+            );
+          } catch (e) {
+            debugPrint('Sidebar bump after notification reply: $e');
+          }
           await clearConversationUnreadInSidebar(
             _ref as WidgetRef,
             conversationId,

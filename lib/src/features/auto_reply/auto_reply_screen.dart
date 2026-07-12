@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'auto_reply_repository.dart';
+import '../../utils/snackbar_helper.dart';
 
 /// AUTO-REPLY: Screen for managing auto-reply rules
 class AutoReplyScreen extends ConsumerStatefulWidget {
@@ -186,20 +187,12 @@ class _AutoReplyScreenState extends ConsumerState<AutoReplyScreen> {
         }
         _loadRules();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
+                    context.showSuccessToast(
                 rule == null ? 'Auto-reply rule added' : 'Auto-reply rule updated',
-              ),
-            ),
-          );
-        }
+              );        }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed: $e')),
-          );
-        }
+                    context.showErrorToast('Failed: $e');        }
       }
     }
   }
@@ -230,16 +223,10 @@ class _AutoReplyScreenState extends ConsumerState<AutoReplyScreen> {
         await repo.deleteAutoReplyRule(rule.id);
         _loadRules();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Auto-reply rule deleted')),
-          );
-        }
+                    context.showSuccessToast('Auto-reply rule deleted');        }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to delete: $e')),
-          );
-        }
+                    context.showErrorToast('Failed to delete: $e');        }
       }
     }
   }
@@ -254,10 +241,7 @@ class _AutoReplyScreenState extends ConsumerState<AutoReplyScreen> {
       _loadRules();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update: $e')),
-        );
-      }
+                context.showErrorToast('Failed to update: $e');      }
     }
   }
 

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'desktop_shell_colors.dart';
+
 /// WhatsApp-style chat wallpaper — tiles the doodle asset instead of stretching it.
 ///
 /// Mobile chat uses [BoxFit.cover] on a small screen; on desktop the same asset is
@@ -11,28 +13,34 @@ class GekyChatDoodleBackground extends StatelessWidget {
 
   static const String assetPath = 'assets/images/gekychat_doodle_bg.png';
 
-  /// Matches mobile default doodle wallpaper (prior opacity × 0.8).
+  /// Doodle tile opacity — 30% softer than the mobile-aligned default.
   static double opacityForTheme(bool isDark) =>
-      isDark ? 0.123 * 0.8 : 0.156 * 0.8;
+      isDark ? 0.123 * 0.8 * 0.7 : 0.156 * 0.8 * 0.7;
 
-  /// Warm cream tint blended over chat wallpaper (matches mobile).
-  static const Color chatLightTint = Color(0xFFFFF5E6);
+  /// Warm cream tint — matches classic [ThemeData.scaffoldBackgroundColor].
+  static const Color chatLightTint = Color(0xFFECE5DD);
 
-  /// Overlay color on the message list — same formula as mobile chat/group screens.
+  /// Semi-transparent cream wash over the doodle (1:1 / group threads only).
   static Color chatMessageAreaOverlay(
     BuildContext context, {
     required bool isDark,
     bool isDragging = false,
   }) {
-    final base = Color.lerp(
-      Theme.of(context).colorScheme.surface,
-      chatLightTint,
-      isDark ? 0.0 : 0.42,
-    )!;
     if (isDark) {
+      final base = Theme.of(context).colorScheme.surface;
       return base.withValues(alpha: isDragging ? 0.70 : 0.30);
     }
-    return base.withValues(alpha: isDragging ? 0.36 : 0.28);
+
+    final cream = DesktopShellColors.chatThreadBackground(
+      context,
+      isDark: false,
+    );
+    final tinted = Color.lerp(
+      Theme.of(context).colorScheme.surface,
+      cream,
+      0.42,
+    )!;
+    return tinted.withValues(alpha: isDragging ? 0.36 : 0.28);
   }
 
   @override
@@ -78,7 +86,7 @@ class _ProceduralDoodlePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
       ..color = (isDark ? Colors.white : Colors.black)
-          .withValues(alpha: isDark ? 0.08 : 0.06)
+          .withValues(alpha: isDark ? 0.056 : 0.042)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.2;
 

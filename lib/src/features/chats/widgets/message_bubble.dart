@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
@@ -13,11 +14,14 @@ import 'package:video_player/video_player.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../services/download_path_service.dart';
+import '../../../utils/desktop_file_actions.dart';
 import '../../../utils/view_once_desktop_policy.dart';
 import '../models.dart';
+import '../reply_accent_strip.dart';
 import '../../../theme/app_theme.dart';
 import '../../../widgets/colored_avatar.dart';
 import 'message_info_dialog.dart';
+import 'package:dio/dio.dart';
 import '../../../core/providers.dart';
 import '../../../utils/display_text.dart';
 import '../../../utils/phone_matcher.dart';
@@ -32,6 +36,26 @@ import '../../calls/joinable_call_message.dart';
 import 'poll_message_widget.dart';
 import '../../calls/call_duration_format.dart';
 import 'media_gallery_viewer.dart';
+import 'video_message_poster.dart';
+import '../../../utils/snackbar_helper.dart';
+import '../../../widgets/desktop_glass_context_menu.dart';
+import '../../../widgets/desktop_glass_popup.dart';
+import '../../../widgets/desktop_menu_icons.dart';
+import '../../../widgets/desktop_typography.dart';
+import '../../../widgets/desktop_whatsapp_hover_chevron.dart';
+import 'desktop_chat_metrics.dart';
+
+const Duration _kClusterMaxGap = Duration(minutes: 10);
+
+bool _sameCalendarDay(DateTime a, DateTime b) =>
+    a.year == b.year && a.month == b.month && a.day == b.day;
+
+bool messagesClustered(Message? earlier, Message? later) {
+  if (earlier == null || later == null) return false;
+  if (earlier.isSystem || later.isSystem) return false;
+  if (!_sameCalendarDay(earlier.createdAt, later.createdAt)) return false;
+  return later.createdAt.difference(earlier.createdAt).abs() <= _kClusterMaxGap;
+}
 
 /// WhatsApp-style bubble text (aligned with mobile [enhanced_message_bubble]).
 const Color _kWaSentTextLight = Color(0xFF111B21);
@@ -98,6 +122,11 @@ class MessageBubble extends ConsumerWidget {
   final Function(String)? onReact;
   final VoidCallback? onReplyPrivately;
   final Function(String)? onEdit;
+  final void Function(bool pin)? onPin;
+  final VoidCallback? onSelectMode;
+  final bool isSelectionMode;
+  final bool isSelected;
+  final VoidCallback? onSelectionToggle;
   final bool isGroupMessage;
   final bool isChannel; // Whether this is a channel message
   final String? channelName; // Channel name (to use instead of admin name)
@@ -113,6 +142,8 @@ class MessageBubble extends ConsumerWidget {
   final Future<void> Function(Message message)? onDeleteMessage;
   /// Map of sender user ID → contact-book display name for group senders.
   final Map<int, String>? contactNames;
+  final Message? previousMessage;
+  final Message? nextMessage;
 
   const MessageBubble({
     super.key,
@@ -124,6 +155,11 @@ class MessageBubble extends ConsumerWidget {
     this.onReact,
     this.onReplyPrivately,
     this.onEdit,
+    this.onPin,
+    this.onSelectMode,
+    this.isSelectionMode = false,
+    this.isSelected = false,
+    this.onSelectionToggle,
     this.isGroupMessage = false,
     this.isChannel = false,
     this.channelName,
@@ -138,9 +174,94 @@ class MessageBubble extends ConsumerWidget {
     this.onForwardToMessage,
     this.onDeleteMessage,
     this.contactNames,
+    this.previousMessage,
+    this.nextMessage,
   });
 
   bool isMe(int currentUserId) => message.senderId == currentUserId;
+
+  bool _isCallMessage() =>
+      message.callData != null ||
+      message.messageType == 'call' ||
+      message.messageType == 'voice_call' ||
+      message.messageType == 'video_call';
+
+  bool _bubbleContinuation(int currentUserId) {
+    if (_isCallMessage()) return false;
+    final previous = previousMessage;
+    if (previous == null) return false;
+    final prevIsMe = previous.senderId == currentUserId;
+    if (prevIsMe != isMe(currentUserId)) return false;
+    if (!messagesClustered(previous, message)) return false;
+    if (!isMe(currentUserId) && isGroupMessage) {
+      return previous.senderId == message.senderId;
+    }
+    return true;
+  }
+
+  bool _nextContinuesCluster(int currentUserId) {
+    if (_isCallMessage()) return false;
+    final next = nextMessage;
+    if (next == null) return false;
+    final nextIsMe = next.senderId == currentUserId;
+    if (nextIsMe != isMe(currentUserId)) return false;
+    if (!messagesClustered(message, next)) return false;
+    if (!isMe(currentUserId) && isGroupMessage) {
+      return next.senderId == message.senderId;
+    }
+    return true;
+  }
+
+  bool _showGroupSenderRow(int currentUserId) {
+    if (!isGroupMessage || isMe(currentUserId) || message.sender == null) {
+      return false;
+    }
+    return !_bubbleContinuation(currentUserId);
+  }
+
+  BorderRadius _bubbleBorderRadius(int currentUserId) {
+    if (_bubbleContinuation(currentUserId)) {
+      return BorderRadius.circular(6);
+    }
+    final isMeValue = isMe(currentUserId);
+    const topRadius = 12.0;
+    const innerRadius = 6.0;
+    const outerRadius = 14.0;
+    final bottomOuter = _nextContinuesCluster(currentUserId)
+        ? const Radius.circular(innerRadius)
+        : const Radius.circular(3);
+    return isMeValue
+        ? BorderRadius.only(
+            topLeft: const Radius.circular(topRadius),
+            topRight: const Radius.circular(topRadius),
+            bottomLeft: const Radius.circular(outerRadius),
+            bottomRight: bottomOuter,
+          )
+        : BorderRadius.only(
+            topLeft: const Radius.circular(topRadius),
+            topRight: const Radius.circular(topRadius),
+            bottomLeft: bottomOuter,
+            bottomRight: const Radius.circular(outerRadius),
+          );
+  }
+
+  List<BoxShadow>? _bubbleShadow(bool isDark) {
+    if (isDark) return null;
+    return [
+      BoxShadow(
+        color: Colors.black.withValues(alpha: 0.06),
+        blurRadius: 1,
+        offset: const Offset(0, 0.5),
+      ),
+    ];
+  }
+
+  EdgeInsets _bubbleMargin(int currentUserId) {
+    final gap = _bubbleContinuation(currentUserId)
+        ? DesktopChatMetrics.messageClusterGap
+        : DesktopChatMetrics.messageBlockGap;
+    return EdgeInsets.fromLTRB(8, gap, 8, 0);
+  }
 
   /// Resolve the display name for a group message sender.
   /// Prefers the contact-book name from [contactNames] over the raw API name.
@@ -188,46 +309,51 @@ class MessageBubble extends ConsumerWidget {
     final subtitle =
         preview != null && preview.isNotEmpty ? preview : 'Tap to view in group';
 
-    final content = Container(
-      margin: const EdgeInsets.only(bottom: 4),
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.05),
+    final content = Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: ReplyAccentStrip(
+        accentColor: borderColor,
+        backgroundColor: Theme.of(
+          context,
+        ).colorScheme.onSurface.withOpacity(0.05),
+        accentWidth: 3,
         borderRadius: BorderRadius.circular(8),
-        border: Border(left: BorderSide(color: borderColor, width: 3)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Icon(Icons.groups_rounded, size: 22, color: borderColor.withOpacity(0.9)),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: borderColor,
-                  ),
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Icon(Icons.groups_rounded, size: 22, color: borderColor.withOpacity(0.9)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: borderColor,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color:
+                            Theme.of(context).colorScheme.onSurface.withOpacity(0.8),
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color:
-                        Theme.of(context).colorScheme.onSurface.withOpacity(0.8),
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
 
@@ -287,73 +413,78 @@ class MessageBubble extends ConsumerWidget {
       subtitle = 'Tap to open';
     }
 
-    final content = Container(
-      margin: const EdgeInsets.only(bottom: 4),
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.05),
+    final content = Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: ReplyAccentStrip(
+        accentColor: borderColor,
+        backgroundColor: Theme.of(
+          context,
+        ).colorScheme.onSurface.withOpacity(0.05),
+        accentWidth: 3,
         borderRadius: BorderRadius.circular(8),
-        border: Border(left: BorderSide(color: borderColor, width: 3)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          if (thumbUrl != null &&
-              thumbUrl.isNotEmpty &&
-              !expired)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: CachedNetworkImage(
-                imageUrl: thumbUrl,
-                width: 40,
-                height: 40,
-                fit: BoxFit.cover,
-                errorWidget: (_, __, ___) => Icon(
-                  Icons.image_outlined,
-                  size: 28,
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: Icon(
-                expired
-                    ? Icons.hourglass_disabled_outlined
-                    : Icons.auto_stories_outlined,
-                size: 26,
-                color: borderColor.withOpacity(0.9),
-              ),
-            ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: borderColor,
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              if (thumbUrl != null &&
+                  thumbUrl.isNotEmpty &&
+                  !expired)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: CachedNetworkImage(
+                    imageUrl: thumbUrl,
+                    width: 40,
+                    height: 40,
+                    fit: BoxFit.cover,
+                    errorWidget: (_, __, ___) => Icon(
+                      Icons.image_outlined,
+                      size: 28,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Icon(
+                    expired
+                        ? Icons.hourglass_disabled_outlined
+                        : Icons.auto_stories_outlined,
+                    size: 26,
+                    color: borderColor.withOpacity(0.9),
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color:
-                        Theme.of(context).colorScheme.onSurface.withOpacity(0.8),
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: borderColor,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color:
+                            Theme.of(context).colorScheme.onSurface.withOpacity(0.8),
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
 
@@ -394,7 +525,7 @@ class MessageBubble extends ConsumerWidget {
       return _buildSystemMessage(context, isDark);
     }
 
-    return Align(
+    final bubble = Align(
       alignment: isMeValue ? Alignment.centerRight : Alignment.centerLeft,
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -402,12 +533,50 @@ class MessageBubble extends ConsumerWidget {
               ? constraints.maxWidth
               : MediaQuery.sizeOf(context).width;
           final bubbleMaxWidth =
-              (availableWidth * 0.78).clamp(200.0, 520.0);
-          return GestureDetector(
-        onLongPress: () => _showMessageMenu(context, context, isMeValue),
-        onSecondaryTapDown: (details) => _showMessageMenuAtPosition(context, details.globalPosition, isMeValue),
+              DesktopChatMetrics.bubbleMaxWidth(availableWidth);
+          return _MessageBubbleHoverChrome(
+            isMe: isMeValue,
+            isDark: isDark,
+            enabled: !isSelectionMode,
+            onMore: () {
+              final box = context.findRenderObject() as RenderBox?;
+              final position = box != null
+                  ? box.localToGlobal(box.size.center(Offset.zero))
+                  : Offset(
+                      MediaQuery.sizeOf(context).width / 2,
+                      MediaQuery.sizeOf(context).height / 2,
+                    );
+              _showMessageMenuAtPosition(context, position, isMeValue);
+            },
+            child: GestureDetector(
+        onTap: isSelectionMode ? onSelectionToggle : null,
+        onLongPress: isSelectionMode
+            ? null
+            : () {
+          final box = context.findRenderObject() as RenderBox?;
+          final position = box != null
+              ? box.localToGlobal(box.size.center(Offset.zero))
+              : Offset(
+                  MediaQuery.sizeOf(context).width / 2,
+                  MediaQuery.sizeOf(context).height / 2,
+                );
+          _showMessageMenuAtPosition(context, position, isMeValue);
+        },
+        onSecondaryTapDown: isSelectionMode
+            ? null
+            : (details) =>
+            _showMessageMenuAtPosition(context, details.globalPosition, isMeValue),
         child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          margin: _bubbleMargin(currentUserId),
+          decoration: isSelectionMode && isSelected
+              ? BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: const Color(0xFF008069).withValues(alpha: 0.85),
+                    width: 2,
+                  ),
+                )
+              : null,
           child: ConstrainedBox(
             constraints: BoxConstraints(maxWidth: bubbleMaxWidth),
             child: Column(
@@ -432,19 +601,15 @@ class MessageBubble extends ConsumerWidget {
                           width: 1.5,
                         )
                       : null,
-                  borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(12),
-                    topRight: const Radius.circular(12),
-                    bottomLeft: Radius.circular(isMeValue ? 12 : 2),
-                    bottomRight: Radius.circular(isMeValue ? 2 : 12),
-                  ),
+                  borderRadius: _bubbleBorderRadius(currentUserId),
+                  boxShadow: _bubbleShadow(isDark),
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     // Group sender above reply preview (WhatsApp order).
-                    if (!isMeValue && isGroupMessage && message.sender != null)
+                    if (_showGroupSenderRow(currentUserId))
                       Padding(
                         padding: const EdgeInsets.only(bottom: 4),
                         child: Row(
@@ -549,6 +714,18 @@ class MessageBubble extends ConsumerWidget {
                         message.linkPreviews != null &&
                         message.linkPreviews!.isNotEmpty)
                       ...message.linkPreviews!.map((preview) => _buildLinkPreview(context, ref, preview, isDark)),
+
+                    if (gkLink != null &&
+                        !message.isDeleted &&
+                        (gkLink.kind == GekychatChatLinkKind.groupJoin ||
+                            gkLink.kind == GekychatChatLinkKind.groupOpen ||
+                            gkLink.kind == GekychatChatLinkKind.channel))
+                      _GekychatLinkCtaRow(
+                        message: message,
+                        link: gkLink,
+                        isDark: isDark,
+                        isMe: isMeValue,
+                      ),
 
                     // Deleted message indicator (WhatsApp style)
                     if (message.isDeleted)
@@ -689,9 +866,49 @@ class MessageBubble extends ConsumerWidget {
           ),
         ),
         ),
+          ),
           );
         },
       ),
+    );
+
+    if (!isSelectionMode) {
+      return bubble;
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, right: 8, top: 6),
+          child: GestureDetector(
+            onTap: onSelectionToggle,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? const Color(0xFF008069)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(
+                  color: isSelected
+                      ? const Color(0xFF008069)
+                      : (isDark
+                          ? Colors.white38
+                          : Colors.black26),
+                  width: 2,
+                ),
+              ),
+              child: isSelected
+                  ? const Icon(Icons.check, color: Colors.white, size: 16)
+                  : null,
+            ),
+          ),
+        ),
+        Expanded(child: bubble),
+      ],
     );
   }
 
@@ -852,59 +1069,57 @@ class MessageBubble extends ConsumerWidget {
     MessageAttachment attachment,
     bool isSent,
   ) {
-    // MEDIA COMPRESSION: Use thumbnail if available, otherwise use video URL
-    final thumbnailUrl = attachment.thumbnailUrl;
     final isCompressing = attachment.isCompressing;
-    
+
     return GestureDetector(
       onTap: () => _openAttachmentInGallery(context, attachment, isSent),
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         child: Container(
-      height: 200,
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: Colors.black,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          if (thumbnailUrl != null && thumbnailUrl.isNotEmpty)
-            CachedNetworkImage(
-              imageUrl: thumbnailUrl,
-              fit: BoxFit.cover,
-              width: double.infinity,
-            ),
-          // MEDIA COMPRESSION: Show compression indicator
-          // Only show "Sending..." if message status is actually "sending" or "queued"
-          // Don't show it just because compression is pending (compression can happen in background)
-          if (isCompressing && (message.status == 'sending' || message.status == 'queued'))
-            Container(
-              color: Colors.black.withOpacity(0.5),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const CircularProgressIndicator(color: Colors.white),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Sending...',
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
-                  ),
-                ],
-              ),
-            ),
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.3),
-              shape: BoxShape.circle,
-            ),
-            padding: const EdgeInsets.all(16),
-            child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 36),
+          height: 200,
+          margin: const EdgeInsets.only(bottom: 8),
+          decoration: BoxDecoration(
+            color: Colors.black,
+            borderRadius: BorderRadius.circular(8),
           ),
-        ],
-      ),
-      ),
+          child: Stack(
+            alignment: Alignment.center,
+            fit: StackFit.expand,
+            children: [
+              VideoMessagePoster(attachment: attachment),
+              if (isCompressing &&
+                  (message.status == 'sending' || message.status == 'queued'))
+                Container(
+                  color: Colors.black.withOpacity(0.5),
+                  child: const Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(color: Colors.white),
+                      SizedBox(height: 8),
+                      Text(
+                        'Sending...',
+                        style: TextStyle(color: Colors.white, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              IgnorePointer(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.3),
+                    shape: BoxShape.circle,
+                  ),
+                  padding: const EdgeInsets.all(16),
+                  child: const Icon(
+                    Icons.play_arrow_rounded,
+                    color: Colors.white,
+                    size: 36,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -939,207 +1154,87 @@ class MessageBubble extends ConsumerWidget {
     );
   }
 
-  void _showMessageMenuAtPosition(BuildContext context, Offset position, bool isMeValue) {
-    final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-    _showMessageMenu(context, context, isMeValue, position: overlay.globalToLocal(position));
-  }
-
-  void _showMessageMenu(BuildContext context, BuildContext widgetContext, bool isMeValue, {Offset? position}) {
-    final screenSize = MediaQuery.of(context).size;
+  void _showMessageMenuAtPosition(
+    BuildContext context,
+    Offset globalPosition,
+    bool isMeValue,
+  ) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
-    // Use provided position or center of screen
-    final menuPosition = position ?? Offset(screenSize.width / 2, screenSize.height / 2);
-    final menuSize = const Size(200, 300); // Approximate menu size
-    
-    showMenu(
-      context: context,
-      position: RelativeRect.fromLTRB(
-        menuPosition.dx,
-        menuPosition.dy,
-        screenSize.width - menuPosition.dx - menuSize.width,
-        screenSize.height - menuPosition.dy - menuSize.height,
+    final fg = isDark ? Colors.white : const Color(0xFF111B21);
+    final items = <DesktopGlassMenuItem>[
+      DesktopGlassMenuItem(
+        icon: Icons.reply,
+        label: 'Reply',
+        onTap: () => onReply?.call(),
       ),
-      color: isDark ? const Color(0xFF2A3942) : Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      items: <PopupMenuEntry<dynamic>>[
-        PopupMenuItem(
-          child: Row(
-            children: [
-              Icon(Icons.reply, size: 20, color: isDark ? Colors.white70 : Colors.black87),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Reply',
-                  style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-                ),
-              ),
-            ],
-          ),
-          onTap: () {
-            Future.delayed(Duration.zero, () {
-              onReply?.call();
-            });
-          },
+      if (isMeValue && onEdit != null)
+        DesktopGlassMenuItem(
+          icon: Icons.edit_outlined,
+          label: 'Edit',
+          onTap: () => _showEditDialog(context),
         ),
-        // Message Info (for sent messages in groups)
-        if (isGroupMessage && isMeValue) ...<PopupMenuEntry<dynamic>>[
-          const PopupMenuDivider(),
-          PopupMenuItem(
-            child: Row(
-              children: [
-                Icon(Icons.info_outline, size: 20, color: isDark ? Colors.white70 : Colors.black87),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Message Info',
-                    style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-                  ),
-                ),
-              ],
-            ),
-            onTap: () {
-              Future.delayed(Duration.zero, () {
-                _showMessageInfo(widgetContext);
-              });
-            },
-          ),
-        ],
-        if (isGroupMessage && !isMeValue) ...<PopupMenuEntry<dynamic>>[
-          const PopupMenuDivider(),
-          PopupMenuItem(
-            child: Row(
-              children: [
-                Icon(Icons.person_outline, size: 20, color: isDark ? Colors.white70 : Colors.black87),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Reply Privately',
-                    style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-                  ),
-                ),
-              ],
-            ),
-            onTap: () {
-              Future.delayed(Duration.zero, () {
-                onReplyPrivately?.call();
-              });
-            },
-          ),
-        ],
-        PopupMenuItem(
-          child: Row(
-            children: [
-              Icon(Icons.add_reaction_outlined, size: 20, color: isDark ? Colors.white70 : Colors.black87),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'React',
-                  style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-                ),
-              ),
-            ],
-          ),
-          onTap: () {
-            Future.delayed(const Duration(milliseconds: 100), () {
-              if (widgetContext.mounted) {
-                _showReactionPicker(widgetContext);
-              }
-            });
-          },
+      if (onPin != null)
+        DesktopGlassMenuItem(
+          icon: Icons.push_pin_outlined,
+          label: 'Pin',
+          onTap: () => onPin!.call(true),
         ),
-        const PopupMenuDivider(),
-        PopupMenuItem(
-          child: Row(
-            children: [
-              Icon(Icons.copy, size: 20, color: isDark ? Colors.white70 : Colors.black87),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Copy',
-                  style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-                ),
-              ),
-            ],
-          ),
-          onTap: () {
-            Future.delayed(Duration.zero, () async {
-              await Clipboard.setData(ClipboardData(text: message.body));
+      if (isGroupMessage && isMeValue)
+        DesktopGlassMenuItem(
+          icon: Icons.info_outline,
+          label: 'Message Info',
+          onTap: () => _showMessageInfo(context),
+        ),
+      if (isGroupMessage && !isMeValue)
+        DesktopGlassMenuItem(
+          icon: Icons.person_outline,
+          label: 'Reply Privately',
+          onTap: () => onReplyPrivately?.call(),
+        ),
+      DesktopGlassMenuItem(
+        icon: Icons.copy,
+        label: 'Copy',
+        onTap: () async {
+          await Clipboard.setData(ClipboardData(text: message.body));
+          if (context.mounted) {
+            context.showSuccessToast('Message copied to clipboard');
+          }
+        },
+      ),
+      DesktopGlassMenuItem(
+        leading: DesktopMenuIcons.forward(fg),
+        label: 'Forward',
+        onTap: () => onForward?.call(),
+      ),
+      DesktopGlassMenuItem(
+        icon: Icons.delete_outline,
+        label: 'Delete',
+        isDestructive: true,
+        onTap: () => onDelete?.call(),
+      ),
+      if (onSelectMode != null)
+        DesktopGlassMenuItem(
+          icon: Icons.check_circle_outline,
+          label: 'Select',
+          onTap: () => onSelectMode!.call(),
+        ),
+    ];
+
+    DesktopGlassContextMenu.showAtPosition(
+      context: context,
+      globalPosition: globalPosition,
+      quickReactions: onReact != null
+          ? const ['👍', '❤️', '🔥', '😂', '😮', '👏']
+          : null,
+      onQuickReaction: onReact,
+      onMoreReactions: onReact != null
+          ? () {
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Message copied to clipboard'),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
+                _showReactionPicker(context);
               }
-            });
-          },
-        ),
-        PopupMenuItem(
-          child: Row(
-            children: [
-              Icon(Icons.forward, size: 20, color: isDark ? Colors.white70 : Colors.black87),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Forward',
-                  style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-                ),
-              ),
-            ],
-          ),
-          onTap: () {
-            Future.delayed(Duration.zero, () {
-              onForward?.call();
-            });
-          },
-        ),
-        if (isMeValue) ...<PopupMenuEntry<dynamic>>[
-          const PopupMenuDivider(),
-          PopupMenuItem(
-            child: Row(
-              children: [
-                Icon(Icons.edit_outlined, size: 20, color: isDark ? Colors.white70 : Colors.black87),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Edit',
-                    style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-                  ),
-                ),
-              ],
-            ),
-            onTap: () {
-              Future.delayed(const Duration(milliseconds: 100), () {
-                if (widgetContext.mounted && onEdit != null) {
-                  _showEditDialog(widgetContext);
-                }
-              });
-            },
-          ),
-        ],
-        const PopupMenuDivider(),
-        PopupMenuItem(
-          child: Row(
-            children: [
-              const Icon(Icons.delete_outline, size: 20, color: Colors.red),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Delete',
-                  style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w500),
-                ),
-              ),
-            ],
-          ),
-          onTap: () {
-            Future.delayed(Duration.zero, () {
-              onDelete?.call();
-            });
-          },
-        ),
-      ],
+            }
+          : null,
+      items: items,
     );
   }
 
@@ -1183,10 +1278,28 @@ class MessageBubble extends ConsumerWidget {
       if (cleaned.isNotEmpty) return cleaned;
       return switch (special.kind) {
         GekychatChatLinkKind.channel => 'Shared a GekyChat channel',
+        GekychatChatLinkKind.groupJoin || GekychatChatLinkKind.groupOpen =>
+          _entityTypeFromPreviews() == 'channel'
+              ? 'Shared a GekyChat channel'
+              : 'Shared a GekyChat group invite',
         _ => 'Shared a GekyChat group invite',
       };
     }
     return text;
+  }
+
+  String? _entityTypeFromPreviews() {
+    final previews = message.linkPreviews;
+    if (previews == null) return null;
+    for (final preview in previews) {
+      if (preview is! Map) continue;
+      final entityType = preview['entity_type'] ?? preview['group_type'];
+      if (entityType == 'channel') return 'channel';
+      if (entityType == 'group') return 'group';
+      final desc = preview['description']?.toString().toLowerCase() ?? '';
+      if (desc.contains('channel')) return 'channel';
+    }
+    return null;
   }
 
   Widget _buildWorldFeedLinkHeader(bool isDark, bool isMeValue) {
@@ -2104,41 +2217,60 @@ class MessageBubble extends ConsumerWidget {
         ? Colors.black.withValues(alpha: 0.18)
         : Colors.black.withValues(alpha: 0.05);
 
-    final strip = Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
-      decoration: BoxDecoration(
-        color: stripBg,
+    final quoteThumb = ReplyQuoteThumbnail.fromMessage(original);
+
+    final strip = Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: ReplyAccentStrip(
+        accentColor: accent,
+        backgroundColor: stripBg,
+        accentWidth: 3,
         borderRadius: BorderRadius.circular(6),
-        border: Border(left: BorderSide(color: accent, width: 3)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            senderLabel,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: accent,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+        trailing: quoteThumb.hasThumb
+            ? ReplyQuoteThumbnail(
+                localPath: quoteThumb.localPath,
+                networkUrl: quoteThumb.networkUrl,
+                showPlayIcon: quoteThumb.isVideo,
+                size: 40,
+              )
+            : null,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            8,
+            6,
+            quoteThumb.hasThumb ? 6 : 8,
+            6,
           ),
-          const SizedBox(height: 2),
-          Text(
-            replyText,
-            style: TextStyle(
-              fontSize: 12,
-              color: isDark
-                  ? _kWaIncomingTextDark.withValues(alpha: 0.85)
-                  : _kWaIncomingTextLight.withValues(alpha: 0.78),
-            ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                senderLabel,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: accent,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 2),
+              Text(
+                replyText,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isDark
+                      ? _kWaIncomingTextDark.withValues(alpha: 0.85)
+                      : _kWaIncomingTextLight.withValues(alpha: 0.78),
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
 
@@ -2168,8 +2300,9 @@ class MessageBubble extends ConsumerWidget {
     final textColor = _bubbleTextColor(isMe, isDark);
     final baseStyle = TextStyle(
       color: textColor,
-      fontSize: 15,
+      fontSize: DesktopTypography.messageBodySize,
       height: 1.4,
+      fontFamily: DesktopTypography.fontFamily,
     );
 
     // Parse formatted text first
@@ -2489,18 +2622,12 @@ class MessageBubble extends ConsumerWidget {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       } else {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Could not open $url')),
-          );
-        }
+                    context.showErrorToast('Could not open $url');        }
       }
     } catch (e) {
       debugPrint('Error launching URL: $e');
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to open link: $e')),
-        );
-      }
+                context.showErrorToast('Failed to open link: $e');      }
     }
   }
 
@@ -2535,10 +2662,7 @@ class MessageBubble extends ConsumerWidget {
                 Navigator.pop(dialogContext);
                 await Clipboard.setData(ClipboardData(text: phone));
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Phone number copied to clipboard')),
-                  );
-                }
+                                    context.showSuccessToast('Phone number copied to clipboard');                }
               },
             ),
           ],
@@ -2592,12 +2716,7 @@ class MessageBubble extends ConsumerWidget {
 
       if (userId == null) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('$phone is not on GekyChat yet. Use Invite to send them a link.'),
-            ),
-          );
-        }
+                    context.showInfoToast('$phone is not on GekyChat yet. Use Invite to send them a link.');        }
         return;
       }
 
@@ -2614,10 +2733,7 @@ class MessageBubble extends ConsumerWidget {
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to start chat: $e')),
-        );
-      }
+                context.showErrorToast('Failed to start chat: $e');      }
     }
   }
 
@@ -2752,10 +2868,7 @@ class _DocumentAttachmentTileState extends ConsumerState<_DocumentAttachmentTile
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to open file: $e')),
-        );
-      }
+                context.showErrorToast('Failed to open file: $e');      }
     }
   }
 
@@ -2808,13 +2921,15 @@ class _DocumentAttachmentTileState extends ConsumerState<_DocumentAttachmentTile
           _downloadProgress = 0;
           _refreshToken++;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Downloaded to Downloads/GekyChat/$fileName'),
-            action: SnackBarAction(
-              label: 'Open',
-              onPressed: () => _openFile(savePath),
-            ),
+        SnackbarHelper.showSuccess(
+          context,
+          'Downloaded $fileName',
+          duration: const Duration(seconds: 5),
+          action: SnackBarAction(
+            label: 'Show in folder',
+            onPressed: () {
+              unawaited(DesktopFileActions.revealInFileManager(savePath));
+            },
           ),
         );
       }
@@ -2824,10 +2939,65 @@ class _DocumentAttachmentTileState extends ConsumerState<_DocumentAttachmentTile
           _isDownloading = false;
           _downloadProgress = 0;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to download: $e')),
-        );
-      }
+                context.showErrorToast('Failed to download: $e');      }
+    }
+  }
+
+  Future<void> _showDocumentContextMenu(
+    Offset globalPosition,
+    bool fileExists,
+    String? localPath,
+  ) async {
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    final overlaySize = overlay?.size ?? MediaQuery.sizeOf(context);
+
+    final value = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        globalPosition.dx,
+        globalPosition.dy,
+        overlaySize.width - globalPosition.dx,
+        overlaySize.height - globalPosition.dy,
+      ),
+      items: [
+        PopupMenuItem(
+          value: fileExists ? 'open' : 'download',
+          child: Row(
+            children: [
+              Icon(
+                fileExists ? Icons.open_in_new_rounded : Icons.download_rounded,
+                size: 18,
+              ),
+              const SizedBox(width: 12),
+              Text(fileExists ? 'Open' : 'Download'),
+            ],
+          ),
+        ),
+        if (fileExists && localPath != null)
+          const PopupMenuItem(
+            value: 'reveal',
+            child: Row(
+              children: [
+                Icon(Icons.folder_open_rounded, size: 18),
+                SizedBox(width: 12),
+                Text('Show in folder'),
+              ],
+            ),
+          ),
+      ],
+    );
+
+    if (!mounted || value == null) return;
+    switch (value) {
+      case 'open':
+        if (localPath != null) await _openFile(localPath);
+      case 'download':
+        await _downloadFile();
+      case 'reveal':
+        if (localPath != null) {
+          await DesktopFileActions.revealInFileManager(localPath);
+        }
     }
   }
 
@@ -2860,6 +3030,15 @@ class _DocumentAttachmentTileState extends ConsumerState<_DocumentAttachmentTile
           onTap: () async {
             final localPath = await _resolveLocalPath();
             await _handleTap(fileExists, localPath);
+          },
+          onSecondaryTapDown: (details) async {
+            final localPath = await _resolveLocalPath();
+            if (!mounted) return;
+            await _showDocumentContextMenu(
+              details.globalPosition,
+              fileExists && localPath != null,
+              localPath,
+            );
           },
           child: MouseRegion(
             cursor: SystemMouseCursors.click,
@@ -2920,6 +3099,19 @@ class _DocumentAttachmentTileState extends ConsumerState<_DocumentAttachmentTile
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          if (fileExists)
+                            IconButton(
+                              tooltip: 'Show in folder',
+                              icon: const Icon(Icons.folder_open_rounded, size: 18),
+                              visualDensity: VisualDensity.compact,
+                              onPressed: () async {
+                                final localPath = await _resolveLocalPath();
+                                if (localPath == null) return;
+                                await DesktopFileActions.revealInFileManager(
+                                  localPath,
+                                );
+                              },
+                            ),
                           Padding(
                             padding: const EdgeInsets.only(right: 4),
                             child: Text(
@@ -3261,19 +3453,25 @@ class _ViewOnceVideoViewer extends StatefulWidget {
 class _ViewOnceVideoViewerState extends State<_ViewOnceVideoViewer> {
   VideoPlayerController? _controller;
   bool _isPlaying = false;
+  bool _disposed = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.url))
-      ..initialize().then((_) {
-        if (mounted) setState(() {});
-      });
+    final controller = VideoPlayerController.networkUrl(Uri.parse(widget.url));
+    _controller = controller;
+    controller.initialize().then((_) {
+      if (!mounted || _disposed) return;
+      setState(() {});
+    }).catchError((_) {});
   }
 
   @override
   void dispose() {
-    _controller?.dispose();
+    _disposed = true;
+    final controller = _controller;
+    _controller = null;
+    controller?.dispose().catchError((_) {});
     super.dispose();
   }
 
@@ -3600,6 +3798,266 @@ class _VoiceMessagePlayerState extends ConsumerState<VoiceMessagePlayer> with Si
                     ),
                   ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Join / follow / open CTA for GekyChat group and channel links in bubbles.
+class _GekychatLinkCtaRow extends ConsumerStatefulWidget {
+  final Message message;
+  final GekychatChatLinkMatch link;
+  final bool isDark;
+  final bool isMe;
+
+  const _GekychatLinkCtaRow({
+    required this.message,
+    required this.link,
+    required this.isDark,
+    required this.isMe,
+  });
+
+  @override
+  ConsumerState<_GekychatLinkCtaRow> createState() =>
+      _GekychatLinkCtaRowState();
+}
+
+class _GekychatLinkCtaRowState extends ConsumerState<_GekychatLinkCtaRow> {
+  bool _busy = false;
+  String? _resolvedEntityType;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolveEntityType();
+  }
+
+  @override
+  void didUpdateWidget(covariant _GekychatLinkCtaRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.message.id != widget.message.id ||
+        oldWidget.link.matchedUrl != widget.link.matchedUrl) {
+      _resolvedEntityType = null;
+      _resolveEntityType();
+    }
+  }
+
+  String? _entityTypeFromPreviews() {
+    final previews = widget.message.linkPreviews;
+    if (previews == null || previews.isEmpty) return null;
+    for (final preview in previews) {
+      if (preview is! Map) continue;
+      final entityType = preview['entity_type'] ?? preview['group_type'];
+      if (entityType == 'channel') return 'channel';
+      if (entityType == 'group') return 'group';
+      final desc = preview['description']?.toString().toLowerCase() ?? '';
+      if (desc.contains('channel')) return 'channel';
+    }
+    return null;
+  }
+
+  bool _linkTargetIsChannel() {
+    if (widget.link.kind == GekychatChatLinkKind.channel) return true;
+    return _resolvedEntityType == 'channel';
+  }
+
+  String _ctaLabel() {
+    final isChannel = _linkTargetIsChannel();
+    return switch (widget.link.kind) {
+      GekychatChatLinkKind.groupJoin =>
+        isChannel ? 'Follow channel' : 'Join group',
+      GekychatChatLinkKind.groupOpen =>
+        isChannel ? 'Open channel' : 'Open group',
+      GekychatChatLinkKind.channel => 'Follow channel',
+      _ => '',
+    };
+  }
+
+  Future<void> _resolveEntityType() async {
+    final fromPreview = _entityTypeFromPreviews();
+    if (fromPreview != null) {
+      if (mounted) setState(() => _resolvedEntityType = fromPreview);
+      return;
+    }
+    if (widget.link.kind == GekychatChatLinkKind.channel) {
+      if (mounted) setState(() => _resolvedEntityType = 'channel');
+      return;
+    }
+    try {
+      final api = ref.read(apiServiceProvider);
+      final response = await api.lookupGroup(
+        id: widget.link.groupId ?? widget.link.channelId,
+        inviteCode: widget.link.inviteCode,
+      );
+      final raw = response.data;
+      final data = raw is Map ? raw['data'] : null;
+      final type = data is Map ? data['type']?.toString() : null;
+      if (mounted && type != null && type.isNotEmpty) {
+        setState(() => _resolvedEntityType = type);
+      }
+    } catch (_) {}
+  }
+
+  void _openGroup(int groupId) {
+    ref.read(pendingDesktopGroupDeepLinkProvider.notifier).state =
+        (groupId: groupId, messageId: 0);
+  }
+
+  Future<void> _onTap() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final api = ref.read(apiServiceProvider);
+      final link = widget.link;
+
+      switch (link.kind) {
+        case GekychatChatLinkKind.groupJoin:
+          final code = link.inviteCode;
+          if (code == null || code.isEmpty) return;
+          if (_linkTargetIsChannel()) {
+            final lookup = await api.lookupGroup(inviteCode: code);
+            final data = lookup.data is Map ? lookup.data['data'] : null;
+            final id = data is Map ? data['id'] : null;
+            final groupId = id is int
+                ? id
+                : (id is num ? id.toInt() : int.tryParse('$id'));
+            if (groupId != null && groupId > 0) _openGroup(groupId);
+            return;
+          }
+          final response = await api.post('/groups/join/$code');
+          final raw = response.data;
+          if (raw is Map) {
+            final data = raw['data'];
+            final id = data is Map ? data['id'] : raw['group_id'];
+            final groupId = id is int
+                ? id
+                : (id is num ? id.toInt() : int.tryParse('$id'));
+            if (groupId != null && groupId > 0) {
+              _openGroup(groupId);
+              if (mounted) {
+                                context.showSuccessToast('Joined successfully');              }
+            }
+          }
+          break;
+        case GekychatChatLinkKind.groupOpen:
+          final gid = link.groupId;
+          if (gid != null) _openGroup(gid);
+          break;
+        case GekychatChatLinkKind.channel:
+          final cid = link.channelId;
+          if (cid != null) _openGroup(cid);
+          break;
+        default:
+          break;
+      }
+    } on DioException catch (e) {
+      final raw = e.response?.data;
+      if (raw is Map) {
+        final data = raw['data'];
+        final id = data is Map ? data['id'] : raw['group_id'];
+        final groupId = id is int
+            ? id
+            : (id is num ? id.toInt() : int.tryParse('$id'));
+        if (groupId != null && groupId > 0) {
+          _openGroup(groupId);
+          return;
+        }
+      }
+      if (mounted) {
+                context.showErrorToast('Could not complete action: $e');      }
+    } catch (e) {
+      if (mounted) {
+                context.showErrorToast('Could not complete action: $e');      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final label = _ctaLabel();
+    if (label.isEmpty) return const SizedBox.shrink();
+    final accent = widget.isDark ? Colors.white : const Color(0xFF111B21);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Divider(
+            height: 1,
+            color: widget.isDark ? Colors.white24 : Colors.black12,
+          ),
+          TextButton(
+            onPressed: _busy ? null : _onTap,
+            child: _busy
+                ? SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: accent,
+                    ),
+                  )
+                : Text(
+                    label,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Fade-in downward chevron on hover (WhatsApp Web–style), top-right of bubble.
+class _MessageBubbleHoverChrome extends StatefulWidget {
+  const _MessageBubbleHoverChrome({
+    required this.isMe,
+    required this.isDark,
+    required this.enabled,
+    required this.child,
+    this.onMore,
+  });
+
+  final bool isMe;
+  final bool isDark;
+  final bool enabled;
+  final Widget child;
+  final VoidCallback? onMore;
+
+  @override
+  State<_MessageBubbleHoverChrome> createState() =>
+      _MessageBubbleHoverChromeState();
+}
+
+class _MessageBubbleHoverChromeState extends State<_MessageBubbleHoverChrome> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.enabled || widget.onMore == null) {
+      return widget.child;
+    }
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          widget.child,
+          Positioned(
+            top: -4,
+            right: -2,
+            child: DesktopWhatsappHoverChevron(
+              visible: _hovered,
+              isDark: widget.isDark,
+              onTap: widget.onMore!,
+              tooltip: 'Message options',
             ),
           ),
         ],

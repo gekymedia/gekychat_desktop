@@ -71,6 +71,7 @@ class StatusRepository {
     required String text,
     String? backgroundColor,
     String? fontFamily,
+    int? fontSize,
     Map<String, dynamic>? audience,
   }) async {
     try {
@@ -79,6 +80,7 @@ class StatusRepository {
         'text': text,
         if (backgroundColor != null) 'background_color': backgroundColor,
         if (fontFamily != null) 'font_family': fontFamily,
+        if (fontSize != null) 'font_size': fontSize,
         if (audience != null) ...audience,
       });
       

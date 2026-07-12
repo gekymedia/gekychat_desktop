@@ -54,9 +54,13 @@ class ContactsRepository {
           ? responseData['data']
           : (responseData is List ? responseData : []);
       final list = _ensureList(data);
-      final parsed = list
-          .map((j) => GekyContact.fromJson(_ensureMap(j)))
-          .toList(growable: false);
+      final parsed = <GekyContact>[];
+      for (final j in list) {
+        try {
+          final c = GekyContact.fromJson(_ensureMap(j));
+          if (c.id > 0) parsed.add(c);
+        } catch (_) {}
+      }
       return UnmodifiableListView(parsed);
     } catch (e) {
       throw ContactsException('Failed to fetch contacts: $e');
@@ -74,10 +78,14 @@ class ContactsRepository {
           ? responseData['data']
           : (responseData is List ? responseData : []);
       final list = _ensureList(data);
-      final parsed = list
-          .map((j) => GekyContact.fromJson(_ensureMap(j)))
-          .toList(growable: false);
-      
+      final parsed = <GekyContact>[];
+      for (final j in list) {
+        try {
+          final c = GekyContact.fromJson(_ensureMap(j));
+          if (c.id > 0) parsed.add(c);
+        } catch (_) {}
+      }
+
       // Extract pagination metadata
       final meta = responseData is Map && responseData['meta'] != null
           ? responseData['meta']
@@ -120,7 +128,8 @@ class ContactsRepository {
   }
 
   /// Fresh profile with online/last-seen and whether they are in your contacts.
-  Future<({User user, bool isContact})> getUserProfile(int userId) async {
+  Future<({User user, bool isContact, GekyContact? gekyContact})>
+      getUserProfile(int userId) async {
     try {
       final r = await api.get('/contacts/user/$userId/profile');
       final data = r.data;
@@ -134,8 +143,28 @@ class ContactsRepository {
       }
       final userMap = Map<String, dynamic>.from(userRaw);
       final user = User.fromJson(userMap);
-      final isContact = userMap['is_contact'] == true || map['is_contact'] == true;
-      return (user: user, isContact: isContact);
+      final isContact =
+          userMap['is_contact'] == true || map['is_contact'] == true;
+
+      GekyContact? gekyContact;
+      final contactData = userMap['contact_data'];
+      if (contactData is Map) {
+        final cd = Map<String, dynamic>.from(contactData);
+        final id = GekyContact.parseInt(cd['id']);
+        if (id != null && id > 0) {
+          gekyContact = GekyContact(
+            id: id,
+            name: (cd['display_name'] ?? user.name).toString(),
+            phone: cd['phone']?.toString() ?? user.phone,
+            avatarUrl: user.avatarUrl,
+            isRegistered: true,
+            contactUserId: user.id > 0 ? user.id : null,
+            note: cd['note']?.toString(),
+          );
+        }
+      }
+
+      return (user: user, isContact: isContact, gekyContact: gekyContact);
     } catch (e) {
       throw ContactsException('Failed to load user profile: $e');
     }
@@ -145,7 +174,7 @@ class ContactsRepository {
     if (userId != null && userId > 0) {
       try {
         final profile = await getUserProfile(userId);
-        if (profile.isContact) return true;
+        if (profile.isContact || profile.gekyContact != null) return true;
       } catch (_) {}
     }
 
@@ -172,6 +201,100 @@ class ContactsRepository {
       }
     } catch (_) {}
     return false;
+  }
+
+  /// Returns the saved GekyChat contact row for [userId] or [phone], if any.
+  Future<GekyContact?> getGekyContactForUser({
+    int? userId,
+    String? phone,
+  }) async {
+    // Prefer profile contact_data — reliable even when the contacts list is huge.
+    if (userId != null && userId > 0) {
+      try {
+        final profile = await getUserProfile(userId);
+        if (profile.gekyContact != null) return profile.gekyContact;
+      } catch (_) {}
+    }
+
+    // Search endpoint when we have a phone (avoids paging the full book).
+    if (phone != null && phone.trim().isNotEmpty) {
+      final searchTerms = <String>{
+        phone.trim(),
+        if (PhoneMatcher.normalizeGhanaLoginPhone(phone).isNotEmpty)
+          PhoneMatcher.normalizeGhanaLoginPhone(phone),
+        ...PhoneMatcher.candidates(phone),
+      };
+      for (final term in searchTerms) {
+        if (term.isEmpty) continue;
+        try {
+          final r = await api.get('/contacts', queryParameters: {
+            'search': term,
+            'per_page': 50,
+          });
+          final responseData = r.data;
+          final data = responseData is Map && responseData['data'] != null
+              ? responseData['data']
+              : (responseData is List ? responseData : []);
+          for (final raw in _ensureList(data)) {
+            try {
+              final c = GekyContact.fromJson(_ensureMap(raw));
+              if (c.id <= 0) continue;
+              if (userId != null &&
+                  userId > 0 &&
+                  c.contactUserId != null &&
+                  c.contactUserId == userId) {
+                return c;
+              }
+              if (PhoneMatcher.matchesLoose(c.phone, phone)) return c;
+            } catch (_) {}
+          }
+        } catch (_) {}
+      }
+    }
+
+    try {
+      var page = 1;
+      while (page <= 20) {
+        final batch = await listContacts(page: page, perPage: 100);
+        if (batch.isEmpty) break;
+        for (final c in batch) {
+          if (userId != null &&
+              userId > 0 &&
+              c.contactUserId != null &&
+              c.contactUserId == userId) {
+            return c;
+          }
+          if (phone != null &&
+              phone.trim().isNotEmpty &&
+              PhoneMatcher.matchesLoose(c.phone, phone)) {
+            return c;
+          }
+        }
+        if (batch.length < 100) break;
+        page++;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> updateContact(
+    int contactId, {
+    String? displayName,
+    String? phone,
+    String? note,
+    bool? isFavorite,
+  }) async {
+    try {
+      await api.updateContact(
+        contactId,
+        displayName: displayName,
+        phone: phone,
+        note: note,
+        isFavorite: isFavorite,
+      );
+    } catch (e) {
+      throw ContactsException('Failed to update contact: $e');
+    }
   }
 
   Future<GekyContact> saveContact({

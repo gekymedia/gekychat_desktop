@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'labels_repository.dart';
+import '../../utils/snackbar_helper.dart';
 
 class LabelsScreen extends ConsumerStatefulWidget {
   const LabelsScreen({super.key});
@@ -79,20 +80,12 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
         }
         _loadLabels();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(label == null
+                    context.showSuccessToast(label == null
                   ? 'Label added'
-                  : 'Label updated'),
-            ),
-          );
-        }
+                  : 'Label updated');        }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed: $e')),
-          );
-        }
+                    context.showErrorToast('Failed: $e');        }
       }
     }
   }
@@ -123,16 +116,10 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
         await repo.deleteLabel(label.id);
         _loadLabels();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Label deleted')),
-          );
-        }
+                    context.showSuccessToast('Label deleted');        }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to delete label: $e')),
-          );
-        }
+                    context.showErrorToast('Failed to delete label: $e');        }
       }
     }
   }
