@@ -106,13 +106,16 @@ flutter_launcher_icons:
     generate: true
     image_path: "assets/icons/gold_no_text/1024x1024.png"
 
-# Start menu / Store tile icon comes from logo_path (not the .exe ICO alone).
+# MSIX is optional; public Windows distribution uses Inno Setup (see windows/installer/gekychat.iss).
+# Replace publisher with your Authenticode cert CN when you have a code-signing certificate.
 msix_config:
   display_name: GekyChat
   publisher_display_name: GekyChat
-  identity_name: com.flutter.gekychatdesktop
-  publisher: CN=Msix Testing, O=Msix Testing Corporation, S=Some-State, C=US
+  identity_name: com.gekychat.desktop
+  publisher: CN=GekyChat
   msix_version: 1.0.0.1
   logo_path: assets/icons/gold_no_text/1024x1024.png
   trim_logo: false
   capabilities: internetClient, microphone, webcam, location
+
+# Windows installer: windows/installer/gekychat.iss (built via scripts/release-desktop-windows.ps1)
