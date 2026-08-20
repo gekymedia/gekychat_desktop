@@ -148,42 +148,70 @@ class AuthNotifier extends StateNotifier<AuthState> {
         'device_type': 'desktop',
       });
       
-      // Support multiple response shapes: token, access_token, or data.token
-      final data = response.data is Map ? response.data as Map<String, dynamic> : <String, dynamic>{};
-      final nested = data['data'] is Map ? data['data'] as Map<String, dynamic> : null;
-      final token = data['token'] as String? ??
-          data['access_token'] as String? ??
-          nested?['token'] as String?;
-      final user = data['user'] ?? nested?['user'];
-      final accountId = data['account_id'] ?? nested?['account_id'];
-      
-      if (token != null && token.isNotEmpty) {
-        await _apiService.saveToken(token);
-        _apiService.setPendingAuthToken(token);
-        
-        if (user != null && user is Map && user['id'] != null) {
-          final prefs = await SharedPreferences.getInstance();
-          final rawId = user['id'];
-          final userId = rawId is int ? rawId : (rawId as num).toInt();
-          await prefs.setInt('user_id', userId);
-          // Store phone number for account-specific database paths
-          await prefs.setString('user_phone', phone);
-          final accountIdInt = accountId is int ? accountId : (accountId != null ? int.tryParse(accountId.toString()) : null);
-          if (accountIdInt != null) {
-            await prefs.setInt('current_account_id', accountIdInt);
-          }
-        }
-        
-        state = state.copyWith(isLoading: false, token: token);
-        await bootstrapAfterAuth(_ref);
-      } else {
-        state = state.copyWith(isLoading: false, error: 'No token received');
-      }
+      await _completeAuthFromResponse(response.data, phone: phone);
     } catch (e) {
       state = state.copyWith(
         isLoading: false,
         error: _formatError(e, 'Verification failed.'),
       );
+    }
+  }
+
+  /// Complete login from QR poll or other auth responses that return a token.
+  Future<void> completeAuthFromResponse(dynamic responseData) async {
+    state = state.copyWith(isLoading: true, error: null);
+    try {
+      await _completeAuthFromResponse(responseData);
+    } catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        error: _formatError(e, 'Login failed.'),
+      );
+      rethrow;
+    }
+  }
+
+  Future<void> _completeAuthFromResponse(
+    dynamic responseData, {
+    String? phone,
+  }) async {
+    final data = responseData is Map
+        ? Map<String, dynamic>.from(responseData)
+        : <String, dynamic>{};
+    final nested = data['data'] is Map
+        ? Map<String, dynamic>.from(data['data'] as Map)
+        : null;
+    final token = data['token'] as String? ??
+        data['access_token'] as String? ??
+        nested?['token'] as String?;
+    final user = data['user'] ?? nested?['user'];
+    final accountId = data['account_id'] ?? nested?['account_id'];
+
+    if (token != null && token.isNotEmpty) {
+      await _apiService.saveToken(token);
+      _apiService.setPendingAuthToken(token);
+
+      if (user != null && user is Map && user['id'] != null) {
+        final prefs = await SharedPreferences.getInstance();
+        final rawId = user['id'];
+        final userId = rawId is int ? rawId : (rawId as num).toInt();
+        await prefs.setInt('user_id', userId);
+        final userPhone = phone ?? user['phone']?.toString();
+        if (userPhone != null && userPhone.isNotEmpty) {
+          await prefs.setString('user_phone', userPhone);
+        }
+        final accountIdInt = accountId is int
+            ? accountId
+            : (accountId != null ? int.tryParse(accountId.toString()) : null);
+        if (accountIdInt != null) {
+          await prefs.setInt('current_account_id', accountIdInt);
+        }
+      }
+
+      state = state.copyWith(isLoading: false, token: token);
+      await bootstrapAfterAuth(_ref);
+    } else {
+      state = state.copyWith(isLoading: false, error: 'No token received');
     }
   }
 

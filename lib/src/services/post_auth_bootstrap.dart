@@ -22,16 +22,19 @@ Future<void> bootstrapAfterAuth(Ref ref) async {
   }
 
   try {
-    await ref.read(inboxRealtimeSyncProvider).initialize();
+    await NotificationManager.ensureReady(
+      ref.read(apiServiceProvider),
+      ref,
+    );
+    await DesktopInboxNotification.loadFromApi(ref.read(apiServiceProvider));
   } catch (e) {
-    debugPrint('⚠️ Post-auth InboxRealtimeSync init failed: $e');
+    debugPrint('⚠️ Post-auth notification init failed: $e');
   }
 
   try {
-    await NotificationManager.tryRefreshAfterLogin();
-    await DesktopInboxNotification.loadFromApi(ref.read(apiServiceProvider));
+    await ref.read(inboxRealtimeSyncProvider).initialize();
   } catch (e) {
-    debugPrint('⚠️ Post-auth notification refresh failed: $e');
+    debugPrint('⚠️ Post-auth InboxRealtimeSync init failed: $e');
   }
 
   try {

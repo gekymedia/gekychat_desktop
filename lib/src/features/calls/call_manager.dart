@@ -332,6 +332,17 @@ class CallManager {
         endCall();
       } else if (payload['action'] == 'cancel') {
         if (!_payloadMatchesCurrentSession(payload)) return;
+        // CallCalleeCancel after join-call — other devices stop ringing; this
+        // answering device must not abandon the call it just accepted.
+        if (!_isCaller &&
+            (_callState == CallState.connecting ||
+                _callState == CallState.connected ||
+                _liveKitRoomActive)) {
+          debugPrint(
+            '📞 CallManager: ignoring cancel echo while $_callState (session ${_currentCall?.id})',
+          );
+          return;
+        }
         abandonCallLocally();
       } else if (!_payloadMatchesCurrentSession(payload)) {
         return;

@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:livekit_client/livekit_client.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
 import 'live_broadcast_repository.dart';
 import 'live_broadcast_social_overlay.dart';
 import 'live_broadcast_screen.dart' show liveBroadcastsProvider;
@@ -629,7 +628,7 @@ class _BroadcastVideoViewState extends State<_BroadcastVideoView> {
     if (_videoPub?.track != null && _videoPub!.track is VideoTrack) {
       return VideoTrackRenderer(
         _videoPub!.track as VideoTrack,
-        fit: rtc.RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+        fit: VideoViewFit.cover,
       );
     }
     

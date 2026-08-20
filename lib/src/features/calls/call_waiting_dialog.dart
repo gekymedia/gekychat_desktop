@@ -1,6 +1,8 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
+import '../../utils/storage_url.dart';
+
 /// Shown when an incoming call arrives while the user is already in another call.
 class CallWaitingDialog extends StatelessWidget {
   final String callerName;
@@ -22,6 +24,7 @@ class CallWaitingDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isVideo = callType == 'video';
+    final avatarUrl = resolveAvatarUrl(callerAvatar);
 
     return AlertDialog(
       backgroundColor: isDark ? const Color(0xFF1F2C34) : Colors.white,
@@ -52,10 +55,10 @@ class CallWaitingDialog extends StatelessWidget {
               shape: BoxShape.circle,
               color: isDark ? Colors.grey[800] : Colors.grey[200],
             ),
-            child: callerAvatar != null && callerAvatar!.isNotEmpty
+            child: avatarUrl != null
                 ? ClipOval(
                     child: CachedNetworkImage(
-                      imageUrl: callerAvatar!,
+                      imageUrl: avatarUrl,
                       fit: BoxFit.cover,
                       placeholder: (_, __) => _buildAvatarPlaceholder(isDark),
                       errorWidget: (_, __, ___) =>

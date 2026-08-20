@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -121,6 +122,8 @@ class DesktopNotificationService extends NotificationService {
     final uid = _userId!;
     final channel = 'user.$uid';
 
+    await _pusher.connect();
+    await _pusher.waitUntilConnected();
     await _pusher.subscribePrivate(channel, (_) {});
 
     _pusher.listen(channel, 'CallInvite', _onCallInvite);
@@ -327,6 +330,29 @@ class DesktopNotificationService extends NotificationService {
 
   @override
   Future<bool> requestPermissions() async {
+    try {
+      if (Platform.isMacOS) {
+        final mac = _localNotifications
+            .resolvePlatformSpecificImplementation<
+                MacOSFlutterLocalNotificationsPlugin>();
+        final granted = await mac?.requestPermissions(
+          alert: true,
+          badge: true,
+          sound: true,
+        );
+        debugPrint('🍎 macOS notification permission: $granted');
+        return granted ?? true;
+      }
+      if (Platform.isLinux) {
+        return true;
+      }
+      if (Platform.isWindows) {
+        // Registry + toast activator are registered during [initialize].
+        return true;
+      }
+    } catch (e) {
+      debugPrint('⚠️ requestPermissions: $e');
+    }
     return true;
   }
 
@@ -421,6 +447,9 @@ class DesktopNotificationService extends NotificationService {
       largeIconPath = await NotificationLargeIconComposer.compose(
         avatarUrl: resolvedAvatarUrl,
         displayName: avatarLabel,
+      ).timeout(
+        const Duration(seconds: 2),
+        onTimeout: () => null,
       );
     } catch (e) {
       debugPrint('NotificationLargeIconComposer: $e');
@@ -503,6 +532,7 @@ class DesktopNotificationService extends NotificationService {
         notificationDetails,
         payload: payloadString.isEmpty ? null : payloadString,
       );
+      debugPrint('🔔 Desktop notification shown: $title');
     } catch (e) {
       debugPrint('❌ showLocalNotification (with reply + avatar): $e');
       if (!isMessage) return;

@@ -28,10 +28,30 @@ class NotificationManager {
   final ApiService _api;
   final dynamic _ref; // Ref or WidgetRef
   static NotificationManager? _instance;
+  static bool _setupComplete = false;
 
   NotificationManager._(this._service, this._api, [this._ref]);
 
   static NotificationManager? get instance => _instance;
+
+  /// Creates [NotificationManager] if needed, runs [setup] once, and wires Pusher
+  /// after login. Safe to call from cold start and post-auth bootstrap.
+  static Future<NotificationManager> ensureReady(
+    ApiService api,
+    dynamic ref,
+  ) async {
+    if (_instance == null) {
+      await create(api, ref);
+    }
+    final manager = _instance!;
+    if (!_setupComplete) {
+      await manager.setup();
+      _setupComplete = true;
+    } else {
+      await manager.refreshRealtimeSubscriptions();
+    }
+    return manager;
+  }
 
   static Future<NotificationManager> create(ApiService api, [dynamic ref]) async {
     if (_instance != null) {
@@ -63,6 +83,7 @@ class NotificationManager {
   static void reset() {
     DesktopInboxNotification.unbindService();
     _instance = null;
+    _setupComplete = false;
   }
 
   /// After OTP login or session restore — wires Pusher user channel if it was skipped at cold start.

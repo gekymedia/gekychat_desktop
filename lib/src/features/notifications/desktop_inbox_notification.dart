@@ -1,5 +1,4 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -104,6 +103,10 @@ class DesktopInboxNotification {
 
       final focused = await windowManager.isFocused();
       if (focused) {
+        // Only suppress when the user is actively viewing this thread in the chat pane.
+        final section = ref.read(currentSectionProvider);
+        if (section != '/chats') return true;
+
         final openGroup = ref.read(selectedGroupIdProvider);
         if (groupId != null && openGroup == groupId) return false;
         final openConv = ref.read(selectedConversationProvider);
@@ -132,6 +135,9 @@ class DesktopInboxNotification {
       conversationId: conversationId,
       groupId: groupId,
     )) {
+      debugPrint(
+        '🔕 Desktop notification suppressed (message $messageId, conv=$conversationId, group=$groupId)',
+      );
       return;
     }
 

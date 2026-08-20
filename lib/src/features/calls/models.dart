@@ -1,4 +1,5 @@
 import 'call_duration_format.dart';
+import '../../utils/storage_url.dart';
 
 class CallLog {
   final int id;
@@ -71,7 +72,9 @@ class CallGroup {
     return CallGroup(
       id: json['id'] as int,
       name: json['name'] as String? ?? 'Group call',
-      avatarUrl: json['avatar_url'] as String?,
+      avatarUrl: resolveAvatarUrl(
+        json['avatar_url']?.toString() ?? json['avatar']?.toString(),
+      ),
     );
   }
 }
@@ -94,7 +97,11 @@ class CallUser {
       id: json['id'],
       name: json['name'] ?? 'Unknown',
       phone: json['phone'],
-      avatarUrl: json['avatar_url'],
+      avatarUrl: resolveAvatarUrl(
+        json['avatar_url']?.toString() ??
+            json['avatar']?.toString() ??
+            json['avatar_path']?.toString(),
+      ),
     );
   }
 }

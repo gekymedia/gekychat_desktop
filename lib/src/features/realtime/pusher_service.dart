@@ -58,9 +58,13 @@ class PusherService {
   /// Soft cap for exponential backoff; does not permanently stop reconnects (see [resetReconnectPolicyAndConnect] on app resume).
   static const int _maxReconnectAttempts = 32;
   Timer? _reconnectTimer;
+  bool _reconnectTimerActive = false;
+  Timer? _connectWatchdog;
   StreamSubscription<ConnectivityResult>? _connectivitySubscription;
   DateTime? _lastReconnectAttempt;
+  String? _lastConnectionErrorSignature;
   Timer? _connectivityDebounceTimer;
+  final List<Completer<void>> _connectWaiters = [];
   final Map<String, Channel> _subscribedChannels = {};
   final Map<String, Function(dynamic)> _listeners = {};
   final Map<String, Map<String, List<Function(dynamic)>>> _eventListeners = {};
@@ -235,10 +239,12 @@ class PusherService {
       unawaited(_processQueuedListeners());
       return;
     }
-    
+
     if (_isConnecting) {
-      debugPrint('⏳ Pusher connection already in progress, skipping...');
-      return;
+      debugPrint('⏳ Pusher connection already in progress, waiting…');
+      final waiter = Completer<void>();
+      _connectWaiters.add(waiter);
+      return waiter.future;
     }
     
     if (_pusherKey.isEmpty) {
@@ -257,12 +263,14 @@ class PusherService {
         return;
       }
 
-      // Dispose existing instance if any
+      // Dispose existing instance if any (skip disconnect if never connected).
       if (_pusher != null) {
-        try {
-          _pusher!.disconnect();
-        } catch (e) {
-          debugPrint('⚠️ Error disconnecting old Pusher instance: $e');
+        if (_isConnected) {
+          try {
+            _pusher!.disconnect();
+          } catch (e) {
+            debugPrint('⚠️ Error disconnecting old Pusher instance: $e');
+          }
         }
         _pusher = null;
         // Drop stale Channel refs from the old client so reconnect re-opens them.
@@ -314,26 +322,36 @@ class PusherService {
       _pusher!.onConnectionEstablished((data) {
         _isConnected = true;
         _isConnecting = false;
+        _connectWatchdog?.cancel();
+        _connectWatchdog = null;
         _reconnectAttempts = 0;
+        _lastConnectionErrorSignature = null;
         debugPrint('✅ Connected to Pusher/Reverb - socket-id: ${_pusher!.socketId}');
+        // Channels created before the socket was ready are stale — reopen all.
+        _subscribedChannels.clear();
+        _boundEvents.clear();
+        _completeConnectWaiters();
         unawaited(
           _processQueuedListeners().then((_) => _resubscribeExistingChannels()),
         );
       });
-      
+
       _pusher!.onConnectionError((error) {
-        debugPrint('❌ Pusher connection error: $error');
         _isConnecting = false;
         _isConnected = false;
-        
-        // Don't schedule reconnect for auth errors
+        _connectWatchdog?.cancel();
+        _connectWatchdog = null;
+        _logConnectionError(error);
+        _completeConnectWaiters();
+
         final errorStr = error.toString().toLowerCase();
-        if (errorStr.contains('auth') || errorStr.contains('401') || errorStr.contains('403')) {
-          debugPrint('🔒 Auth error detected, stopping auto-reconnect');
-          _shouldReconnect = false;
-          return;
+        if (errorStr.contains('auth') ||
+            errorStr.contains('401') ||
+            errorStr.contains('403')) {
+          debugPrint('🔒 Auth error — retrying with fresh token');
+          _reconnectAttempts = 0;
         }
-        
+
         _scheduleReconnect();
       });
       
@@ -352,38 +370,104 @@ class PusherService {
         debugPrint('🔌 Pusher disconnected: $data');
         _isConnected = false;
         _isConnecting = false;
-        
-        if (_shouldReconnect) {
+
+        if (_shouldReconnect && !_reconnectTimerActive) {
           _scheduleReconnect();
         }
       });
 
-      // Connect
+      // Connect (native handshake runs async; watchdog clears stuck _isConnecting).
       _pusher!.connect();
-      
+      _armConnectWatchdog();
     } catch (e) {
       debugPrint('❌ Error connecting to Pusher: $e');
       _isConnected = false;
       _isConnecting = false;
+      _connectWatchdog?.cancel();
+      _connectWatchdog = null;
+      _completeConnectWaiters();
       _scheduleReconnect();
     }
   }
-  
+
+  void _logConnectionError(Object error) {
+    final text = error.toString();
+    if (_lastConnectionErrorSignature == text) {
+      debugPrint('❌ Pusher connection error (repeat): $error');
+      return;
+    }
+    _lastConnectionErrorSignature = text;
+    if (text.contains('404')) {
+      debugPrint(
+        '❌ Reverb WebSocket returned 404 — check Reverb/nginx on the server',
+      );
+      return;
+    }
+    debugPrint('❌ Pusher connection error: $error');
+  }
+
+  void _armConnectWatchdog() {
+    _connectWatchdog?.cancel();
+    _connectWatchdog = Timer(const Duration(seconds: 12), () {
+      if (_isConnected || !_isConnecting) return;
+      debugPrint(
+        '⏱️ Pusher connect watchdog (12s) — resetting stuck connection',
+      );
+      _isConnecting = false;
+      _completeConnectWaiters();
+      _scheduleReconnect();
+    });
+  }
+
+  void _completeConnectWaiters() {
+    for (final waiter in _connectWaiters) {
+      if (!waiter.isCompleted) {
+        waiter.complete();
+      }
+    }
+    _connectWaiters.clear();
+  }
+
+  /// Waits until the WebSocket is connected (or [timeout] elapses).
+  Future<void> waitUntilConnected({
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    if (_isConnected) return;
+    await connect();
+    if (_isConnected) return;
+    final waiter = Completer<void>();
+    _connectWaiters.add(waiter);
+    try {
+      await waiter.future.timeout(timeout);
+    } on TimeoutException {
+      debugPrint(
+        '⏱️ waitUntilConnected timed out after ${timeout.inSeconds}s',
+      );
+    }
+  }
+
   void _scheduleReconnect() {
     if (!_shouldReconnect) {
       return;
     }
-    
+    if (_reconnectTimerActive) {
+      return;
+    }
+
     _reconnectTimer?.cancel();
-    
+
     final cappedAttempt = _reconnectAttempts.clamp(0, _maxReconnectAttempts);
     final delaySeconds = cappedAttempt < 6
         ? (1 << cappedAttempt)
         : (cappedAttempt < 12 ? 60 : 120);
-    
-    debugPrint('⏰ Scheduling Pusher reconnection in $delaySeconds seconds (attempt $_reconnectAttempts)');
-    
+
+    debugPrint(
+      '⏰ Scheduling Pusher reconnection in $delaySeconds seconds (attempt $_reconnectAttempts)',
+    );
+
+    _reconnectTimerActive = true;
     _reconnectTimer = Timer(Duration(seconds: delaySeconds), () async {
+      _reconnectTimerActive = false;
       if (!_isConnected && _shouldReconnect && !_isConnecting) {
         final hasInternet = await ConnectivityService.hasInternetConnection();
         if (hasInternet) {
@@ -396,10 +480,10 @@ class PusherService {
       }
     });
   }
-  
+
   void _queueListener(String channel, String event, Function(dynamic) callback) {
     _queuedListeners.add(_QueuedListener(channel, event, callback));
-    if (!_isConnected && _pusher == null) {
+    if (!_isConnected && !_isConnecting) {
       connect().catchError((e) {
         debugPrint('⚠️ Background Pusher connection failed: $e');
       });
@@ -495,7 +579,6 @@ class PusherService {
     if (_eventListeners.isEmpty) return;
 
     for (final channelName in _eventListeners.keys.toList()) {
-      if (_subscribedChannels.containsKey(channelName)) continue;
       try {
         final ch = _openChannel(channelName);
         _subscribedChannels[channelName] = ch;
@@ -575,9 +658,15 @@ class PusherService {
     
     try {
       if (_subscribedChannels.containsKey(channelName)) {
-        debugPrint('⚠️ Already subscribed to $channelName, skipping duplicate subscription');
-        _listeners[channelName] = callback;
-        return;
+        if (_isConnected) {
+          debugPrint(
+            '⚠️ Already subscribed to $channelName, skipping duplicate subscription',
+          );
+          _listeners[channelName] = callback;
+          return;
+        }
+        _subscribedChannels.remove(channelName);
+        _boundEvents.remove(channelName);
       }
 
       final pusherChannel = _pusher!.private(
@@ -673,7 +762,11 @@ class PusherService {
     _shouldReconnect = false;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
-    
+    _reconnectTimerActive = false;
+    _connectWatchdog?.cancel();
+    _connectWatchdog = null;
+    _completeConnectWaiters();
+
     if (_pusher == null) return;
 
     try {
@@ -695,6 +788,7 @@ class PusherService {
   void dispose() {
     disconnect();
     _reconnectTimer?.cancel();
+    _connectWatchdog?.cancel();
     _connectivityDebounceTimer?.cancel();
     _connectivitySubscription?.cancel();
     _connectivitySubscription = null;
@@ -722,9 +816,46 @@ class PusherService {
     _reconnectAttempts = 0;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    _reconnectTimerActive = false;
     await connect();
+    await waitUntilConnected();
   }
   
   /// Get the current socket ID (useful for excluding sender from broadcasts)
   String? get socketId => _pusher?.socketId;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

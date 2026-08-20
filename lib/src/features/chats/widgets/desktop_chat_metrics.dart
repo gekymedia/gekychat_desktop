@@ -8,11 +8,11 @@ abstract final class DesktopChatMetrics {
   /// Hard cap so bubbles stay readable on very wide panes.
   static const double bubbleMaxWidthCap = 480;
 
-  static const double bubbleMinWidth = 200;
-
   static double bubbleMaxWidth(double availableWidth) {
-    return (availableWidth * bubbleWidthFraction)
-        .clamp(bubbleMinWidth, bubbleMaxWidthCap);
+    if (!availableWidth.isFinite || availableWidth <= 0) {
+      return bubbleMaxWidthCap;
+    }
+    return (availableWidth * bubbleWidthFraction).clamp(0.0, bubbleMaxWidthCap);
   }
 
   /// Message list inset — tighter than generic 16px padding.

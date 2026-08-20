@@ -193,9 +193,15 @@ class LiveKitCallService extends ChangeNotifier {
       _activeCall!.room.removeListener(_onRoomChanged);
       if (disposeRoom) {
         try {
-          await _activeCall!.room
-              .disconnect()
-              .timeout(const Duration(seconds: 2));
+          final cs = _activeCall!.room.connectionState;
+          final live = cs == livekit.ConnectionState.connecting ||
+              cs == livekit.ConnectionState.connected ||
+              cs == livekit.ConnectionState.reconnecting;
+          if (live) {
+            await _activeCall!.room
+                .disconnect()
+                .timeout(const Duration(milliseconds: 800));
+          }
         } catch (e) {
           debugPrint('LiveKitCallService: disconnect ignored: $e');
         }

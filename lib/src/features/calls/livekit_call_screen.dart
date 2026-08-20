@@ -9,17 +9,21 @@ import 'call_duration_format.dart';
 
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc show DesktopCapturerSource, RTCVideoViewObjectFit;
+import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc show DesktopCapturerSource;
 import 'package:livekit_client/livekit_client.dart';
 
 import '../../services/livekit_call_service.dart';
+import '../../core/providers.dart';
 import '../../core/session.dart';
+import '../../widgets/desktop_microphone_permission_dialog.dart';
+import '../../widgets/desktop_voice_permission.dart';
 import 'call_manager.dart';
 import 'call_rating_sheet.dart';
+import 'livekit_ice_config.dart';
 import 'providers.dart';
 import 'incoming_call_handler.dart';
-import 'livekit_token_service.dart';
 import '../../utils/snackbar_helper.dart';
+import '../../utils/storage_url.dart';
 
 class LiveKitCallScreen extends ConsumerStatefulWidget {
   final String? url;
@@ -78,6 +82,7 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
   bool _hasRequestedVideoUpgrade = false;
   void Function(CallState)? _callManagerStateBeforeIncoming;
   String? _error;
+  MediaDevice? _selectedAudioOutput;
   DateTime? _connectedAt;
   Timer? _durationTicker;
   DateTime? _mediaRenegotiationGraceUntil;
@@ -105,10 +110,13 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
   bool get _canUpgradeToVideo =>
       _hasRemoteParticipants && widget.groupId == null;
 
-  String? get _safePeerAvatar {
-    final url = widget.peerAvatar;
-    if (url == null || url.isEmpty || !url.startsWith('http')) return null;
-    return url;
+  String? get _safePeerAvatar => resolveAvatarUrl(widget.peerAvatar);
+
+  bool get _roomIsLive {
+    final cs = _room.connectionState;
+    return cs == ConnectionState.connecting ||
+        cs == ConnectionState.connected ||
+        cs == ConnectionState.reconnecting;
   }
 
   @override
@@ -122,7 +130,16 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
       _connecting = false;
     }
     _ownsRoom = widget.existingRoom == null;
-    _room = widget.existingRoom ?? Room();
+    _room = widget.existingRoom ??
+        Room(
+          roomOptions: const RoomOptions(
+            adaptiveStream: false,
+            dynacast: true,
+            defaultVideoPublishOptions: VideoPublishOptions(
+              simulcast: true,
+            ),
+          ),
+        );
     _room.addListener(_onRoomChanged);
     _roomListener = _room.createListener()
       ..on<RoomConnectedEvent>((_) {
@@ -252,12 +269,14 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
     });
   }
 
-  /// Disconnect without throwing — cancelled/never-connected rooms often time out.
+  /// Disconnect without throwing — cancelled/never-connected rooms often hang.
   Future<void> _safeDisconnectRoom({bool disposeOwned = true}) async {
-    try {
-      await _room.disconnect().timeout(const Duration(seconds: 2));
-    } catch (e) {
-      debugPrint('LiveKitCallScreen: disconnect ignored: $e');
+    if (_roomIsLive) {
+      try {
+        await _room.disconnect().timeout(const Duration(milliseconds: 800));
+      } catch (e) {
+        debugPrint('LiveKitCallScreen: disconnect ignored: $e');
+      }
     }
     if (disposeOwned && _ownsRoom) {
       try {
@@ -270,15 +289,16 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
     if (_isEnding) return;
     _isEnding = true;
     _durationTicker?.cancel();
+    // Pop immediately — don't freeze the UI on WebRTC teardown.
+    _safePopRoute();
     try {
-      // Service clears overlay state; we disconnect once here (avoid double-disconnect timeout).
       await ref
           .read(liveKitCallServiceProvider)
           .endCall(disposeRoom: false);
     } catch (e) {
       debugPrint('LiveKitCallScreen: endCall overlay clear: $e');
     }
-    await _safeDisconnectRoom();
+    unawaited(_safeDisconnectRoom());
     try {
       final cm = ref.read(callManagerProvider);
       cm.onCallStateChanged = null;
@@ -288,7 +308,6 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
         cm.onError = null;
       }
     } catch (_) {}
-    _safePopRoute();
   }
 
   void _onRoomChanged() {
@@ -328,6 +347,18 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
   }
 
   Future<void> _connect() async {
+    if (_isEnding || !mounted) return;
+
+    final micOk = await ensureDesktopMicrophoneForCall(context);
+    if (!mounted || _isEnding) return;
+    if (!micOk) {
+      setState(() {
+        _connecting = false;
+        _error = 'Microphone permission is required for calls';
+      });
+      return;
+    }
+
     var url = widget.url;
     var token = widget.token;
     if ((url == null || token == null) && widget.deferCredentialFetch) {
@@ -340,10 +371,11 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
           roomName: widget.roomName,
           displayName: displayName,
         );
+        if (_isEnding || !mounted) return;
         url = tokenResult.url;
         token = tokenResult.token;
       } catch (e) {
-        if (mounted) {
+        if (mounted && !_isEnding) {
           setState(() {
             _connecting = false;
             _error = 'Could not connect: $e';
@@ -352,6 +384,7 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
         return;
       }
     }
+    if (_isEnding || !mounted) return;
     if (url == null || token == null) {
       setState(() {
         _connecting = false;
@@ -361,44 +394,66 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
     }
 
     try {
+      final rtcConfiguration = await fetchLiveKitRtcConfiguration(
+        ref.read(apiServiceProvider),
+      );
+      if (!mounted || _isEnding) return;
       await _room.connect(
         url,
         token,
-        roomOptions: const RoomOptions(
-          adaptiveStream: false,
-          dynacast: true,
-          defaultVideoPublishOptions: VideoPublishOptions(
-            simulcast: true,
-          ),
+        connectOptions: ConnectOptions(
+          rtcConfiguration: rtcConfiguration,
         ),
         fastConnectOptions: FastConnectOptions(
           microphone: const TrackOption(enabled: true),
           camera: TrackOption(enabled: widget.videoEnabled),
         ),
       );
-      if (mounted) {
-        setState(() => _connecting = false);
-        final lp = _room.localParticipant;
+      if (!mounted || _isEnding) {
+        unawaited(_safeDisconnectRoom());
+        return;
+      }
+      setState(() {
+        _connecting = false;
+        _error = null;
+      });
+      final lp = _room.localParticipant;
+      try {
         await lp?.setMicrophoneEnabled(true);
-        if (widget.videoEnabled && !_videoOff) {
-          await lp?.setCameraEnabled(true);
-        }
-        _registerWithOverlayService();
-        try {
-          ref.read(callManagerProvider).notifyLiveKitRoomConnected();
-        } catch (_) {}
-        if (!widget.isOutgoingCall) {
-          await ref
-              .read(callRepositoryProvider)
-              .acceptIncomingCallSession(widget.callId);
-          await _notifyLiveKitJoinedSignal();
+      } catch (e) {
+        if (!mounted || _isEnding) return;
+        if (desktopMicrophoneNotFoundError(e)) {
+          await showDesktopMicrophoneNotFoundDialog(
+            context,
+            purpose: DesktopMicrophonePurpose.call,
+          );
+        } else if (mounted) {
+          context.showErrorToast('Could not enable microphone');
         }
       }
+      if (widget.videoEnabled && !_videoOff) {
+        await lp?.setCameraEnabled(true);
+      }
+      if (!mounted || _isEnding) {
+        unawaited(_safeDisconnectRoom());
+        return;
+      }
+      _registerWithOverlayService();
+      try {
+        ref.read(callManagerProvider).notifyLiveKitRoomConnected();
+      } catch (_) {}
+      if (!widget.isOutgoingCall) {
+        await ref
+            .read(callRepositoryProvider)
+            .acceptIncomingCallSession(widget.callId);
+        if (!mounted || _isEnding) return;
+        await _notifyLiveKitJoinedSignal();
+      }
     } catch (e) {
-      if (mounted) {
+      if (mounted && !_isEnding) {
         setState(() {
           _connecting = false;
-          _error = e.toString();
+          _error = friendlyLiveKitConnectError(e);
         });
       }
     }
@@ -408,6 +463,7 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
     _callManagerStateBeforeIncoming?.call(state);
     if (!mounted) return;
     if (state == CallState.ended) {
+      _isEnding = true;
       _safePopRoute();
     }
   }
@@ -620,7 +676,9 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
       if (_ownsRoom) {
         unawaited(() async {
           try {
-            await _room.disconnect().timeout(const Duration(seconds: 2));
+            if (_roomIsLive) {
+              await _room.disconnect().timeout(const Duration(milliseconds: 800));
+            }
           } catch (_) {}
           try {
             _room.dispose();
@@ -637,12 +695,97 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
 
   Future<void> _toggleMute() async {
     final lp = _room.localParticipant;
-    if (lp == null) return;
-    _muted
-        ? await lp.setMicrophoneEnabled(true)
-        : await lp.setMicrophoneEnabled(false);
-    setState(() => _muted = !_muted);
-    ref.read(liveKitCallServiceProvider).updateMuteState(_muted);
+    if (lp == null) {
+      if (mounted) {
+        context.showWarningToast('Microphone not ready yet');
+      }
+      return;
+    }
+    final nextMuted = !_muted;
+    try {
+      await lp.setMicrophoneEnabled(!nextMuted);
+      if (!mounted) return;
+      setState(() => _muted = nextMuted);
+      ref.read(liveKitCallServiceProvider).updateMuteState(_muted);
+    } catch (e) {
+      if (!mounted) return;
+      if (desktopMicrophoneNotFoundError(e)) {
+        await showDesktopMicrophoneNotFoundDialog(
+          context,
+          purpose: DesktopMicrophonePurpose.call,
+        );
+      } else {
+        context.showErrorToast('Could not toggle mute');
+      }
+    }
+  }
+
+  Future<void> _showAudioOutputPicker() async {
+    try {
+      final devices = await Hardware.instance.audioOutputs();
+      if (!mounted) return;
+      if (devices.isEmpty) {
+        context.showInfoToast('No audio output devices found');
+        return;
+      }
+      final currentId = _selectedAudioOutput?.deviceId ??
+          _room.selectedAudioOutputDeviceId;
+      final picked = await showDialog<MediaDevice>(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1F2C34),
+            title: const Text(
+              'Audio output',
+              style: TextStyle(color: Colors.white),
+            ),
+            content: SizedBox(
+              width: 360,
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: devices.length,
+                itemBuilder: (context, index) {
+                  final device = devices[index];
+                  final selected = device.deviceId == currentId;
+                  final label = device.label.trim().isEmpty
+                      ? 'Audio device ${index + 1}'
+                      : device.label.trim();
+                  return ListTile(
+                    leading: Icon(
+                      Icons.volume_up_rounded,
+                      color: selected ? Colors.greenAccent : Colors.white70,
+                    ),
+                    title: Text(
+                      label,
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                    trailing: selected
+                        ? const Icon(Icons.check, color: Colors.greenAccent)
+                        : null,
+                    onTap: () => Navigator.pop(ctx, device),
+                  );
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+            ],
+          );
+        },
+      );
+      if (picked == null || !mounted) return;
+      await _room.setAudioOutputDevice(picked);
+      if (!mounted) return;
+      setState(() => _selectedAudioOutput = picked);
+      context.showSuccessToast('Audio output updated');
+    } catch (e) {
+      if (mounted) {
+        context.showErrorToast('Could not change audio output');
+      }
+    }
   }
 
   void _onCallSignalPayload(Map<String, dynamic> payload) {
@@ -1027,20 +1170,7 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
         cm.onError = null;
       } catch (_) {}
     }
-    try {
-      await ref
-          .read(liveKitCallServiceProvider)
-          .endCall(disposeRoom: false);
-    } catch (e) {
-      debugPrint('LiveKitCallScreen: hangUp endCall: $e');
-    }
-    await _safeDisconnectRoom();
-    final cm = ref.read(callManagerProvider);
-    if (_shouldLeaveGroupCallWithoutEnding()) {
-      await cm.leaveCall(sessionIdOverride: widget.callId);
-    } else {
-      await cm.endCall(sessionIdOverride: widget.callId);
-    }
+    // Leave the call UI immediately; finish teardown in the background.
     if (mounted) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -1055,17 +1185,66 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
     } else if (hadPeer) {
       _maybePromptRating();
     }
+    try {
+      await ref
+          .read(liveKitCallServiceProvider)
+          .endCall(disposeRoom: false);
+    } catch (e) {
+      debugPrint('LiveKitCallScreen: hangUp endCall: $e');
+    }
+    unawaited(_safeDisconnectRoom());
+    final cm = ref.read(callManagerProvider);
+    if (_shouldLeaveGroupCallWithoutEnding()) {
+      unawaited(cm.leaveCall(sessionIdOverride: widget.callId));
+    } else {
+      unawaited(cm.endCall(sessionIdOverride: widget.callId));
+    }
   }
 
   String _statusText() {
     if (_noAnswer) return 'No answer';
-    if (_room.connectionState == ConnectionState.reconnecting) {
+    if (_error != null) return 'Connection failed';
+
+    final cs = _room.connectionState;
+    final connectedOnce = _connectedAt != null;
+
+    // After media is up, brief ICE/reconnect blips must not flash "Connecting…".
+    if (connectedOnce || cs == ConnectionState.connected) {
+      if (cs == ConnectionState.reconnecting ||
+          cs == ConnectionState.connecting ||
+          cs == ConnectionState.disconnected) {
+        if (_hasRemoteParticipants && _connectedAt != null) {
+          return formatCallDurationHms(
+            DateTime.now().difference(_connectedAt!),
+          );
+        }
+        return 'Reconnecting…';
+      }
+      if (!_hasRemoteParticipants) {
+        return widget.isOutgoingCall ? 'Calling…' : 'Waiting…';
+      }
+      final remotes = _room.remoteParticipants.values.toList();
+      if (remotes.isNotEmpty && _remoteVideoPending(remotes.first)) {
+        // Keep duration visible once established — video attach is not a new connect.
+        if (_connectedAt != null) {
+          return formatCallDurationHms(
+            DateTime.now().difference(_connectedAt!),
+          );
+        }
+        return 'Connecting video…';
+      }
+      if (_connectedAt != null) {
+        return formatCallDurationHms(DateTime.now().difference(_connectedAt!));
+      }
+      return 'Connected';
+    }
+
+    if (cs == ConnectionState.reconnecting) {
       return 'Reconnecting…';
     }
     if (_connecting) {
       return widget.isOutgoingCall ? 'Calling…' : 'Connecting…';
     }
-    if (_error != null) return 'Connection failed';
     if (!_hasRemoteParticipants) {
       return widget.isOutgoingCall ? 'Calling…' : 'Waiting…';
     }
@@ -1073,11 +1252,16 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
     if (remotes.isNotEmpty && _remoteVideoPending(remotes.first)) {
       return 'Connecting video…';
     }
-    final start = _connectedAt;
-    if (start != null) {
-      return formatCallDurationHms(DateTime.now().difference(start));
-    }
     return 'Connected';
+  }
+
+  Future<void> _retryConnect() async {
+    if (_isEnding || _connecting) return;
+    setState(() {
+      _error = null;
+      _connecting = true;
+    });
+    await _connect();
   }
 
   bool _remoteVideoPending(Participant participant) {
@@ -1106,9 +1290,7 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
   Widget _videoRenderer(VideoTrack track, {bool screenShare = false}) {
     return VideoTrackRenderer(
       track,
-      fit: screenShare
-          ? rtc.RTCVideoViewObjectFit.RTCVideoViewObjectFitContain
-          : rtc.RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+      fit: screenShare ? VideoViewFit.contain : VideoViewFit.cover,
     );
   }
 
@@ -1424,7 +1606,13 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
                     _ControlBtn(
                       icon: _muted ? Icons.mic_off : Icons.mic,
                       bg: _muted ? Colors.red : Colors.grey[800]!,
-                      onTap: _toggleMute,
+                      onTap: () => unawaited(_toggleMute()),
+                    ),
+                    const SizedBox(width: 16),
+                    _ControlBtn(
+                      icon: Icons.volume_up_rounded,
+                      bg: Colors.grey[800]!,
+                      onTap: () => unawaited(_showAudioOutputPicker()),
                     ),
                     const SizedBox(width: 16),
                     _ControlBtn(
@@ -1464,15 +1652,30 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
                 left: 16,
                 right: 16,
                 child: Container(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
                   decoration: BoxDecoration(
                     color: Colors.red[900],
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Text(
-                    'Connection failed: $_error',
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
-                    textAlign: TextAlign.center,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _error!,
+                        style: const TextStyle(color: Colors.white, fontSize: 13),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      TextButton(
+                        onPressed: _connecting
+                            ? null
+                            : () => unawaited(_retryConnect()),
+                        child: const Text(
+                          'Retry',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),

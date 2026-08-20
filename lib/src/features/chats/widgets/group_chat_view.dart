@@ -39,7 +39,6 @@ import 'desktop_emoji_picker_popup.dart';
 import 'desktop_media_preview_dialog.dart';
 import 'desktop_voice_recording.dart';
 import '../../../theme/app_theme.dart';
-import '../../contacts/contacts_repository.dart';
 import '../../contacts/contact_display_service.dart';
 import '../../contacts/contact_info_screen.dart';
 import 'group_info_screen.dart';
@@ -63,6 +62,7 @@ import '../../realtime/pusher_service.dart';
 import '../../../utils/mention_utils.dart';
 import '../../../utils/clipboard_media_helper.dart';
 import 'chat_attachment_menu_sheet.dart';
+import 'share_contact_picker.dart';
 import 'poll_composer_sheet.dart';
 import 'desktop_composer_trailing_action.dart';
 import 'desktop_message_composer_pill.dart';
@@ -2157,98 +2157,29 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
   }
 
   Future<void> _shareContact() async {
-    // Load all contacts with pagination
-    final contactsRepo = ref.read(contactsRepositoryProvider);
-    List<GekyContact> allContacts = [];
-    int page = 1;
-    bool hasMore = true;
-    
-    while (hasMore) {
-      try {
-        final paginated = await contactsRepo.listContactsPaginated(page: page, perPage: 100);
-        final contacts = paginated['data'] as List<GekyContact>;
-        allContacts.addAll(contacts);
-        
-        final meta = paginated['meta'] as Map<String, dynamic>;
-        final currentPage = meta['current_page'] as int? ?? page;
-        final lastPage = meta['last_page'] as int? ?? page;
-        hasMore = currentPage < lastPage;
-        page++;
-      } catch (e) {
-        debugPrint('Error loading contacts page $page: $e');
-        break;
-      }
-    }
-    
-    if (!mounted) return;
-    
-    final selected = await showDialog<int>(
-      context: context,
-      builder: (context) => Dialog(
-        child: Container(
-          width: 400,
-          height: 500,
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              const Text(
-                'Share Contact',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: allContacts.isEmpty
-                    ? const Center(child: Text('No contacts available'))
-                    : ListView.builder(
-                        itemCount: allContacts.length,
-                        itemBuilder: (context, index) {
-                          final contact = allContacts[index];
-                          return ListTile(
-                            leading: CircleAvatar(
-                              child: Text(contact.name.isNotEmpty ? contact.name[0].toUpperCase() : '?'),
-                            ),
-                            title: Text(contact.name),
-                            subtitle: contact.phone != null ? Text(contact.phone!) : null,
-                            onTap: () => Navigator.pop(context, contact.id),
-                          );
-                        },
-                      ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+    final selected = await showShareContactPicker(context: context);
+    if (selected == null) return;
 
-    if (selected != null) {
+    setState(() {
+      _isSending = true;
+    });
+
+    try {
+      final chatRepo = ref.read(chatRepositoryProvider);
+      final newMessage = await chatRepo.shareContactInGroup(
+        widget.groupId,
+        contactId: selected,
+      );
       setState(() {
-        _isSending = true;
+        _messages.add(newMessage);
       });
-
-      try {
-        final chatRepo = ref.read(chatRepositoryProvider);
-        final newMessage = await chatRepo.shareContactInGroup(
-          widget.groupId,
-          contactId: selected,
-        );
-        setState(() {
-          _messages.add(newMessage);
-        });
-        _scrollToBottom();
-      } catch (e) {
-        if (mounted) {
-                    context.showErrorToast('Failed to share contact: $e');        }
-      } finally {
+      _scrollToBottom();
+    } catch (e) {
+      if (mounted) {
+        context.showErrorToast('Failed to share contact: $e');
+      }
+    } finally {
+      if (mounted) {
         setState(() {
           _isSending = false;
         });
@@ -2473,6 +2404,24 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
 
   Future<void> _forwardMessage(Message message) async {
     await ForwardMessageScreen.showModal(context, message);
+  }
+
+  void _forwardSelectedMessages() {
+    final ids = _messageSelection.selectedItems.toSet();
+    final toForward = _messages.where((m) => ids.contains(m.id)).toList();
+    if (toForward.isEmpty) return;
+    _messageSelection.exitSelectionMode();
+    unawaited(ForwardMessageScreen.showModalForMessages(context, toForward));
+  }
+
+  void _deleteSelectedMessages() {
+    final ids = _messageSelection.selectedItems.toSet();
+    final toDelete = _messages.where((m) => ids.contains(m.id)).toList();
+    if (toDelete.isEmpty) return;
+    _messageSelection.exitSelectionMode();
+    for (final msg in toDelete) {
+      unawaited(_deleteMessage(msg));
+    }
   }
 
   Future<void> _markViewOnceOpened(Message message) async {
@@ -2825,52 +2774,11 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
             ),
           ),
           child: _messageSelection.isSelectionMode
-              ? Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      color: isDark ? Colors.white70 : Colors.black87,
-                      onPressed: _messageSelection.exitSelectionMode,
-                    ),
-                    Expanded(
-                      child: Text(
-                        '${_messageSelection.selectedCount} selected',
-                        style: TextStyle(
-                          fontFamily: DesktopTypography.fontFamily,
-                          color: isDark ? Colors.white : Colors.black,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 16,
-                        ),
-                      ),
-                    ),
-                    if (_messageSelection.selectedCount == 1)
-                      IconButton(
-                        icon: const Icon(Icons.push_pin_outlined),
-                        color: isDark ? Colors.white70 : Colors.black87,
-                        tooltip: 'Pin',
-                        onPressed: () {
-                          final id = _messageSelection.selectedItems.first;
-                          final msg = _messages.firstWhere((m) => m.id == id);
-                          unawaited(_pinMessage(msg, true));
-                          _messageSelection.exitSelectionMode();
-                        },
-                      ),
-                    IconButton(
-                      icon: const Icon(Icons.delete_outline),
-                      color: Colors.red,
-                      tooltip: 'Delete',
-                      onPressed: () {
-                        final ids = _messageSelection.selectedItems.toSet();
-                        final toDelete = _messages
-                            .where((m) => ids.contains(m.id))
-                            .toList();
-                        _messageSelection.exitSelectionMode();
-                        for (final msg in toDelete) {
-                          unawaited(_deleteMessage(msg));
-                        }
-                      },
-                    ),
-                  ],
+              ? MessageSelectionToolbar(
+                  selectedCount: _messageSelection.selectedCount,
+                  onCancel: _messageSelection.exitSelectionMode,
+                  onForward: _forwardSelectedMessages,
+                  onDelete: _deleteSelectedMessages,
                 )
               : Row(
             children: [

@@ -1,9 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'auth_provider.dart';
 import '../../app_router.dart';
 import '../../utils/phone_matcher.dart';
+import '../../utils/snackbar_helper.dart';
+import 'login_countries.dart';
+import 'qr_login_panel.dart';
+
+const _termsOfServiceUrl = 'https://gekychat.com/terms-of-service';
+const _privacyPolicyUrl = 'https://gekychat.com/privacy-policy';
 
 class PhoneLoginScreen extends ConsumerStatefulWidget {
   const PhoneLoginScreen({super.key});
@@ -18,6 +25,7 @@ class _PhoneLoginState extends ConsumerState<PhoneLoginScreen> {
   final _focusNode = FocusNode();
   bool _loading = false;
   String? _error;
+  LoginCountry _selectedCountry = kDefaultLoginCountry;
 
   @override
   void dispose() {
@@ -27,6 +35,9 @@ class _PhoneLoginState extends ConsumerState<PhoneLoginScreen> {
   }
 
   String? _validatePhone(String? v) {
+    if (!_selectedCountry.supported) {
+      return 'Phone login is only available for Ghana (+233) at the moment';
+    }
     if ((v ?? '').trim().isEmpty) return 'Please enter your phone number';
     if (!PhoneMatcher.isValidGhanaLoginPhone(v)) {
       return 'Enter a valid mobile number';
@@ -34,42 +45,179 @@ class _PhoneLoginState extends ConsumerState<PhoneLoginScreen> {
     return null;
   }
 
+  void _showUnsupportedCountryNotice(LoginCountry country) {
+    context.showInfoToast('${country.name} is not supported yet');
+    setState(() => _selectedCountry = kDefaultLoginCountry);
+  }
+
+  void _onCountrySelected(LoginCountry country) {
+    if (!country.supported) {
+      _showUnsupportedCountryNotice(country);
+      return;
+    }
+    setState(() => _selectedCountry = country);
+  }
+
+  Future<void> _openUrl(String url) async {
+    final uri = Uri.parse(url);
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) {
+        context.showErrorToast('Could not open $url');
+      }
+    } catch (e) {
+      if (mounted) {
+        context.showErrorToast('Could not open link: $e');
+      }
+    }
+  }
+
+  Future<void> _showCountryPicker() async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    var query = '';
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final q = query.trim().toLowerCase();
+            final filtered = loginCountriesSorted.where((c) {
+              if (q.isEmpty) return true;
+              return c.name.toLowerCase().contains(q) ||
+                  c.dialCode.contains(q) ||
+                  c.code.toLowerCase().contains(q);
+            }).toList();
+
+            return AlertDialog(
+              backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
+              title: Text(
+                'Select country',
+                style: TextStyle(
+                  color: isDark ? Colors.white : const Color(0xFF111B21),
+                ),
+              ),
+              content: SizedBox(
+                width: 420,
+                height: 420,
+                child: Column(
+                  children: [
+                    TextField(
+                      autofocus: true,
+                      onChanged: (v) => setDialogState(() => query = v),
+                      style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: 'Search country',
+                        prefixIcon: const Icon(Icons.search, size: 22),
+                        filled: true,
+                        fillColor: isDark
+                            ? const Color(0xFF111B21)
+                            : const Color(0xFFF0F2F5),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: filtered.length,
+                        itemBuilder: (_, i) {
+                          final country = filtered[i];
+                          final selected =
+                              country.code == _selectedCountry.code;
+                          return ListTile(
+                            leading: Text(
+                              country.flag,
+                              style: const TextStyle(fontSize: 24),
+                            ),
+                            title: Text(
+                              country.name,
+                              style: TextStyle(
+                                fontWeight: selected
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
+                                color: isDark ? Colors.white : Colors.black,
+                              ),
+                            ),
+                            trailing: Text(
+                              country.dialCode,
+                              style: TextStyle(
+                                color: isDark
+                                    ? const Color(0xFF8696A0)
+                                    : const Color(0xFF667781),
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            selected: selected,
+                            onTap: () {
+                              Navigator.pop(dialogContext);
+                              _onCountrySelected(country);
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _showQrLogin() async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF202C33) : Colors.white,
+          contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+          content: const SizedBox(
+            width: 380,
+            child: QrLoginPanel(),
+          ),
+        );
+      },
+    );
+  }
 
   Future<void> _submit() async {
     if (_loading) {
       debugPrint('🔵 Already submitting, ignoring duplicate call');
       return;
     }
-    
+
     if (!_formKey.currentState!.validate()) return;
-    
+
     _focusNode.unfocus();
-    
+
     setState(() {
       _loading = true;
       _error = null;
     });
 
     final phone = PhoneMatcher.normalizeGhanaLoginPhone(_phoneCtrl.text);
-    
-    // Capture router before async call to avoid using ref after widget disposal
+
     final router = ref.read(routerProvider);
-    
+
     try {
       debugPrint('🔵 Starting login with phone: $phone');
       await ref.read(authProvider.notifier).loginWithPhone(phone);
       debugPrint('🔵 loginWithPhone completed');
 
-      // Use post-frame callback to navigate after any router refresh completes
-      // This ensures navigation happens even if widget is disposed
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        // Navigate directly since API call succeeded (status 200)
-        // If there was an error, it would be in the state, but we know it succeeded
-      debugPrint('✅ OTP request successful, navigating to /verify?phone=$phone');
+        debugPrint('✅ OTP request successful, navigating to /verify?phone=$phone');
         router.go('/verify?phone=$phone');
         debugPrint('🔵 Navigation call completed');
-        });
-      
+      });
     } catch (e, stackTrace) {
       debugPrint('❌ Login exception: $e');
       debugPrint('❌ Stack trace: $stackTrace');
@@ -85,6 +233,8 @@ class _PhoneLoginState extends ConsumerState<PhoneLoginScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primaryColor = Theme.of(context).colorScheme.primary;
+    final mutedColor =
+        isDark ? const Color(0xFF8696A0) : const Color(0xFF667781);
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
@@ -105,13 +255,11 @@ class _PhoneLoginState extends ConsumerState<PhoneLoginScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Logo/Icon (without text)
                     Image.asset(
                       'assets/icons/gold_no_text/128x128.png',
                       width: 128,
                       height: 128,
                       errorBuilder: (context, error, stackTrace) {
-                        // Fallback to icon if image not found
                         return Icon(
                           Icons.chat_bubble_outline,
                           size: 64,
@@ -120,8 +268,6 @@ class _PhoneLoginState extends ConsumerState<PhoneLoginScreen> {
                       },
                     ),
                     const SizedBox(height: 24),
-                    
-                    // Title
                     Text(
                       'Welcome to GekyChat',
                       style: Theme.of(context).textTheme.headlineMedium,
@@ -134,28 +280,87 @@ class _PhoneLoginState extends ConsumerState<PhoneLoginScreen> {
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 32),
-                    
-                    // Phone input
-                    TextFormField(
-                      controller: _phoneCtrl,
-                      focusNode: _focusNode,
-                      decoration: const InputDecoration(
-                        labelText: 'Phone Number',
-                        hintText: '24 123 4567',
-                        prefixText: '+233 ',
-                        prefixIcon: Icon(Icons.phone),
+                    Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: isDark
+                              ? const Color(0xFF2A3942)
+                              : const Color(0xFFE4E6EB),
+                        ),
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      keyboardType: TextInputType.phone,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(10),
-                      ],
-                      validator: _validatePhone,
-                      onFieldSubmitted: (_) => _submit(),
+                      child: Row(
+                        children: [
+                          Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: _showCountryPicker,
+                              borderRadius: const BorderRadius.horizontal(
+                                left: Radius.circular(11),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 14,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      _selectedCountry.flag,
+                                      style: const TextStyle(fontSize: 20),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      _selectedCountry.dialCode,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        color: isDark
+                                            ? Colors.white
+                                            : Colors.black,
+                                      ),
+                                    ),
+                                    Icon(
+                                      Icons.arrow_drop_down,
+                                      color: mutedColor,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          Container(
+                            width: 1,
+                            height: 28,
+                            color: isDark
+                                ? const Color(0xFF2A3942)
+                                : const Color(0xFFE4E6EB),
+                          ),
+                          Expanded(
+                            child: TextFormField(
+                              controller: _phoneCtrl,
+                              focusNode: _focusNode,
+                              decoration: const InputDecoration(
+                                hintText: '24 123 4567',
+                                border: InputBorder.none,
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 14,
+                                ),
+                              ),
+                              keyboardType: TextInputType.phone,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                                LengthLimitingTextInputFormatter(10),
+                              ],
+                              validator: _validatePhone,
+                              onFieldSubmitted: (_) => _submit(),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 24),
-                    
-                    // Error message
                     if (_error != null)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 16),
@@ -172,8 +377,6 @@ class _PhoneLoginState extends ConsumerState<PhoneLoginScreen> {
                           ),
                         ),
                       ),
-                    
-                    // Submit button
                     ElevatedButton(
                       onPressed: _loading ? null : _submit,
                       style: ElevatedButton.styleFrom(
@@ -190,6 +393,84 @@ class _PhoneLoginState extends ConsumerState<PhoneLoginScreen> {
                             )
                           : const Text('Continue'),
                     ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Divider(color: mutedColor.withValues(alpha: 0.4)),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: Text(
+                            'OR',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: mutedColor,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Divider(color: mutedColor.withValues(alpha: 0.4)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    OutlinedButton.icon(
+                      onPressed: _loading ? null : _showQrLogin,
+                      icon: const Icon(Icons.qr_code_scanner),
+                      label: const Text('Log in with QR code'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          'By continuing, you agree to our ',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: mutedColor,
+                              ),
+                        ),
+                        TextButton(
+                          onPressed: () => _openUrl(_termsOfServiceUrl),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            foregroundColor: primaryColor,
+                          ),
+                          child: const Text('Terms of Service'),
+                        ),
+                        Text(
+                          ' and ',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: mutedColor,
+                              ),
+                        ),
+                        TextButton(
+                          onPressed: () => _openUrl(_privacyPolicyUrl),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            foregroundColor: primaryColor,
+                          ),
+                          child: const Text('Privacy Policy'),
+                        ),
+                        Text(
+                          '.',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: mutedColor,
+                              ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -200,4 +481,3 @@ class _PhoneLoginState extends ConsumerState<PhoneLoginScreen> {
     );
   }
 }
-

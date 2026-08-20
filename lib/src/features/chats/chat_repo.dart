@@ -1193,6 +1193,15 @@ class ChatRepository {
       final raw = response.data;
       final map = (raw is Map && raw['data'] is Map) ? raw['data'] : raw;
       return Message.fromJson(Map<String, dynamic>.from(map));
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 422) {
+        final data = e.response?.data;
+        final serverMsg = data is Map ? data['message']?.toString() : null;
+        throw Exception(
+          serverMsg ?? 'Could not edit message (text may be too long or invalid).',
+        );
+      }
+      throw Exception('Failed to edit message: $e');
     } catch (e) {
       throw Exception('Failed to edit message: $e');
     }
@@ -1204,6 +1213,15 @@ class ChatRepository {
       final raw = response.data;
       final map = (raw is Map && raw['data'] is Map) ? raw['data'] : raw;
       return Message.fromJson(Map<String, dynamic>.from(map));
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 422) {
+        final data = e.response?.data;
+        final serverMsg = data is Map ? data['message']?.toString() : null;
+        throw Exception(
+          serverMsg ?? 'Could not edit message (text may be too long or invalid).',
+        );
+      }
+      throw Exception('Failed to edit group message: $e');
     } catch (e) {
       throw Exception('Failed to edit group message: $e');
     }

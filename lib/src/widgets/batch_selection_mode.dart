@@ -1,5 +1,127 @@
 import 'package:flutter/material.dart';
 
+/// Telegram-style multi-select header: Forward + Delete on the left, Cancel on the right.
+class MessageSelectionToolbar extends StatelessWidget {
+  const MessageSelectionToolbar({
+    super.key,
+    required this.selectedCount,
+    required this.onCancel,
+    required this.onForward,
+    required this.onDelete,
+  });
+
+  final int selectedCount;
+  final VoidCallback onCancel;
+  final VoidCallback onForward;
+  final VoidCallback onDelete;
+
+  static const Color _actionBlue = Color(0xFF3390EC);
+  static const Color _actionBlueDark = Color(0xFF2B7CD3);
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = selectedCount > 0;
+
+    return Row(
+      children: [
+        _ActionPill(
+          label: 'FORWARD',
+          count: selectedCount,
+          onPressed: enabled ? onForward : null,
+        ),
+        const SizedBox(width: 8),
+        _ActionPill(
+          label: 'DELETE',
+          count: selectedCount,
+          onPressed: enabled ? onDelete : null,
+        ),
+        const Spacer(),
+        TextButton(
+          onPressed: onCancel,
+          style: TextButton.styleFrom(
+            foregroundColor: _actionBlue,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          child: const Text(
+            'CANCEL',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ActionPill extends StatelessWidget {
+  const _ActionPill({
+    required this.label,
+    required this.count,
+    required this.onPressed,
+  });
+
+  final String label;
+  final int count;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPressed != null;
+
+    return Material(
+      color: enabled
+          ? MessageSelectionToolbar._actionBlue
+          : MessageSelectionToolbar._actionBlue.withValues(alpha: 0.45),
+      borderRadius: BorderRadius.circular(6),
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(6),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              if (count > 0) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: MessageSelectionToolbar._actionBlueDark,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '$count',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Batch selection mode UI (like WhatsApp multi-select)
 /// Shows count of selected items and action buttons
 class BatchSelectionAppBar extends StatelessWidget implements PreferredSizeWidget {

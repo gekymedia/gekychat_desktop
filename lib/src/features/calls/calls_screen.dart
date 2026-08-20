@@ -13,6 +13,7 @@ import '../live/broadcast_streaming_screen.dart';
 import '../contacts/contact_display_service.dart';
 import '../../utils/phone_formatter.dart';
 import '../../utils/snackbar_helper.dart';
+import '../../utils/storage_url.dart';
 
 final callLogsProvider = FutureProvider<List<CallLog>>((ref) async {
   final repo = ref.read(callRepositoryProvider);
@@ -186,7 +187,7 @@ class _CallLogItem extends ConsumerWidget {
           phone: user?.phone,
           apiName: user?.name ?? 'Unknown',
         );
-    final avatarUrl = group?.avatarUrl ?? user?.avatarUrl;
+    final avatarUrl = resolveAvatarUrl(group?.avatarUrl ?? user?.avatarUrl);
     final formattedPhone = (user?.phone != null &&
             user!.phone!.isNotEmpty &&
             displayName != user.phone)

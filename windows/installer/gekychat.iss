@@ -34,6 +34,11 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 DisableDirPage=auto
 DisableProgramGroupPage=auto
+; Upgrade over existing install (same AppId), reuse install folder.
+UsePreviousAppDir=yes
+; Force-close GekyChat so gekychat_desktop.exe / DLLs are not locked during upgrade.
+CloseApplications=force
+RestartApplications=no
 
 [InstallDelete]
 Type: filesandordirs; Name: "{app}\*"
@@ -53,3 +58,26 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// GekyChat hides to the system tray on window close — the process keeps running and
+// locks the install folder. Kill it before upgrade so Inno Setup can replace files.
+procedure KillRunningGekyChat();
+var
+  ResultCode: Integer;
+begin
+  Exec('taskkill.exe', '/F /IM {#MyAppExeName} /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(800);
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  KillRunningGekyChat();
+  Result := True;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  KillRunningGekyChat();
+  Result := '';
+end;

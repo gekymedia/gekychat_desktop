@@ -23,6 +23,7 @@ import 'livekit_call_screen.dart';
 import 'providers.dart';
 import '../../services/livekit_call_service.dart';
 import '../../core/providers/connectivity_provider.dart';
+import '../../utils/storage_url.dart';
 
 /// Global handler for incoming calls. Uses [rootNavigatorKey] so the ring UI
 /// works from any route (settings, calls tab, etc.), not only [DesktopChatScreen].
@@ -288,7 +289,7 @@ class IncomingCallHandler {
       'caller': <String, dynamic>{
         'id': _asInt(data['caller_id']) ?? 0,
         'name': data['caller_name']?.toString() ?? 'Someone',
-        'avatar': data['caller_avatar']?.toString(),
+        'avatar': resolveAvatarUrl(data['caller_avatar']?.toString()),
         'phone': data['caller_phone']?.toString() ?? '',
       },
     });
@@ -532,7 +533,11 @@ class IncomingCallHandler {
 
       final callType = callData['type'] as String? ?? 'voice';
       final callerName = caller?['name'] as String? ?? 'Unknown';
-      final callerAvatar = caller?['avatar'] as String?;
+      final callerAvatar = resolveAvatarUrl(
+        caller?['avatar']?.toString() ??
+            caller?['avatar_url']?.toString() ??
+            caller?['avatar_path']?.toString(),
+      );
       final conversationId = _asInt(callData['conversation_id']);
       final groupId = _asInt(callData['group_id']);
 
@@ -604,8 +609,9 @@ class IncomingCallHandler {
     await _dismissInAppRingOverlay();
     try {
       final lk = _ref?.read(liveKitCallServiceProvider);
+      // Only tear down LiveKit if we actually joined a room for this call.
       if (lk?.hasActiveCall == true) {
-        await lk!.endCall();
+        unawaited(lk!.endCall());
       }
     } catch (_) {}
     await _callManager?.abandonCallLocally(sessionIdOverride: sessionId);
@@ -629,10 +635,45 @@ class IncomingCallHandler {
     _liveKitOnStack = false;
   }
 
+  /// join-call broadcasts CallCalleeCancel (action:cancel) to every device for
+  /// this user — including the one that just answered. Ignore that echo while
+  /// we are already connecting / in-call for the same session.
+  bool _shouldIgnoreCallCancelEcho(int sessionId) {
+    final cm = _callManager;
+    if (cm != null &&
+        !cm.isCaller &&
+        (cm.callState == CallState.connecting ||
+            cm.callState == CallState.connected)) {
+      final activeId = cm.currentCall?.id ?? _pendingCall?.id;
+      if (activeId == sessionId) return true;
+    }
+    try {
+      final lk = _ref?.read(liveKitCallServiceProvider);
+      if (lk?.hasActiveCall == true && lk?.activeCall?.callId == sessionId) {
+        return true;
+      }
+    } catch (_) {}
+    if (_liveKitOnStack &&
+        (_pendingCall?.id == sessionId ||
+            cm?.currentCall?.id == sessionId)) {
+      return true;
+    }
+    return false;
+  }
+
   void _handleCallCancelled(Map<String, dynamic> callData) {
     final sessionId =
         _asInt(callData['session_id']) ?? _asInt(callData['call_id']);
     if (sessionId == null) return;
+
+    final action = callData['action']?.toString() ?? 'cancel';
+    if ((action == 'cancel' || action == 'end' || action == 'ended') &&
+        _shouldIgnoreCallCancelEcho(sessionId)) {
+      debugPrint(
+        '📞 Ignoring $action for session $sessionId — this device is answering',
+      );
+      return;
+    }
 
     if (_waitingCall != null && _waitingCall!.id == sessionId) {
       _waitingCallTimer?.cancel();

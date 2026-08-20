@@ -95,6 +95,11 @@ class _LiveKitCallOverlayState extends ConsumerState<LiveKitCallOverlay> {
 
     final isConnected = activeCall.isConnected;
     final participantCount = activeCall.participantCount;
+    final hadPeerOrDuration =
+        activeCall.callDuration.inSeconds > 0 || participantCount > 1;
+    final statusLabel = isConnected
+        ? '${_formatDuration(activeCall.callDuration)} • $participantCount'
+        : (hadPeerOrDuration ? 'Reconnecting…' : 'Connecting…');
     final bubbleColor =
         isConnected ? const Color(0xFF008069) : Colors.orange.shade700;
 
@@ -147,9 +152,7 @@ class _LiveKitCallOverlayState extends ConsumerState<LiveKitCallOverlay> {
                             ),
                           ),
                           Text(
-                            isConnected
-                                ? '${_formatDuration(activeCall.callDuration)} • $participantCount'
-                                : 'Connecting…',
+                            statusLabel,
                             style: const TextStyle(
                               color: Colors.white70,
                               fontSize: 11,

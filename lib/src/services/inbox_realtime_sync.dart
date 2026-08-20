@@ -13,7 +13,7 @@ import '../features/chats/models.dart';
 import '../features/chats/chat_providers.dart';
 import '../realtime/pusher_message_payload.dart';
 import '../core/services/taskbar_badge_service.dart';
-import '../features/notifications/notification_manager.dart';
+import '../features/notifications/desktop_inbox_notification.dart';
 
 /// App-wide inbox listener: refreshes the chats list and pushes live messages
 /// into open [ChatView] / [GroupChatView] via [inboxLiveMessageProvider].
@@ -36,16 +36,18 @@ class InboxRealtimeSync {
         return;
       }
       if (!force && _ready && _listeningUserId == userId) return;
-      _ready = true;
-      _listeningUserId = userId;
 
       final pusher = _ref.read(pusherServiceProvider);
       final channel = 'user.$userId';
 
       await pusher.connect();
+      await pusher.waitUntilConnected();
       await pusher.subscribePrivate(channel, (_) {});
       pusher.listen(channel, 'UserInboxMessage', _handleInboxEvent);
       pusher.listen(channel, 'UserInboxGroupMessage', _handleInboxEvent);
+
+      _ready = true;
+      _listeningUserId = userId;
 
       debugPrint('✅ InboxRealtimeSync listening on private-user.$userId');
     } catch (e) {
@@ -122,6 +124,18 @@ class InboxRealtimeSync {
         parsedMessage = Message.fromJson(messageMap);
       } catch (e) {
         debugPrint('InboxRealtimeSync: Message.fromJson failed: $e');
+        unawaited(
+          DesktopInboxNotification.showFromInbox(
+            _ref,
+            messageMap: messageMap,
+            messageId: messageId,
+            senderId: senderId,
+            currentUserId: userId,
+            conversationId: conversationId,
+            groupId: groupId,
+            isGroupMessage: isGroupMessage,
+          ),
+        );
         return;
       }
 
@@ -196,7 +210,16 @@ class InboxRealtimeSync {
       unawaited(_ref.read(taskbarBadgeServiceProvider).updateBadge());
 
       unawaited(
-        NotificationManager.instance?.notifyInboxPayload(payload),
+        DesktopInboxNotification.showFromInbox(
+          _ref,
+          messageMap: messageMap,
+          messageId: messageId,
+          senderId: senderId,
+          currentUserId: userId,
+          conversationId: conversationId,
+          groupId: groupId,
+          isGroupMessage: isGroupMessage,
+        ),
       );
     } catch (e) {
       debugPrint('InboxRealtimeSync event: $e');

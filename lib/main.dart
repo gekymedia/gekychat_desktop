@@ -127,8 +127,7 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
         try {
           final apiService = ref.read(apiServiceProvider);
           // WidgetRef extends Ref, so we can pass it directly
-          final notificationManager = await NotificationManager.create(apiService, ref);
-          await notificationManager.setup();
+          await NotificationManager.ensureReady(apiService, ref);
           debugPrint('✅ Notifications initialized');
         } catch (e) {
           debugPrint('⚠️ Failed to initialize notifications: $e');

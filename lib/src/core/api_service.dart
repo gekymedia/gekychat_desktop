@@ -608,6 +608,25 @@ class ApiService {
       post('/two-factor/regenerate-recovery-codes', data: data);
 
   // ---------------------------------------------------------------------------
+  // QR login (desktop shows QR, mobile approves)
+  // ---------------------------------------------------------------------------
+
+  Future<Response> createQrLoginSession() => get('/auth/qr-session');
+
+  Future<Response> pollQrLoginSession(
+    String sessionToken, {
+    required String deviceId,
+    String deviceType = 'desktop',
+  }) =>
+      get(
+        '/auth/qr-session/$sessionToken',
+        queryParameters: {
+          'device_id': deviceId,
+          'device_type': deviceType,
+        },
+      );
+
+  // ---------------------------------------------------------------------------
   // Linked Devices
   // ---------------------------------------------------------------------------
 

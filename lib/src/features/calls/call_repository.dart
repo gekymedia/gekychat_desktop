@@ -2,6 +2,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../core/api_service.dart';
+import '../../core/device_id.dart';
+import '../../core/installation_id.dart';
 import '../../services/product_analytics_service.dart';
 import 'call_phone_guard.dart';
 import 'models.dart';
@@ -145,13 +147,30 @@ class CallRepository {
       Duration(milliseconds: 1800),
       Duration(milliseconds: 3500),
     ];
+    // Lets the server exclude THIS device from the "stop ringing on other
+    // devices" cancel it broadcasts on accept — without it, that cancel also
+    // reaches (and can tear down) the very device that just answered.
+    String? installationId;
+    String? deviceId;
+    try {
+      installationId = await getOrCreateInstallationId();
+      deviceId = await getOrCreateDeviceId();
+    } catch (_) {}
+    final identifiers = <String, dynamic>{
+      if (installationId != null && installationId.isNotEmpty)
+        'installation_id': installationId,
+      if (deviceId != null && deviceId.isNotEmpty) 'device_id': deviceId,
+    };
     Object? lastError;
     for (final delay in delays) {
       if (delay > Duration.zero) {
         await Future.delayed(delay);
       }
       try {
-        await _api.post('/calls/$sessionId/join-call');
+        await _api.post(
+          '/calls/$sessionId/join-call',
+          data: identifiers.isNotEmpty ? identifiers : null,
+        );
         return;
       } catch (e) {
         lastError = e;

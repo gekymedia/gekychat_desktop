@@ -7,12 +7,19 @@ enum DesktopMicrophoneDialogKind {
   denied,
 }
 
-/// WhatsApp-style microphone permission / hardware dialogs for desktop voice notes.
+enum DesktopMicrophonePurpose {
+  voiceNote,
+  call,
+}
+
+/// WhatsApp-style microphone permission / hardware dialogs for desktop.
 Future<void> showDesktopMicrophonePermissionDialog(
   BuildContext context, {
   required DesktopMicrophoneDialogKind kind,
+  DesktopMicrophonePurpose purpose = DesktopMicrophonePurpose.voiceNote,
 }) {
   final isDark = Theme.of(context).brightness == Brightness.dark;
+  final forCall = purpose == DesktopMicrophonePurpose.call;
 
   late final String title;
   late final String body;
@@ -20,15 +27,19 @@ Future<void> showDesktopMicrophonePermissionDialog(
   switch (kind) {
     case DesktopMicrophoneDialogKind.allowAccess:
       title = 'Allow microphone';
-      body =
-          'To record voice messages, allow GekyChat access to your microphone '
-          'when Windows asks.';
+      body = forCall
+          ? 'To join calls, allow GekyChat access to your microphone when Windows asks.'
+          : 'To record voice messages, allow GekyChat access to your microphone '
+              'when Windows asks.';
     case DesktopMicrophoneDialogKind.notFound:
       title = 'Microphone not found';
-      body =
-          "You can't record a voice message because it looks like your computer "
-          "doesn't have a microphone. Try connecting one, or restart the app "
-          'after plugging it in.';
+      body = forCall
+          ? "You can't join this call because it looks like your computer "
+              "doesn't have a microphone. Try connecting one, or restart the app "
+              'after plugging it in.'
+          : "You can't record a voice message because it looks like your computer "
+              "doesn't have a microphone. Try connecting one, or restart the app "
+              'after plugging it in.';
     case DesktopMicrophoneDialogKind.denied:
       title = 'Microphone access needed';
       body =

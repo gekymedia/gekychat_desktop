@@ -18,6 +18,21 @@ String? resolveStorageUrl(String? raw) {
       .replaceAll(RegExp(r'/api$', caseSensitive: false), '')
       .replaceAll(RegExp(r'/$'), '');
 
-  final path = s.startsWith('/') ? s : '/$s';
-  return '$serverRoot$path';
+  var path = s.startsWith('/') ? s.substring(1) : s;
+  // Bare avatar/media paths from some payloads omit the `storage/` prefix.
+  if (!path.startsWith('storage/')) {
+    path = 'storage/$path';
+  }
+  return '$serverRoot/$path';
+}
+
+/// Avatar-safe resolver: absolute http(s) URLs unchanged; relative paths get
+/// `{origin}/storage/...`. Returns null when unresolvable (never a relative URI).
+String? resolveAvatarUrl(String? raw) {
+  if (raw == null || raw.trim().isEmpty) return null;
+  final value = raw.trim();
+  if (value.startsWith('http://') || value.startsWith('https://')) {
+    return value;
+  }
+  return resolveStorageUrl(value);
 }

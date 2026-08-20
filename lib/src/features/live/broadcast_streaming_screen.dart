@@ -4,7 +4,6 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:livekit_client/livekit_client.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/providers.dart';
@@ -769,7 +768,7 @@ class _LocalVideoPreviewState extends State<_LocalVideoPreview> {
       return Center(
         child: VideoTrackRenderer(
           _localVideoTrack!,
-          fit: rtc.RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+          fit: VideoViewFit.cover,
         ),
       );
     }

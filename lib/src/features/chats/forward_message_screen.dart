@@ -20,14 +20,22 @@ ImageProvider? _avatarImageProvider(String? url) {
 }
 
 class ForwardMessageScreen extends ConsumerStatefulWidget {
-  final Message message;
+  final List<Message> messages;
   final bool forModal;
 
-  const ForwardMessageScreen({
+  ForwardMessageScreen({
     super.key,
-    required this.message,
+    required Message message,
+    this.forModal = false,
+  }) : messages = [message];
+
+  const ForwardMessageScreen.multiple({
+    super.key,
+    required this.messages,
     this.forModal = false,
   });
+
+  Message get primaryMessage => messages.first;
 
   static Future<void> showModal(BuildContext context, Message message) {
     return showDesktopCenterModal<void>(
@@ -36,6 +44,26 @@ class ForwardMessageScreen extends ConsumerStatefulWidget {
       maxWidth: 560,
       maxHeightFraction: 0.85,
       child: ForwardMessageScreen(message: message, forModal: true),
+    );
+  }
+
+  static Future<void> showModalForMessages(
+    BuildContext context,
+    List<Message> messages,
+  ) {
+    if (messages.isEmpty) return Future.value();
+    final title = messages.length == 1
+        ? 'Forward message'
+        : 'Forward ${messages.length} messages';
+    return showDesktopCenterModal<void>(
+      context: context,
+      title: title,
+      maxWidth: 560,
+      maxHeightFraction: 0.85,
+      child: ForwardMessageScreen.multiple(
+        messages: messages,
+        forModal: true,
+      ),
     );
   }
 
@@ -127,7 +155,7 @@ class _ForwardMessageScreenState
                     children: [
                       _ConversationTab(searchQuery: _searchQuery),
                       _GroupTab(searchQuery: _searchQuery),
-                      _StatusTab(message: widget.message),
+                      _StatusTab(message: widget.primaryMessage),
                     ],
                   ),
                 ),
@@ -226,12 +254,11 @@ class _ForwardMessageScreenState
         });
       }
 
-      // Forward to all targets in a single API call
+      // Forward each selected message to all targets (preserves order).
       if (targets.isNotEmpty) {
-        await repo.forwardMessage(
-          widget.message.id,
-          targets,
-        );
+        for (final message in widget.messages) {
+          await repo.forwardMessage(message.id, targets);
+        }
       } else {
         throw Exception('No recipients selected');
       }
@@ -243,7 +270,16 @@ class _ForwardMessageScreenState
         'groups': selection.groups.toList(),
         'savedMessages': selection.savedMessagesSelected,
       });
-            context.showInfoToast('Message forwarded to ${targets.length} ${targets.length == 1 ? 'recipient' : 'recipients'}');    } catch (e) {
+      final msgCount = widget.messages.length;
+      final recipientLabel =
+          '${targets.length} ${targets.length == 1 ? 'recipient' : 'recipients'}';
+      if (msgCount == 1) {
+        context.showInfoToast('Message forwarded to $recipientLabel');
+      } else {
+        context.showInfoToast(
+          '$msgCount messages forwarded to $recipientLabel',
+        );
+      }    } catch (e) {
       debugPrint('Error forwarding message: $e');
       if (!mounted) return;
       

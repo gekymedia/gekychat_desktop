@@ -66,7 +66,8 @@ class _AppUpdateCheckerState extends ConsumerState<AppUpdateChecker> {
           title: const Text('Update required'),
           content: Text(
             'This version (${result.installedVersion}) is no longer supported. '
-            'Please update to ${result.remote.latestVersion} or newer to continue.',
+            'Please update to ${result.remote.latestVersion} or newer to continue.\n\n'
+            'Quit GekyChat from the system tray (Exit) before running the installer.',
           ),
           actions: [
             FilledButton(
@@ -88,7 +89,9 @@ class _AppUpdateCheckerState extends ConsumerState<AppUpdateChecker> {
         title: const Text('Update available'),
         content: Text(
           'A newer version (${result.remote.latestVersion}) is available. '
-          'You are on ${result.installedVersion}.',
+          'You are on ${result.installedVersion}.\n\n'
+          'Download the installer, then fully quit GekyChat (right-click the tray icon → Exit) '
+          'before running the setup. The installer will upgrade your existing install.',
         ),
         actions: [
           TextButton(

@@ -13,18 +13,16 @@ class PasteIntent extends Intent {
 
 class OtpPasteFormatter extends TextInputFormatter {
   final Function(String) onPaste;
-  
+
   OtpPasteFormatter(this.onPaste);
-  
+
   @override
   TextEditingValue formatEditUpdate(
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
-    // If the new value has more than 1 character, it's likely a paste
     if (newValue.text.length > 1) {
       onPaste(newValue.text);
-      // Return the old value to prevent the paste from going through
       return oldValue;
     }
     return newValue;
@@ -50,6 +48,12 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.phone.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) context.go('/login');
+      });
+      return;
+    }
     _startCooldown(30);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _nodes.first.requestFocus();
@@ -81,10 +85,13 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
   }
 
   Future<void> _verify() async {
+    if (_loading) return;
+
     if (_code.length != 6) {
       setState(() => _error = 'Please enter the 6-digit code');
       return;
     }
+
     setState(() {
       _loading = true;
       _error = null;
@@ -97,7 +104,6 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
     final err = ref.read(authProvider).error;
 
     if ((token ?? '').isNotEmpty) {
-      // Drop stale error state from pre-login API failures (401 without token).
       ref.invalidate(conversationsProvider);
       ref.invalidate(archivedConversationsProvider);
       ref.invalidate(groupsProvider);
@@ -170,17 +176,14 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
         inputFormatters: [
           FilteringTextInputFormatter.digitsOnly,
           OtpPasteFormatter((text) => _handlePaste(text)),
-          LengthLimitingTextInputFormatter(1), // Limit to 1 character after paste handling
+          LengthLimitingTextInputFormatter(1),
         ],
         decoration: const InputDecoration(
           counterText: '',
           border: InputBorder.none,
           contentPadding: EdgeInsets.zero,
         ),
-        onTap: () {
-          // Check clipboard when user taps on any field
-          _handleClipboardPaste();
-        },
+        onTap: _handleClipboardPaste,
         onChanged: (v) {
           if (v.length > 1) {
             _handlePaste(v);
@@ -188,7 +191,6 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
           }
           if (v.isNotEmpty && i < 5) _nodes[i + 1].requestFocus();
           if (v.isEmpty && i > 0) _nodes[i - 1].requestFocus();
-          if (_code.length == 6) _verify();
           setState(() {});
         },
         onSubmitted: (_) => i == 5 ? _verify() : _nodes[i + 1].requestFocus(),
@@ -199,9 +201,11 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryColor = Theme.of(context).colorScheme.primary;
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
+      backgroundColor:
+          isDark ? const Color(0xFF0B141A) : const Color(0xFFF0F2F5),
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -210,41 +214,38 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
             Icons.arrow_back,
             color: isDark ? Colors.white : Colors.black,
           ),
-          onPressed: () {
-            context.go('/login');
-          },
+          onPressed: () => context.go('/login'),
           tooltip: 'Back to phone number',
         ),
       ),
       body: Center(
         child: Container(
           constraints: const BoxConstraints(maxWidth: 500),
-          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
+          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
           child: Card(
             elevation: 8,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(24),
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 40),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
                   Image.asset(
                     'assets/icons/gold_no_text/128x128.png',
-                    width: 128,
-                    height: 128,
+                    width: 96,
+                    height: 96,
                     errorBuilder: (context, error, stackTrace) {
-                      // Fallback to icon if image not found
                       return Icon(
                         Icons.sms_outlined,
-                        size: 64,
-                        color: Theme.of(context).colorScheme.primary,
+                        size: 56,
+                        color: primaryColor,
                       );
                     },
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 20),
                   Text(
                     'Verification Code',
                     style: Theme.of(context).textTheme.headlineMedium,
@@ -258,50 +259,43 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
                   ),
                   const SizedBox(height: 8),
                   TextButton.icon(
-                    onPressed: () {
-                      context.go('/login');
-                    },
-                    icon: Icon(
-                      Icons.edit,
-                      size: 16,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
+                    onPressed: () => context.go('/login'),
+                    icon: Icon(Icons.edit, size: 16, color: primaryColor),
                     label: Text(
                       'Change phone number',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
+                      style: TextStyle(color: primaryColor),
                     ),
                   ),
-                  const SizedBox(height: 32),
-                  
-                  // OTP boxes
+                  const SizedBox(height: 24),
                   Shortcuts(
                     shortcuts: {
-                      LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyV): const PasteIntent(),
-                      LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyV): const PasteIntent(),
+                      LogicalKeySet(
+                        LogicalKeyboardKey.control,
+                        LogicalKeyboardKey.keyV,
+                      ): const PasteIntent(),
+                      LogicalKeySet(
+                        LogicalKeyboardKey.meta,
+                        LogicalKeyboardKey.keyV,
+                      ): const PasteIntent(),
                     },
                     child: Actions(
                       actions: {
                         PasteIntent: CallbackAction<PasteIntent>(
-                          onInvoke: (intent) => _handleClipboardPaste(),
+                          onInvoke: (intent) {
+                            _handleClipboardPaste();
+                            return null;
+                          },
                         ),
                       },
                       child: Focus(
                         autofocus: false,
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            mainAxisSize: MainAxisSize.min,
-                            children: List.generate(
-                              6,
-                              (i) => Padding(
-                                padding: EdgeInsets.only(
-                                  right: i < 5 ? 8 : 0,
-                                ),
-                                child: _otpBox(i),
-                              ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: List.generate(
+                            6,
+                            (i) => Padding(
+                              padding: EdgeInsets.only(right: i < 5 ? 8 : 0),
+                              child: _otpBox(i),
                             ),
                           ),
                         ),
@@ -309,8 +303,6 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  
-                  // Error message
                   if (_error != null)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 16),
@@ -327,24 +319,10 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
                         ),
                       ),
                     ),
-                  
-                  // Resend button
-                  TextButton(
-                    onPressed: _cooldown > 0 || _loading ? null : _resend,
-                    child: Text(
-                      _cooldown > 0
-                          ? 'Resend code in $_cooldown seconds'
-                          : 'Resend code',
-                    ),
-                  ),
-                  
-                  const SizedBox(height: 16),
-                  
-                  // Verify button
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: _loading || _code.length != 6 ? null : _verify,
+                      onPressed: _loading ? null : _verify,
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(
@@ -357,11 +335,19 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
                               width: 20,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : const Text('Verify'),
+                          : const Text('Confirm'),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: _cooldown > 0 || _loading ? null : _resend,
+                    child: Text(
+                      _cooldown > 0
+                          ? 'Resend code in $_cooldown seconds'
+                          : 'Resend code',
                     ),
                   ),
                 ],
-                ),
               ),
             ),
           ),
@@ -370,4 +356,3 @@ class _OtpVerifyState extends ConsumerState<OtpVerifyScreen> {
     );
   }
 }
-

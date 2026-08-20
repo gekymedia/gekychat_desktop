@@ -534,21 +534,7 @@ class MessageBubble extends ConsumerWidget {
               : MediaQuery.sizeOf(context).width;
           final bubbleMaxWidth =
               DesktopChatMetrics.bubbleMaxWidth(availableWidth);
-          return _MessageBubbleHoverChrome(
-            isMe: isMeValue,
-            isDark: isDark,
-            enabled: !isSelectionMode,
-            onMore: () {
-              final box = context.findRenderObject() as RenderBox?;
-              final position = box != null
-                  ? box.localToGlobal(box.size.center(Offset.zero))
-                  : Offset(
-                      MediaQuery.sizeOf(context).width / 2,
-                      MediaQuery.sizeOf(context).height / 2,
-                    );
-              _showMessageMenuAtPosition(context, position, isMeValue);
-            },
-            child: GestureDetector(
+          return GestureDetector(
         onTap: isSelectionMode ? onSelectionToggle : null,
         onLongPress: isSelectionMode
             ? null
@@ -568,15 +554,6 @@ class MessageBubble extends ConsumerWidget {
             _showMessageMenuAtPosition(context, details.globalPosition, isMeValue),
         child: Container(
           margin: _bubbleMargin(currentUserId),
-          decoration: isSelectionMode && isSelected
-              ? BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: const Color(0xFF008069).withValues(alpha: 0.85),
-                    width: 2,
-                  ),
-                )
-              : null,
           child: ConstrainedBox(
             constraints: BoxConstraints(maxWidth: bubbleMaxWidth),
             child: Column(
@@ -604,9 +581,34 @@ class MessageBubble extends ConsumerWidget {
                   borderRadius: _bubbleBorderRadius(currentUserId),
                   boxShadow: _bubbleShadow(isDark),
                 ),
-                child: Column(
+                clipBehavior: Clip.antiAlias,
+                child: _BubbleInteractiveLayer(
+                  isSelectionMode: isSelectionMode,
+                  isSelected: isSelected,
+                  isDark: isDark,
+                  isMe: isMeValue,
+                  onSelectionToggle: onSelectionToggle,
+                  onMore: isSelectionMode
+                      ? null
+                      : () {
+                          final box = context.findRenderObject() as RenderBox?;
+                          final position = box != null
+                              ? box.localToGlobal(box.size.center(Offset.zero))
+                              : Offset(
+                                  MediaQuery.sizeOf(context).width / 2,
+                                  MediaQuery.sizeOf(context).height / 2,
+                                );
+                          _showMessageMenuAtPosition(
+                            context,
+                            position,
+                            isMeValue,
+                          );
+                        },
+                  child: Column(
                   mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  crossAxisAlignment: isMeValue
+                      ? CrossAxisAlignment.end
+                      : CrossAxisAlignment.start,
                   children: [
                     // Group sender above reply preview (WhatsApp order).
                     if (_showGroupSenderRow(currentUserId))
@@ -778,64 +780,30 @@ class MessageBubble extends ConsumerWidget {
                                (message.linkPreviews != null && message.linkPreviews!.isNotEmpty) ||
                                isWorldFeedBubble ? 8 : 0,
                         ),
-                        child: _buildMessageText(context, ref, isDark, isMeValue),
+                        child: _useWhatsAppShrinkWrap(isWorldFeedBubble)
+                            ? _buildMessageTextWithInlineFooter(
+                                context,
+                                ref,
+                                isDark,
+                                isMeValue,
+                              )
+                            : _buildMessageText(
+                                context,
+                                ref,
+                                isDark,
+                                isMeValue,
+                              ),
                       ),
 
-                    // Timestamp + Edited label + status tick
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (message.editedAt != null) ...[
-                            Text(
-                              'Edited',
-                              style: TextStyle(
-                                color: _bubbleMutedColor(isMeValue, isDark),
-                                fontSize: 10,
-                                fontStyle: FontStyle.italic,
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                          ],
-                          Text(
-                            DateFormat.jm().format(message.createdAt),
-                            style: TextStyle(
-                              color: _bubbleMutedColor(isMeValue, isDark),
-                              fontSize: 11,
-                            ),
-                          ),
-                          if (isMeValue) ...[
-                            const SizedBox(width: 4),
-                            Tooltip(
-                              message: _getStatusTooltip(message),
-                              child: Builder(builder: (context) {
-                                final st = message.status;
-                                final tickMuted = _bubbleMutedColor(true, isDark);
-                                if (st == 'queued' || st == 'sending') {
-                                  return Icon(Icons.schedule, size: 14,
-                                      color: tickMuted);
-                                } else if (st == 'failed') {
-                                  return const Icon(Icons.error_outline, size: 14,
-                                      color: Colors.redAccent);
-                                } else if (message.readAt != null || st == 'read') {
-                                  return const Icon(Icons.done_all, size: 14,
-                                      color: _kWaReadReceiptBlue);
-                                } else if (message.deliveredAt != null || st == 'delivered') {
-                                  return Icon(Icons.done_all, size: 14,
-                                      color: tickMuted);
-                                } else {
-                                  return Icon(Icons.done, size: 14,
-                                      color: tickMuted);
-                                }
-                              }),
-                            ),
-                          ],
-                        ],
+                    // Timestamp + Edited label + status tick (below body when not inline)
+                    if (!_useWhatsAppShrinkWrap(isWorldFeedBubble))
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: _buildMessageMetaRow(isMeValue, isDark),
                       ),
-                    ),
                   ],
                 ),
+              ),
               ),
               // Reactions
               if (message.reactions.isNotEmpty)
@@ -865,51 +833,13 @@ class MessageBubble extends ConsumerWidget {
             ],
           ),
         ),
-        ),
           ),
           );
         },
       ),
     );
 
-    if (!isSelectionMode) {
-      return bubble;
-    }
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, right: 8, top: 6),
-          child: GestureDetector(
-            onTap: onSelectionToggle,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              width: 22,
-              height: 22,
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? const Color(0xFF008069)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(
-                  color: isSelected
-                      ? const Color(0xFF008069)
-                      : (isDark
-                          ? Colors.white38
-                          : Colors.black26),
-                  width: 2,
-                ),
-              ),
-              child: isSelected
-                  ? const Icon(Icons.check, color: Colors.white, size: 16)
-                  : null,
-            ),
-          ),
-        ),
-        Expanded(child: bubble),
-      ],
-    );
+    return bubble;
   }
 
   List<GalleryMediaItem> _getGalleryMediaItems() {
@@ -1243,6 +1173,103 @@ class MessageBubble extends ConsumerWidget {
     final resolved = _resolvedBodyText();
     if (resolved.isEmpty) return false;
     return true;
+  }
+
+  bool _messageHasRichContent(bool isWorldFeedBubble) {
+    final gkLink = parseFirstGekychatSpecialLink(message.body);
+    return message.attachments.isNotEmpty ||
+        message.locationData != null ||
+        message.contactData != null ||
+        message.sikaTransferData != null ||
+        message.messageType == 'poll' ||
+        message.callData != null ||
+        isWorldFeedBubble ||
+        (message.linkPreviews != null && message.linkPreviews!.isNotEmpty) ||
+        (gkLink != null &&
+            (gkLink.kind == GekychatChatLinkKind.groupJoin ||
+                gkLink.kind == GekychatChatLinkKind.groupOpen ||
+                gkLink.kind == GekychatChatLinkKind.channel));
+  }
+
+  bool _useWhatsAppShrinkWrap(bool isWorldFeedBubble) {
+    if (message.isDeleted) return false;
+    if (_messageHasRichContent(isWorldFeedBubble)) return false;
+    if (!_shouldShowMessageBody(isWorldFeedBubble)) return false;
+    return true;
+  }
+
+  Widget _buildMessageMetaRow(bool isMeValue, bool isDark) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (message.editedAt != null) ...[
+          Text(
+            'Edited',
+            style: TextStyle(
+              color: _bubbleMutedColor(isMeValue, isDark),
+              fontSize: 10,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+          const SizedBox(width: 4),
+        ],
+        Text(
+          DateFormat.jm().format(message.createdAt),
+          style: TextStyle(
+            color: _bubbleMutedColor(isMeValue, isDark),
+            fontSize: 11,
+          ),
+        ),
+        if (isMeValue) ...[
+          const SizedBox(width: 4),
+          Tooltip(
+            message: _getStatusTooltip(message),
+            child: Builder(builder: (context) {
+              final st = message.status;
+              final tickMuted = _bubbleMutedColor(true, isDark);
+              if (st == 'queued' || st == 'sending') {
+                return Icon(Icons.schedule, size: 14, color: tickMuted);
+              } else if (st == 'failed') {
+                return const Icon(Icons.error_outline,
+                    size: 14, color: Colors.redAccent);
+              } else if (message.readAt != null || st == 'read') {
+                return const Icon(Icons.done_all,
+                    size: 14, color: _kWaReadReceiptBlue);
+              } else if (message.deliveredAt != null || st == 'delivered') {
+                return Icon(Icons.done_all, size: 14, color: tickMuted);
+              } else {
+                return Icon(Icons.done, size: 14, color: tickMuted);
+              }
+            }),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildMessageTextWithInlineFooter(
+    BuildContext context,
+    WidgetRef ref,
+    bool isDark,
+    bool isMe,
+  ) {
+    final footerSpan = WidgetSpan(
+      alignment: PlaceholderAlignment.baseline,
+      baseline: TextBaseline.alphabetic,
+      child: Padding(
+        padding: const EdgeInsets.only(left: 8),
+        child: _buildMessageMetaRow(isMe, isDark),
+      ),
+    );
+
+    return _buildMessageText(
+      context,
+      ref,
+      isDark,
+      isMe,
+      trailingSpans: [footerSpan],
+      shrinkWrapWidth: true,
+    );
   }
 
   Map<String, dynamic>? _worldFeedLinkPreview(GekychatChatLinkMatch match) {
@@ -2294,8 +2321,10 @@ class MessageBubble extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
     bool isDark,
-    bool isMe,
-  ) {
+    bool isMe, {
+    List<InlineSpan>? trailingSpans,
+    bool shrinkWrapWidth = false,
+  }) {
     final text = _resolvedBodyText();
     final textColor = _bubbleTextColor(isMe, isDark);
     final baseStyle = TextStyle(
@@ -2304,6 +2333,8 @@ class MessageBubble extends ConsumerWidget {
       height: 1.4,
       fontFamily: DesktopTypography.fontFamily,
     );
+    final textWidthBasis =
+        shrinkWrapWidth ? TextWidthBasis.longestLine : TextWidthBasis.parent;
 
     // Parse formatted text first
     final formattedSpan = TextFormatting.parseFormattedText(
@@ -2312,33 +2343,43 @@ class MessageBubble extends ConsumerWidget {
       defaultColor: textColor,
     );
 
-    // URL regex: http(s), www., and gekychat:// deep links
+    void appendTrailing(List<InlineSpan> spans) {
+      if (trailingSpans != null && trailingSpans.isNotEmpty) {
+        spans.addAll(trailingSpans);
+      }
+    }
     final urlRegex = RegExp(
       r'(?:gekychat:\/\/[^\s<>\[\]()]+|(?:(?:https?:\/\/)|(?:www\.))[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*))',
       caseSensitive: false,
     );
-    
+
     // Phone number regex: matches Ghana phone numbers
     // Pattern: (?:\+?233|0)?([1-9]\d{8})
     final phoneRegex = RegExp(r'(?:\+?233|0)?([1-9]\d{8})');
-    
+
     final urlMatches = urlRegex.allMatches(text);
     final phoneMatches = phoneRegex.allMatches(text);
 
     if (urlMatches.isEmpty && phoneMatches.isEmpty) {
+      final spans = <InlineSpan>[formattedSpan];
+      appendTrailing(spans);
       return SelectableText.rich(
-        formattedSpan,
-        textWidthBasis: TextWidthBasis.longestLine,
+        TextSpan(style: baseStyle, children: spans),
+        textWidthBasis: textWidthBasis,
       );
     }
 
     // Build TextSpan with clickable URLs and phone numbers while preserving formatting
-    final spans = <TextSpan>[];
+    final spans = <InlineSpan>[];
     final formattedChildren = formattedSpan.children;
-    
+
     if (formattedChildren == null || formattedChildren.isEmpty) {
-      // No children, just use the text directly
-      return SelectableText.rich(formattedSpan);
+      final plainSpans = <InlineSpan>[formattedSpan];
+      appendTrailing(plainSpans);
+      return SelectableText.rich(
+        TextSpan(style: baseStyle, children: plainSpans),
+        textWidthBasis: textWidthBasis,
+      );
     }
     
     // Process each formatted span and add URL/phone number detection
@@ -2410,8 +2451,11 @@ class MessageBubble extends ConsumerWidget {
       }
     }
 
+    appendTrailing(spans);
+
     return SelectableText.rich(
-      TextSpan(children: spans),
+      TextSpan(style: baseStyle, children: spans),
+      textWidthBasis: textWidthBasis,
     );
   }
 
@@ -4013,54 +4057,121 @@ class _GekychatLinkCtaRowState extends ConsumerState<_GekychatLinkCtaRow> {
   }
 }
 
-/// Fade-in downward chevron on hover (WhatsApp Web–style), top-right of bubble.
-class _MessageBubbleHoverChrome extends StatefulWidget {
-  const _MessageBubbleHoverChrome({
-    required this.isMe,
+/// Hover menu chevron + selection overlay, clipped inside the bubble bounds.
+class _BubbleInteractiveLayer extends StatefulWidget {
+  const _BubbleInteractiveLayer({
+    required this.isSelectionMode,
+    required this.isSelected,
     required this.isDark,
-    required this.enabled,
+    required this.isMe,
     required this.child,
+    this.onSelectionToggle,
     this.onMore,
   });
 
-  final bool isMe;
+  final bool isSelectionMode;
+  final bool isSelected;
   final bool isDark;
-  final bool enabled;
+  final bool isMe;
   final Widget child;
+  final VoidCallback? onSelectionToggle;
   final VoidCallback? onMore;
 
   @override
-  State<_MessageBubbleHoverChrome> createState() =>
-      _MessageBubbleHoverChromeState();
+  State<_BubbleInteractiveLayer> createState() =>
+      _BubbleInteractiveLayerState();
 }
 
-class _MessageBubbleHoverChromeState extends State<_MessageBubbleHoverChrome> {
+class _BubbleInteractiveLayerState extends State<_BubbleInteractiveLayer> {
   bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
-    if (!widget.enabled || widget.onMore == null) {
-      return widget.child;
-    }
+    final showHoverChevron =
+        !widget.isSelectionMode && widget.onMore != null && _hovered;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: Stack(
-        clipBehavior: Clip.none,
+        clipBehavior: Clip.hardEdge,
         children: [
           widget.child,
-          Positioned(
-            top: -4,
-            right: -2,
-            child: DesktopWhatsappHoverChevron(
-              visible: _hovered,
-              isDark: widget.isDark,
-              onTap: widget.onMore!,
-              tooltip: 'Message options',
+          if (widget.isSelectionMode && widget.isSelected)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: widget.isMe
+                        ? Colors.white.withValues(alpha: 0.22)
+                        : const Color(0xFF008069).withValues(alpha: 0.14),
+                  ),
+                ),
+              ),
             ),
+          Positioned(
+            top: 4,
+            right: 4,
+            child: widget.isSelectionMode
+                ? _BubbleSelectionIndicator(
+                    isSelected: widget.isSelected,
+                    isMe: widget.isMe,
+                    isDark: widget.isDark,
+                    onTap: widget.onSelectionToggle,
+                  )
+                : DesktopWhatsappHoverChevron(
+                    visible: showHoverChevron,
+                    isDark: widget.isDark,
+                    onTap: widget.onMore ?? () {},
+                    tooltip: 'Message options',
+                    size: 16,
+                    embedded: true,
+                  ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _BubbleSelectionIndicator extends StatelessWidget {
+  const _BubbleSelectionIndicator({
+    required this.isSelected,
+    required this.isMe,
+    required this.isDark,
+    this.onTap,
+  });
+
+  final bool isSelected;
+  final bool isMe;
+  final bool isDark;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final borderColor = isSelected
+        ? const Color(0xFF008069)
+        : (isMe
+            ? Colors.white.withValues(alpha: 0.85)
+            : (isDark
+                ? Colors.white54
+                : Colors.black.withValues(alpha: 0.35)));
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        width: 20,
+        height: 20,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: isSelected ? const Color(0xFF008069) : Colors.transparent,
+          border: Border.all(color: borderColor, width: 2),
+        ),
+        child: isSelected
+            ? const Icon(Icons.check, color: Colors.white, size: 14)
+            : null,
       ),
     );
   }

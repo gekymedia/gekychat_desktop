@@ -9,6 +9,7 @@ import 'call_repository.dart';
 import 'livekit_call_screen.dart';
 import 'providers.dart';
 import '../../utils/snackbar_helper.dart';
+import '../../utils/storage_url.dart';
 
 const _dismissedDeadCallKeysPrefsKey = 'dismissed_dead_call_keys_v1';
 bool _dismissedDeadCallKeysHydrated = false;
@@ -123,7 +124,9 @@ Future<void> joinCallFromChatLink(
       final conversationId = response['conversation_id'] as int?;
       final groupId = response['group_id'] as int?;
       final callerName = response['caller_name'] as String?;
-      final callerAvatar = response['caller_avatar'] as String?;
+      final callerAvatar = resolveAvatarUrl(
+        response['caller_avatar']?.toString(),
+      );
       final roomName = 'call_$sessionId';
       final currentUser = await ref.read(currentUserProvider.future);
       final displayName =

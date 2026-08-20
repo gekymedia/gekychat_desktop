@@ -37,19 +37,33 @@ class DesktopGlassPanel extends StatelessWidget {
         : Colors.white.withValues(alpha: 0.65);
 
     final shadows = prominentShadow
-        ? [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.48 : 0.20),
-              blurRadius: 36,
-              offset: const Offset(0, 12),
-              spreadRadius: 1,
-            ),
-            BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.08),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
-            ),
-          ]
+        ? (solid && !isDark
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.16),
+                  blurRadius: 20,
+                  offset: const Offset(0, 6),
+                  spreadRadius: 0,
+                ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.08),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.48 : 0.20),
+                  blurRadius: 36,
+                  offset: const Offset(0, 12),
+                  spreadRadius: 1,
+                ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.08),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ])
         : [
             BoxShadow(
               color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.12),
@@ -66,9 +80,12 @@ class DesktopGlassPanel extends StatelessWidget {
     );
 
     if (solid) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(borderRadius),
-        child: DecoratedBox(decoration: decoration, child: child),
+      return DecoratedBox(
+        decoration: decoration,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(borderRadius),
+          child: child,
+        ),
       );
     }
 
@@ -95,6 +112,7 @@ class DesktopGlassMenuRow extends StatelessWidget {
     required this.onTap,
     this.isDestructive = false,
     this.accentColor,
+    this.compact = false,
   }) : assert(icon != null || leading != null);
 
   final IconData? icon;
@@ -104,6 +122,8 @@ class DesktopGlassMenuRow extends StatelessWidget {
   final VoidCallback onTap;
   final bool isDestructive;
   final Color? accentColor;
+  /// Shrink row to label width (Telegram-style compact action menu).
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -120,6 +140,7 @@ class DesktopGlassMenuRow extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
           child: Row(
+            mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
             children: [
               leading ??
                   Icon(
@@ -128,8 +149,8 @@ class DesktopGlassMenuRow extends StatelessWidget {
                     color: accentColor ?? iconColor,
                   ),
               const SizedBox(width: 12),
-              Expanded(
-                child: Text(
+              if (compact)
+                Text(
                   label,
                   style: TextStyle(
                     fontFamily: DesktopTypography.fontFamily,
@@ -137,8 +158,19 @@ class DesktopGlassMenuRow extends StatelessWidget {
                     fontWeight: FontWeight.w500,
                     color: fg,
                   ),
+                )
+              else
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontFamily: DesktopTypography.fontFamily,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: fg,
+                    ),
+                  ),
                 ),
-              ),
             ],
           ),
         ),

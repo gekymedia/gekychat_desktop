@@ -9,6 +9,7 @@ class DesktopWhatsappHoverChevron extends StatelessWidget {
     required this.isDark,
     this.tooltip = 'Menu',
     this.size = 18,
+    this.embedded = false,
   });
 
   final bool visible;
@@ -16,10 +17,41 @@ class DesktopWhatsappHoverChevron extends StatelessWidget {
   final bool isDark;
   final String tooltip;
   final double size;
+  /// When true, renders flush inside a message bubble (no card elevation).
+  final bool embedded;
 
   @override
   Widget build(BuildContext context) {
-    final iconColor = isDark ? Colors.white70 : const Color(0xFF8696A0);
+    final iconColor = embedded
+        ? (isDark ? Colors.white70 : const Color(0xFF667781))
+        : (isDark ? Colors.white70 : const Color(0xFF8696A0));
+
+    final chevron = Icon(
+      Icons.keyboard_arrow_down_rounded,
+      size: size,
+      color: iconColor,
+    );
+
+    final child = embedded
+        ? InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(4),
+            child: Padding(
+              padding: const EdgeInsets.all(2),
+              child: chevron,
+            ),
+          )
+        : InkWell(
+            onTap: onTap,
+            splashColor: isDark
+                ? Colors.white.withValues(alpha: 0.08)
+                : Colors.black.withValues(alpha: 0.06),
+            child: SizedBox(
+              width: size + 6,
+              height: size + 4,
+              child: chevron,
+            ),
+          );
 
     return AnimatedOpacity(
       opacity: visible ? 1 : 0,
@@ -30,28 +62,16 @@ class DesktopWhatsappHoverChevron extends StatelessWidget {
         child: Semantics(
           label: tooltip,
           button: true,
-          child: Material(
-            color: isDark ? const Color(0xFF202C33) : Colors.white,
-            elevation: visible ? 1 : 0,
-            shadowColor: Colors.black.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(4),
-            clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              onTap: onTap,
-              splashColor: isDark
-                  ? Colors.white.withValues(alpha: 0.08)
-                  : Colors.black.withValues(alpha: 0.06),
-              child: SizedBox(
-                width: size + 6,
-                height: size + 4,
-                child: Icon(
-                  Icons.keyboard_arrow_down_rounded,
-                  size: size,
-                  color: iconColor,
+          child: embedded
+              ? child
+              : Material(
+                  color: isDark ? const Color(0xFF202C33) : Colors.white,
+                  elevation: visible ? 1 : 0,
+                  shadowColor: Colors.black.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(4),
+                  clipBehavior: Clip.antiAlias,
+                  child: child,
                 ),
-              ),
-            ),
-          ),
         ),
       ),
     );

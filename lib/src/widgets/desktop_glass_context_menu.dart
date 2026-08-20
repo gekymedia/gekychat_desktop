@@ -1,15 +1,43 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import 'desktop_glass_panel.dart';
 import 'desktop_glass_popup.dart';
+import 'desktop_typography.dart';
 
-/// Telegram / iOS-style glass context menu shown at a screen position (e.g. right-click).
+/// Telegram-style context menu at a screen position (e.g. right-click on a message).
 class DesktopGlassContextMenu {
-  static const double _menuWidth = 248;
   static const double _reactionBarWidth = 328;
   static const double _reactionBarHeight = 48;
   static const double _rowHeight = 44;
   static const double _padding = 6;
+  static const double _menuMinWidth = 148;
+
+  static double _computeMenuWidth(List<DesktopGlassMenuItem> items) {
+    const horizontalPad = 24.0; // 12 each side
+    const iconWidth = 20.0;
+    const gap = 12.0;
+
+    final style = TextStyle(
+      fontFamily: DesktopTypography.fontFamily,
+      fontSize: 14,
+      fontWeight: FontWeight.w500,
+    );
+
+    var maxLabel = 0.0;
+    for (final item in items) {
+      final tp = TextPainter(
+        text: TextSpan(text: item.label, style: style),
+        maxLines: 1,
+        textDirection: TextDirection.ltr,
+      )..layout();
+      maxLabel = math.max(maxLabel, tp.width);
+    }
+
+    return (horizontalPad + iconWidth + gap + maxLabel + 4)
+        .clamp(_menuMinWidth, _reactionBarWidth);
+  }
 
   static Future<void> showAtPosition({
     required BuildContext context,
@@ -28,8 +56,9 @@ class DesktopGlassContextMenu {
         onQuickReaction != null;
 
     final menuItems = items.where((item) => !item.isDivider).toList();
-    final panelWidth =
-        hasReactions ? _reactionBarWidth : _menuWidth.toDouble();
+    final actionMenuWidth = _computeMenuWidth(menuItems);
+    final stackWidth =
+        hasReactions ? _reactionBarWidth : actionMenuWidth;
     var menuHeight = _padding * 2 + menuItems.length * _rowHeight;
     if (hasReactions) {
       menuHeight += _reactionBarHeight + 8;
@@ -38,10 +67,10 @@ class DesktopGlassContextMenu {
     var left = globalPosition.dx;
     var top = globalPosition.dy;
 
-    if (left + panelWidth > screenSize.width - 8) {
-      left = screenSize.width - panelWidth - 8;
+    if (left + stackWidth > screenSize.width - 8) {
+      left = screenSize.width - stackWidth - 8;
     }
-    left = left.clamp(8.0, screenSize.width - panelWidth - 8);
+    left = left.clamp(8.0, screenSize.width - stackWidth - 8);
 
     if (top + menuHeight > screenSize.height - 8) {
       top = globalPosition.dy - menuHeight;
@@ -66,52 +95,61 @@ class DesktopGlassContextMenu {
                 Positioned(
                   left: left,
                   top: top,
-                  width: panelWidth,
+                  width: stackWidth,
                   child: GestureDetector(
                     onTap: () {},
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         if (hasReactions)
-                          _ReactionBar(
-                            isDark: isDark,
-                            emojis: quickReactions,
-                            onReaction: (emoji) {
-                              Navigator.pop(dialogContext);
-                              onQuickReaction(emoji);
-                            },
-                            onMore: onMoreReactions == null
-                                ? null
-                                : () {
-                                    Navigator.pop(dialogContext);
-                                    onMoreReactions();
-                                  },
+                          SizedBox(
+                            width: _reactionBarWidth,
+                            child: _ReactionBar(
+                              isDark: isDark,
+                              emojis: quickReactions,
+                              onReaction: (emoji) {
+                                Navigator.pop(dialogContext);
+                                onQuickReaction(emoji);
+                              },
+                              onMore: onMoreReactions == null
+                                  ? null
+                                  : () {
+                                      Navigator.pop(dialogContext);
+                                      onMoreReactions();
+                                    },
+                            ),
                           ),
                         if (hasReactions) const SizedBox(height: 8),
-                        DesktopGlassPanel(
-                          isDark: isDark,
-                          borderRadius: 14,
-                          prominentShadow: true,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: _padding),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                for (final item in menuItems)
-                                  DesktopGlassMenuRow(
-                                    icon: item.icon,
-                                    leading: item.leading,
-                                    label: item.label,
-                                    isDark: isDark,
-                                    isDestructive: item.isDestructive,
-                                    accentColor: item.accentColor,
-                                    onTap: () {
-                                      Navigator.pop(dialogContext);
-                                      item.onTap();
-                                    },
-                                  ),
-                              ],
+                        SizedBox(
+                          width: actionMenuWidth,
+                          child: DesktopGlassPanel(
+                            isDark: isDark,
+                            borderRadius: 14,
+                            prominentShadow: true,
+                            solid: true,
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: _padding),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  for (final item in menuItems)
+                                    DesktopGlassMenuRow(
+                                      icon: item.icon,
+                                      leading: item.leading,
+                                      label: item.label,
+                                      isDark: isDark,
+                                      isDestructive: item.isDestructive,
+                                      accentColor: item.accentColor,
+                                      compact: true,
+                                      onTap: () {
+                                        Navigator.pop(dialogContext);
+                                        item.onTap();
+                                      },
+                                    ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -159,6 +197,7 @@ class _ReactionBar extends StatelessWidget {
       isDark: isDark,
       borderRadius: 24,
       prominentShadow: true,
+      solid: true,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         child: Row(

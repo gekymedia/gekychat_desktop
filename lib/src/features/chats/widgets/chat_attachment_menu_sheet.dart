@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/feature_flags.dart';
@@ -178,7 +180,12 @@ class ChatAttachmentMenuSheet extends ConsumerWidget {
         icon: Icons.contact_phone_rounded,
         label: 'Contact',
         color: const Color(0xFFFF7043),
-        onTap: () => popThen(callbacks.onContact),
+        onTap: () {
+          Navigator.pop(context);
+          SchedulerBinding.instance.addPostFrameCallback((_) {
+            unawaited(callbacks.onContact());
+          });
+        },
       ),
     ];
 
