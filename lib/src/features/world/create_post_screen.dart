@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
+import 'dart:async';
 import 'dart:io';
 import '../../core/providers.dart';
+import '../../services/video_compression_service.dart';
 import '../audio/audio_search_screen.dart';
 import 'widgets/video_trimmer_widget.dart';
+import 'world_feed_repository.dart';
 import '../../utils/snackbar_helper.dart';
 
 class CreatePostScreen extends ConsumerStatefulWidget {
@@ -44,7 +47,7 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
       
       if (mounted) {
         setState(() {
-          _uploadLimits = response.data;
+          _uploadLimits = parseUploadLimitsPayload(response.data);
         });
       }
     } catch (e) {
@@ -59,7 +62,11 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
       final durationSeconds = controller.value.duration.inSeconds;
       await controller.dispose();
 
-      final maxDuration = _uploadLimits?['world_feed']?['max_duration'] ?? 180;
+      final maxDuration = uploadLimitDurationSeconds(
+        _uploadLimits,
+        'world_feed',
+        fallback: 180,
+      );
       
       if (durationSeconds > maxDuration) {
         if (!mounted) return;
@@ -158,11 +165,93 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
   }
 
   void _removeMedia() async {
-    await _videoController?.dispose();
+    await _releaseVideoPreview();
     setState(() {
       _selectedMedia = null;
-      _videoController = null;
     });
+  }
+
+  Future<void> _releaseVideoPreview() async {
+    final controller = _videoController;
+    _videoController = null;
+    if (controller != null) {
+      try {
+        await controller.pause();
+      } catch (_) {}
+      await controller.dispose();
+    }
+  }
+
+  int _worldFeedMaxVideoBytes() {
+    return uploadLimitBytes(
+      _uploadLimits,
+      'world_feed',
+      fallback: VideoCompressionService.worldFeedMaxBytesDefault,
+    );
+  }
+
+  Future<File> _compressWorldFeedVideo(File videoFile) async {
+    final maxBytes = _worldFeedMaxVideoBytes();
+    final originalSize = await videoFile.length();
+    if (originalSize > 40 * 1024 * 1024 && mounted) {
+      context.showInfoToast(
+        'Compressing video so it can upload. 4K clips can take a minute.',
+      );
+    }
+    final out = await VideoCompressionService().compressVideo(
+      videoFile,
+      maxHeight: 720,
+      skipIfUnderBytes: 15 * 1024 * 1024,
+      maxBytes: maxBytes,
+    );
+    final size = await out.length();
+    if (size > maxBytes) {
+      throw VideoTooLargeException(maxBytes);
+    }
+    return out;
+  }
+
+  String _friendlyWorldPostError(Object error, {String kind = 'video'}) {
+    return friendlyVideoUploadError(error, kind: kind);
+  }
+
+  Future<void> _uploadPreparedPost(
+    ProviderContainer container, {
+    required File media,
+    required bool deleteAfterUpload,
+    String? caption,
+    int? audioId,
+    int? audioVolume,
+    bool? audioLoop,
+  }) async {
+    try {
+      final apiService = container.read(apiServiceProvider);
+      await apiService.createWorldFeedPost(
+        media: media,
+        caption: caption,
+        audioId: audioId,
+        audioVolume: audioVolume,
+        audioLoop: audioLoop,
+      );
+      container.read(worldFeedRefreshNonceProvider.notifier).state++;
+      SnackbarHelper.showSuccessGlobal('Post published');
+    } catch (e) {
+      SnackbarHelper.showErrorGlobal(
+        _friendlyWorldPostError(
+          e,
+          kind: VideoCompressionService.isVideoPath(media.path)
+              ? 'video'
+              : 'photo',
+        ),
+      );
+    } finally {
+      if (deleteAfterUpload) {
+        try {
+          await media.delete();
+        } catch (_) {}
+      }
+      container.read(worldPostPendingProvider.notifier).state = false;
+    }
   }
 
   Future<void> _createPost() async {
@@ -170,29 +259,78 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
     if (_selectedMedia == null) {
             context.showInfoToast('Please add a photo or video to post');      return;
     }
+    if (_isPosting) return;
 
     setState(() {
       _isPosting = true;
     });
 
-    try {
-      final apiService = ref.read(apiServiceProvider);
-      final caption = _captionController.text.trim();
+    final container = ProviderScope.containerOf(context);
+    File? compressTemp;
 
-      await apiService.createWorldFeedPost(
-        media: _selectedMedia!,
-        caption: caption.isNotEmpty ? caption : null,
-        audioId: _selectedAudio?['id'],
-        audioVolume: _selectedAudio != null ? _audioVolume : null,
-        audioLoop: _selectedAudio != null ? true : null,
-      );
+    try {
+      var media = _selectedMedia!;
+      final isVideo = _isVideo(media);
+
+      if (isVideo) {
+        await _releaseVideoPreview();
+        if (mounted) setState(() {});
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+        final compressed = await _compressWorldFeedVideo(media);
+        if (compressed.path != media.path) {
+          compressTemp = compressed;
+          media = compressed;
+        }
+      }
+
+      final caption = _captionController.text.trim();
+      final audioId = _selectedAudio?['id'] is int
+          ? _selectedAudio!['id'] as int
+          : int.tryParse(_selectedAudio?['id']?.toString() ?? '');
+      final audioVolume = _selectedAudio != null ? _audioVolume : null;
+      final audioLoop = _selectedAudio != null ? true : null;
+
+      container.read(worldPostPendingProvider.notifier).state = true;
 
       if (mounted) {
         Navigator.of(context).pop();
-                context.showSuccessToast('Post created successfully');      }
+      }
+
+      unawaited(
+        _uploadPreparedPost(
+          container,
+          media: media,
+          deleteAfterUpload: compressTemp != null,
+          caption: caption.isNotEmpty ? caption : null,
+          audioId: audioId,
+          audioVolume: audioVolume,
+          audioLoop: audioLoop,
+        ),
+      );
+      compressTemp = null;
     } catch (e) {
+      if (compressTemp != null) {
+        try {
+          await compressTemp.delete();
+        } catch (_) {}
+      }
+      container.read(worldPostPendingProvider.notifier).state = false;
       if (mounted) {
-                context.showErrorToast('Failed to create post: $e');      }
+        context.showErrorToast(_friendlyWorldPostError(e));
+        if (_selectedMedia != null && _isVideo(_selectedMedia!)) {
+          try {
+            final controller = VideoPlayerController.file(_selectedMedia!);
+            await controller.initialize();
+            await controller.setLooping(true);
+            await controller.play();
+            if (mounted) {
+              setState(() => _videoController = controller);
+            } else {
+              await controller.dispose();
+            }
+          } catch (_) {}
+        }
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -402,11 +540,7 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
   }
   
   bool _isVideo(File file) {
-    final path = file.path.toLowerCase();
-    return path.endsWith('.mp4') || 
-           path.endsWith('.mov') || 
-           path.endsWith('.avi') || 
-           path.endsWith('.mkv');
+    return VideoCompressionService.isVideoPath(file.path);
   }
   
   Widget _buildAudioSection(bool isDark) {

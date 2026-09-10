@@ -17,6 +17,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:dio/dio.dart';
 import 'package:uuid/uuid.dart';
 import '../models.dart';
+import '../../../services/video_compression_service.dart';
 import 'desktop_media_preview_dialog.dart';
 import '../chat_providers.dart';
 import '../providers/typing_status_provider.dart';
@@ -309,9 +310,52 @@ class _ChatViewState extends ConsumerState<ChatView> {
     if (mounted) setState(() {});
   }
 
+  List<Message> get _selectedMessages {
+    final ids = _messageSelection.selectedItems.toSet();
+    return _messages.where((m) => ids.contains(m.id)).toList();
+  }
+
+  bool get _selectionIsCallOnly =>
+      _selectedMessages.isNotEmpty &&
+      _selectedMessages.every(Message.isCallMessage);
+
   void _enterMessageSelection(Message message) {
-    _messageSelection.enterSelectionMode();
-    _messageSelection.toggleSelection(message.id);
+    if (!_messageSelection.isSelectionMode) {
+      _messageSelection.enterSelectionMode();
+    }
+    _toggleMessageSelection(message);
+  }
+
+  void _toggleMessageSelection(Message message) {
+    final next = _messageSelection.selectedItems.toSet();
+    toggleChatBubbleSelection(
+      selectedIds: next,
+      message: message,
+      allMessages: _messages,
+    );
+    _applyMessageSelection(next);
+  }
+
+  void _applyMessageSelection(Set<int> next) {
+    final current = _messageSelection.selectedItems.toSet();
+    if (next.isEmpty) {
+      _messageSelection.exitSelectionMode();
+      return;
+    }
+    for (final id in current.difference(next)) {
+      if (_messageSelection.isSelected(id)) {
+        _messageSelection.toggleSelection(id);
+      }
+    }
+    if (!_messageSelection.isSelectionMode) {
+      _messageSelection.enterSelectionMode();
+    }
+    final afterRemoves = _messageSelection.selectedItems.toSet();
+    for (final id in next.difference(afterRemoves)) {
+      if (!_messageSelection.isSelected(id)) {
+        _messageSelection.toggleSelection(id);
+      }
+    }
   }
 
   Future<void> _pinMessage(Message message, bool pin) async {
@@ -1273,16 +1317,26 @@ class _ChatViewState extends ConsumerState<ChatView> {
         onDelete: () => _deleteMessage(message),
         onReply: () => _setReply(message),
         onReact: (emoji) => _reactToMessage(message, emoji),
-        onForward: () => _forwardMessage(message),
+        onForward: Message.isCallMessage(message)
+            ? null
+            : () => _forwardMessage(message),
         onReplyToMessage: _setReply,
-        onForwardToMessage: _forwardMessage,
+        onForwardToMessage:
+            Message.isCallMessage(message) ? null : _forwardMessage,
         onDeleteMessage: _deleteMessage,
-        onEdit: (newBody) => _editMessage(message, newBody),
+        onEdit: Message.isCallMessage(message)
+            ? null
+            : (newBody) => _editMessage(message, newBody),
         onPin: (pin) => _pinMessage(message, pin),
-        isSelectionMode: _messageSelection.isSelectionMode,
+        isSelectionMode: _messageSelection.isSelectionMode &&
+            messageShowsSelectionChrome(
+              message: message,
+              selectedIds: _messageSelection.selectedItems.toSet(),
+              selectionMode: _messageSelection.isSelectionMode,
+            ),
         isSelected: _messageSelection.isSelected(message.id),
         onSelectMode: () => _enterMessageSelection(message),
-        onSelectionToggle: () => _messageSelection.toggleSelection(message.id),
+        onSelectionToggle: () => _toggleMessageSelection(message),
         onReferencedStatusTap: () => _openReferencedStatus(message),
         onReferencedGroupTap: () => _openReferencedGroup(message),
         onViewOnceOpened: (msg) => _markViewOnceOpened(msg),
@@ -1764,14 +1818,12 @@ class _ChatViewState extends ConsumerState<ChatView> {
         debugPrint('Error sending message: $e');
         if (mounted) {
           setState(() => _markOptimisticSendFailed(clientUuid));
-          final errorMessage = e.toString().replaceAll('Exception: ', '');
-                    context.showErrorToast('Failed to send message: $errorMessage');        }
+          context.showErrorToast('Failed to send message: ${unwrapExceptionMessage(e)}');        }
       }
     } catch (e) {
       debugPrint('Error sending message: $e');
       if (mounted) {
-        final errorMessage = e.toString().replaceAll('Exception: ', '');
-                context.showErrorToast('Failed to send message: $errorMessage');      }
+        context.showErrorToast('Failed to send message: ${unwrapExceptionMessage(e)}');      }
     }
   }
 
@@ -2001,8 +2053,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
     } catch (e) {
       debugPrint('Error sending media: $e');
       if (mounted) {
-        final errorMessage = e.toString().replaceAll('Exception: ', '');
-                context.showErrorToast('Failed to send media: $errorMessage');      }
+        context.showErrorToast('Failed to send media: ${unwrapExceptionMessage(e)}');      }
     }
   }
 
@@ -2878,12 +2929,15 @@ class _ChatViewState extends ConsumerState<ChatView> {
   }
 
   Future<void> _forwardMessage(Message message) async {
+    if (Message.isCallMessage(message)) return;
     await ForwardMessageScreen.showModal(context, message);
   }
 
   void _forwardSelectedMessages() {
     final ids = _messageSelection.selectedItems.toSet();
-    final toForward = _messages.where((m) => ids.contains(m.id)).toList();
+    final toForward = _messages
+        .where((m) => ids.contains(m.id) && !Message.isCallMessage(m))
+        .toList();
     if (toForward.isEmpty) return;
     _messageSelection.exitSelectionMode();
     unawaited(ForwardMessageScreen.showModalForMessages(context, toForward));
@@ -2919,7 +2973,9 @@ class _ChatViewState extends ConsumerState<ChatView> {
   Future<void> _deleteMessage(Message message) async {
     // PHASE 1: Check if message is less than 1 hour old (for "delete for everyone")
     final messageAge = DateTime.now().difference(message.createdAt);
-    final canDeleteForEveryone = messageAge.inHours < 1;
+    final canDeleteForEveryone = message.senderId == _currentUserId &&
+        messageAge.inHours < 1 &&
+        !Message.isCallMessage(message);
 
     // Show confirmation dialog with options
     final deleteType = await showDialog<String>(
@@ -3202,7 +3258,8 @@ class _ChatViewState extends ConsumerState<ChatView> {
               ? MessageSelectionToolbar(
                   selectedCount: _messageSelection.selectedCount,
                   onCancel: _messageSelection.exitSelectionMode,
-                  onForward: _forwardSelectedMessages,
+                  onForward:
+                      _selectionIsCallOnly ? null : _forwardSelectedMessages,
                   onDelete: _deleteSelectedMessages,
                 )
               : Row(

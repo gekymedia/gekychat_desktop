@@ -7,6 +7,7 @@ import 'live_broadcast_social_overlay.dart';
 import 'live_broadcast_screen.dart' show liveBroadcastsProvider;
 import '../../core/providers.dart';
 import '../../utils/snackbar_helper.dart';
+import '../calls/livekit_quality.dart';
 
 /// PHASE 2: Broadcast Viewer Screen for Desktop
 /// Shows the live broadcast stream and chat with LiveKit integration
@@ -153,7 +154,7 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
       }
 
       // Create LiveKit room
-      final room = Room();
+      final room = Room(roomOptions: LiveKitQuality.viewerRoomOptions());
       
       // Connect to room with timeout
       await room.connect(

@@ -59,6 +59,22 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
     super.dispose();
   }
 
+  Future<void> _reloadFeed() async {
+    for (final controller in _videoControllers.values) {
+      controller.dispose();
+    }
+    _videoControllers.clear();
+    if (!mounted) return;
+    setState(() {
+      _posts = [];
+      _currentPage = 1;
+      _hasMore = true;
+      _currentIndex = 0;
+      _isLoading = false;
+    });
+    await _loadPosts();
+  }
+
   Future<void> _loadPosts() async {
     if (_isLoading || !_hasMore) return;
     setState(() => _isLoading = true);
@@ -408,6 +424,12 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
         if (mounted) _openPostFromShareCode(slug);
       });
     });
+    ref.listen<int>(worldFeedRefreshNonceProvider, (previous, next) {
+      if (previous == next) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _reloadFeed();
+      });
+    });
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -523,6 +545,22 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
                   ],
                 ),
               ),
+              if (ref.watch(worldPostPendingProvider)) ...[
+                const SizedBox(width: 12),
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                const Text(
+                  'Uploading…',
+                  style: TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+              ],
               const Spacer(),
               IconButton(
                 icon: const Icon(Icons.search, color: Colors.white),

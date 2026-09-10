@@ -102,3 +102,9 @@ final worldFeedRepositoryProvider = Provider<WorldFeedRepository>((ref) {
   return WorldFeedRepository(apiService);
 });
 
+/// True while a World Feed post is compressing or uploading after the composer closed.
+final worldPostPendingProvider = StateProvider<bool>((ref) => false);
+
+/// Bumped after a successful background World Feed publish so the feed reloads.
+final worldFeedRefreshNonceProvider = StateProvider<int>((ref) => 0);
+

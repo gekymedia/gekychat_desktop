@@ -6,13 +6,13 @@ class MessageSelectionToolbar extends StatelessWidget {
     super.key,
     required this.selectedCount,
     required this.onCancel,
-    required this.onForward,
+    this.onForward,
     required this.onDelete,
   });
 
   final int selectedCount;
   final VoidCallback onCancel;
-  final VoidCallback onForward;
+  final VoidCallback? onForward;
   final VoidCallback onDelete;
 
   static const Color _actionBlue = Color(0xFF3390EC);
@@ -24,12 +24,14 @@ class MessageSelectionToolbar extends StatelessWidget {
 
     return Row(
       children: [
-        _ActionPill(
-          label: 'FORWARD',
-          count: selectedCount,
-          onPressed: enabled ? onForward : null,
-        ),
-        const SizedBox(width: 8),
+        if (onForward != null) ...[
+          _ActionPill(
+            label: 'FORWARD',
+            count: selectedCount,
+            onPressed: enabled ? onForward : null,
+          ),
+          const SizedBox(width: 8),
+        ],
         _ActionPill(
           label: 'DELETE',
           count: selectedCount,

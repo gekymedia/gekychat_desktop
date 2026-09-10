@@ -128,6 +128,27 @@ class LiveBroadcastRepository {
     );
     return response.data['token'] as String;
   }
+
+  Future<Map<String, dynamic>> startRecording(int id) async {
+    final response = await _apiService.startLiveEgressRecord(id);
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  Future<Map<String, dynamic>> startRtmpOut(int id, {required String rtmpUrl}) async {
+    final response =
+        await _apiService.startLiveEgressRtmp(id, rtmpUrl: rtmpUrl);
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  Future<Map<String, dynamic>> stopEgress(int id) async {
+    final response = await _apiService.stopLiveEgress(id);
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  Future<Map<String, dynamic>> createIngress(int id) async {
+    final response = await _apiService.createLiveIngress(id);
+    return Map<String, dynamic>.from(response.data as Map);
+  }
 }
 
 final liveBroadcastRepositoryProvider = Provider<LiveBroadcastRepository>((ref) {

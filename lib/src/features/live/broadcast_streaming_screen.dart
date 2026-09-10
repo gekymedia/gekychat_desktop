@@ -8,9 +8,11 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/providers.dart';
 import '../../core/session.dart';
+import '../calls/livekit_quality.dart';
 import 'live_broadcast_repository.dart';
 import 'live_broadcast_screen.dart' show liveBroadcastsProvider;
 import 'live_broadcast_social_overlay.dart';
+import 'live_broadcast_host_tools_sheet.dart';
 import '../../utils/snackbar_helper.dart';
 
 /// PHASE 2: Broadcast Streaming Screen for Desktop
@@ -49,12 +51,18 @@ class _BroadcastStreamingScreenState extends ConsumerState<BroadcastStreamingScr
   Timer? _statsPollTimer;
   int? _countdownSeconds;
   bool _showFollowerNotify = false;
+  bool _isRecording = false;
+  String? _ingressRtmpUrl;
+  String? _ingressStreamKey;
+  String? _ingressWhipUrl;
 
   @override
   void initState() {
     super.initState();
     _likesCount = int.tryParse(widget.startData['likes_count']?.toString() ?? '') ?? 0;
     _viewerCount = int.tryParse(widget.startData['viewers_count']?.toString() ?? '') ?? 0;
+    _isRecording = widget.startData['recording'] == true ||
+        widget.startData['recording']?.toString() == 'true';
     _connectAndStartStreaming();
   }
 
@@ -210,7 +218,7 @@ class _BroadcastStreamingScreenState extends ConsumerState<BroadcastStreamingScr
         throw Exception('Missing token or room name');
       }
 
-      final room = Room();
+      final room = Room(roomOptions: LiveKitQuality.broadcastHostRoomOptions());
 
       await room.connect(
         websocketUrl,
@@ -348,6 +356,30 @@ class _BroadcastStreamingScreenState extends ConsumerState<BroadcastStreamingScr
     final url = _liveWatchUrl();
     final text = 'Watch my LIVE on GekyChat\n$url';
     await Share.share(text, subject: 'Live on GekyChat');
+  }
+
+  Future<void> _openHostTools() async {
+    final repo = ref.read(liveBroadcastRepositoryProvider);
+    await showLiveBroadcastHostToolsSheet(
+      context: context,
+      repository: repo,
+      broadcastId: widget.broadcastId,
+      isRecording: _isRecording,
+      onRecordingChanged: (v) {
+        if (mounted) setState(() => _isRecording = v);
+      },
+      rtmpUrl: _ingressRtmpUrl,
+      streamKey: _ingressStreamKey,
+      whipUrl: _ingressWhipUrl,
+      onIngressUpdated: ({rtmpUrl, streamKey, whipUrl}) {
+        if (!mounted) return;
+        setState(() {
+          _ingressRtmpUrl = rtmpUrl ?? _ingressRtmpUrl;
+          _ingressStreamKey = streamKey ?? _ingressStreamKey;
+          _ingressWhipUrl = whipUrl ?? _ingressWhipUrl;
+        });
+      },
+    );
   }
 
   Future<void> _onSayHi(String viewerName) async {
@@ -704,8 +736,7 @@ class _BroadcastStreamingScreenState extends ConsumerState<BroadcastStreamingScr
                         ),
                         LiveGlassIconButton(
                           icon: Icons.more_horiz,
-                          onPressed: () {
-                                                        context.showInfoToast('Stream settings');                          },
+                          onPressed: _openHostTools,
                         ),
                       ],
                     ),

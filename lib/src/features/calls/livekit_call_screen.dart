@@ -20,6 +20,7 @@ import '../../widgets/desktop_voice_permission.dart';
 import 'call_manager.dart';
 import 'call_rating_sheet.dart';
 import 'livekit_ice_config.dart';
+import 'livekit_quality.dart';
 import 'providers.dart';
 import 'incoming_call_handler.dart';
 import '../../utils/snackbar_helper.dart';
@@ -132,13 +133,7 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
     _ownsRoom = widget.existingRoom == null;
     _room = widget.existingRoom ??
         Room(
-          roomOptions: const RoomOptions(
-            adaptiveStream: false,
-            dynacast: true,
-            defaultVideoPublishOptions: VideoPublishOptions(
-              simulcast: true,
-            ),
-          ),
+          roomOptions: LiveKitQuality.callRoomOptions(),
         );
     _room.addListener(_onRoomChanged);
     _roomListener = _room.createListener()
@@ -1135,14 +1130,11 @@ class _LiveKitCallScreenState extends ConsumerState<LiveKitCallScreen> {
 
         _armMediaRenegotiationGrace();
         final track = await LocalVideoTrack.createScreenShareTrack(
-          ScreenShareCaptureOptions(
-            sourceId: source.id,
-            maxFrameRate: 15.0,
-          ),
+          LiveKitQuality.screenShareCaptureOptions(sourceId: source.id),
         );
         await lp.publishVideoTrack(
           track,
-          publishOptions: const VideoPublishOptions(simulcast: false),
+          publishOptions: LiveKitQuality.screenSharePublishOptions,
         );
         if (mounted) setState(() => _screenSharing = true);
         return;

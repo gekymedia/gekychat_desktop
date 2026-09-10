@@ -18,6 +18,7 @@ import '../contacts/contacts_repository.dart';
 import '../chats/models.dart' show GekyContact;
 import '../../utils/snackbar_helper.dart';
 import '../../services/product_analytics_service.dart';
+import '../../services/video_compression_service.dart';
 import '../../widgets/desktop_center_modal.dart';
 
 class CreateStatusScreen extends ConsumerStatefulWidget {
@@ -322,7 +323,7 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
       
       if (mounted) {
         setState(() {
-          _uploadLimits = response.data;
+          _uploadLimits = parseUploadLimitsPayload(response.data);
         });
       }
     } catch (e) {
@@ -337,7 +338,11 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
       final durationSeconds = controller.value.duration.inSeconds;
       await controller.dispose();
 
-      final maxDuration = _uploadLimits?['status']?['max_duration'] ?? 180;
+      final maxDuration = uploadLimitDurationSeconds(
+        _uploadLimits,
+        'status',
+        fallback: 180,
+      );
       
       if (durationSeconds > maxDuration) {
         if (!mounted) return;
@@ -478,8 +483,16 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
                   ? 'Status posted. Mention alerts sent to ${_mentionedTargets.length} contact(s).'
                   : 'Status posted successfully',
             );      }
+    } on VideoTooLargeException catch (e) {
+      _showError(e.toString());
+    } on FfmpegNotFoundException catch (e) {
+      _showError(e.toString());
     } catch (e) {
-      _showError('Failed to create status: $e');
+      _showError(
+        _isVideo
+            ? friendlyVideoUploadError(e, kind: 'video')
+            : unwrapExceptionMessage(e),
+      );
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);

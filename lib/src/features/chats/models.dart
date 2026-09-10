@@ -865,6 +865,15 @@ class Message {
     );
   }
 
+  static const _callMessageTypes = {'call', 'voice_call', 'video_call'};
+
+  /// Whether this row should render / behave as a call log, not a normal chat bubble.
+  static bool isCallMessage(Message m) {
+    if (m.callData != null) return true;
+    final mt = (m.messageType ?? '').toLowerCase();
+    return _callMessageTypes.contains(mt);
+  }
+
   Message copyWith({
     bool? viewOnceOpened,
     List<Reaction>? reactions,
@@ -916,6 +925,59 @@ class Message {
       metadata: metadata,
     );
   }
+}
+
+/// Call logs may be the only selected item (reply / pin / delete-for-me)
+/// but must never join a multi-select — that would allow forward/copy.
+void toggleChatBubbleSelection({
+  required Set<int> selectedIds,
+  required Message message,
+  required Iterable<Message> allMessages,
+}) {
+  final id = message.id;
+  if (selectedIds.contains(id)) {
+    selectedIds.remove(id);
+    return;
+  }
+  if (Message.isCallMessage(message)) {
+    if (selectedIds.isEmpty) selectedIds.add(id);
+    return;
+  }
+  selectedIds.removeWhere((sid) {
+    for (final m in allMessages) {
+      if (m.id == sid && Message.isCallMessage(m)) return true;
+    }
+    return false;
+  });
+  selectedIds.add(id);
+}
+
+/// Call logs only show selection chrome while they are the sole pick.
+bool messageShowsSelectionChrome({
+  required Message message,
+  required Set<int> selectedIds,
+  required bool selectionMode,
+}) {
+  if (message.isSystem) return false;
+  if (!Message.isCallMessage(message)) return true;
+  if (!selectionMode) return true;
+  return selectedIds.isEmpty ||
+      (selectedIds.length == 1 && selectedIds.contains(message.id));
+}
+
+/// Whether to show the swipe/forward affordance on a bubble.
+bool messageShowsForwardQuickAffordance(Message m) {
+  if (Message.isCallMessage(m)) return false;
+  if (m.attachments.isNotEmpty) return true;
+  final t = (m.messageType ?? '').toLowerCase();
+  if (t == 'image' ||
+      t == 'video' ||
+      t == 'audio' ||
+      t == 'voice' ||
+      t == 'document') {
+    return true;
+  }
+  return m.body.trim().length > 40;
 }
 
 /// Next DM message can reference a status (opened from status viewer).

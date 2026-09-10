@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api_service.dart';
 import '../../core/providers.dart';
+import '../../services/video_compression_service.dart';
 import 'models.dart';
 
 final statusRepositoryProvider = Provider<StatusRepository>((ref) {
@@ -149,38 +150,87 @@ class StatusRepository {
     String? caption,
     Map<String, dynamic>? audience,
   }) async {
+    File toUpload = videoFile;
     try {
-      final formData = FormData.fromMap({
-        'type': 'video',
-        'media': await MultipartFile.fromFile(
-          videoFile.path,
-          filename: videoFile.path.split(Platform.pathSeparator).last,
-        ),
-        if (caption != null) 'caption': caption,
-        if (audience != null) ...audience,
-      });
-
-      final response = await _api.post('/statuses', data: formData);
-      final raw = response.data;
-      
-      Map<String, dynamic> statusData;
-      if (raw is Map) {
-        final rawMap = Map<String, dynamic>.from(raw);
-        if (rawMap['status'] != null) {
-          statusData = Map<String, dynamic>.from(rawMap['status'] as Map);
-        } else if (rawMap['data'] != null && rawMap['data'] is Map) {
-          statusData = Map<String, dynamic>.from(rawMap['data'] as Map);
-        } else {
-          statusData = rawMap;
-        }
-      } else {
-        throw Exception('Unexpected response format: ${raw.runtimeType}');
-      }
-      
-      return StatusUpdate.fromJson(statusData);
+      toUpload = await VideoCompressionService().compressVideo(
+        videoFile,
+        maxHeight: 720,
+        skipIfUnderBytes: 8 * 1024 * 1024,
+        maxBytes: VideoCompressionService.statusMaxBytesDefault,
+      );
+      return await _postVideoStatus(
+        videoFile: toUpload,
+        caption: caption,
+        audience: audience,
+      );
+    } on VideoTooLargeException {
+      rethrow;
+    } on FfmpegNotFoundException {
+      rethrow;
     } catch (e) {
-      throw Exception('Failed to create video status: $e');
+      throw Exception(friendlyVideoUploadError(e, kind: 'video'));
+    } finally {
+      if (toUpload.path != videoFile.path) {
+        try {
+          await toUpload.delete();
+        } catch (_) {}
+      }
     }
+  }
+
+  Future<StatusUpdate> _postVideoStatus({
+    required File videoFile,
+    String? caption,
+    Map<String, dynamic>? audience,
+  }) async {
+    if (!await videoFile.exists()) {
+      throw Exception('Video file is no longer available');
+    }
+    final size = await videoFile.length();
+    if (size <= 0) {
+      throw Exception('Video file is empty');
+    }
+    if (size > VideoCompressionService.statusMaxBytesDefault) {
+      throw VideoTooLargeException(
+        VideoCompressionService.statusMaxBytesDefault,
+      );
+    }
+
+    final formData = FormData.fromMap({
+      'type': 'video',
+      'media': await MultipartFile.fromFile(
+        videoFile.path,
+        filename: videoFile.path.split(Platform.pathSeparator).last,
+      ),
+      if (caption != null) 'caption': caption,
+      if (audience != null) ...audience,
+    });
+
+    final response = await _api.post(
+      '/statuses',
+      data: formData,
+      options: Options(
+        sendTimeout: const Duration(minutes: 10),
+        receiveTimeout: const Duration(minutes: 3),
+      ),
+    );
+    final raw = response.data;
+
+    Map<String, dynamic> statusData;
+    if (raw is Map) {
+      final rawMap = Map<String, dynamic>.from(raw);
+      if (rawMap['status'] != null) {
+        statusData = Map<String, dynamic>.from(rawMap['status'] as Map);
+      } else if (rawMap['data'] != null && rawMap['data'] is Map) {
+        statusData = Map<String, dynamic>.from(rawMap['data'] as Map);
+      } else {
+        statusData = rawMap;
+      }
+    } else {
+      throw Exception('Unexpected response format: ${raw.runtimeType}');
+    }
+
+    return StatusUpdate.fromJson(statusData);
   }
 
   /// Mark a status as viewed

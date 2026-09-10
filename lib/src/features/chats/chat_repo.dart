@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import '../../core/api_service.dart';
 import '../../core/database/local_storage_service.dart';
 import '../../services/product_analytics_service.dart';
+import '../../services/video_compression_service.dart';
 import 'models.dart';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -692,6 +693,21 @@ class ChatRepository {
     }
   }
 
+  Future<File> _compressChatVideoIfNeeded(
+    File file, {
+    required bool skipCompression,
+  }) async {
+    if (skipCompression || !VideoCompressionService.isVideoPath(file.path)) {
+      return file;
+    }
+    return VideoCompressionService().compressVideo(
+      file,
+      maxHeight: 720,
+      skipIfUnderBytes: 8 * 1024 * 1024,
+      maxBytes: VideoCompressionService.chatMaxBytesDefault,
+    );
+  }
+
   Future<Message> sendMessageToConversation({
     required int conversationId,
     String? body,
@@ -783,33 +799,58 @@ class ChatRepository {
             debugPrint('📤 [UPLOAD] Calling uploadAttachment with:');
             debugPrint('📤 [UPLOAD]   - file.path: ${file.path}');
             debugPrint('📤 [UPLOAD]   - compressionLevel: $compressionLevel');
-            
-            final uploadResponse = await apiService.uploadAttachment(
-              file,
-              compressionLevel: compressionLevel,
-              isVoicenote: voiceNote && totalFiles == 1,
-              onSendProgress: onProgress != null
-                  ? (sent, total) {
-                      // Map file progress to overall progress
-                      final fileProgress = sent / total;
-                      final overallProgress = fileStartProgress + (fileProgress * (fileEndProgress - fileStartProgress));
-                      onProgress(overallProgress);
-                    }
-                  : null,
-            );
-            final attachmentData = uploadResponse.data;
-            final attachment = attachmentData is Map && attachmentData['data'] != null
-                ? attachmentData['data'] as Map<String, dynamic>
-                : attachmentData as Map<String, dynamic>;
-            if (attachment['id'] == null) {
-              throw Exception('Upload failed: No attachment ID returned');
+
+            File uploadFile = file;
+            File? compressTemp;
+            try {
+              uploadFile = await _compressChatVideoIfNeeded(
+                file,
+                skipCompression: skipCompression,
+              );
+              if (uploadFile.path != file.path) {
+                compressTemp = uploadFile;
+              }
+
+              final uploadResponse = await apiService.uploadAttachment(
+                uploadFile,
+                compressionLevel: compressionLevel,
+                isVoicenote: voiceNote && totalFiles == 1,
+                onSendProgress: onProgress != null
+                    ? (sent, total) {
+                        // Map file progress to overall progress
+                        final fileProgress = sent / total;
+                        final overallProgress = fileStartProgress +
+                            (fileProgress *
+                                (fileEndProgress - fileStartProgress));
+                        onProgress(overallProgress);
+                      }
+                    : null,
+              );
+              final attachmentData = uploadResponse.data;
+              final attachment =
+                  attachmentData is Map && attachmentData['data'] != null
+                      ? attachmentData['data'] as Map<String, dynamic>
+                      : attachmentData as Map<String, dynamic>;
+              if (attachment['id'] == null) {
+                throw Exception('Upload failed: No attachment ID returned');
+              }
+              attachmentIds.add(attachment['id'] as int);
+            } finally {
+              if (compressTemp != null) {
+                try {
+                  await compressTemp.delete();
+                } catch (_) {}
+              }
             }
-            attachmentIds.add(attachment['id'] as int);
             
             // Update progress to show this file is complete
             if (onProgress != null) {
               onProgress(fileEndProgress);
             }
+          } on VideoTooLargeException {
+            rethrow;
+          } on FfmpegNotFoundException {
+            rethrow;
           } catch (e) {
             throw Exception('Failed to upload attachment ${file.path}: $e');
           }
@@ -841,6 +882,10 @@ class ChatRepository {
       // Ensure non-UI senders (notification reply, share, etc.) update local history.
       unawaited(persistConversationMessages(conversationId, [message]));
       return message;
+    } on VideoTooLargeException {
+      rethrow;
+    } on FfmpegNotFoundException {
+      rethrow;
     } catch (e) {
       throw Exception('Failed to send message: $e');
     }
@@ -1073,33 +1118,58 @@ class ChatRepository {
             // Within each file, progress goes from i/totalFiles to (i+1)/totalFiles
             final fileStartProgress = i / totalFiles;
             final fileEndProgress = (i + 1) / totalFiles;
-            
-            final uploadResponse = await apiService.uploadAttachment(
-              file,
-              compressionLevel: compressionLevel,
-              isVoicenote: voiceNote && totalFiles == 1,
-              onSendProgress: onProgress != null
-                  ? (sent, total) {
-                      // Map file progress to overall progress
-                      final fileProgress = sent / total;
-                      final overallProgress = fileStartProgress + (fileProgress * (fileEndProgress - fileStartProgress));
-                      onProgress(overallProgress);
-                    }
-                  : null,
-            );
-            final attachmentData = uploadResponse.data;
-            final attachment = attachmentData is Map && attachmentData['data'] != null
-                ? attachmentData['data'] as Map<String, dynamic>
-                : attachmentData as Map<String, dynamic>;
-            if (attachment['id'] == null) {
-              throw Exception('Upload failed: No attachment ID returned');
+
+            File uploadFile = file;
+            File? compressTemp;
+            try {
+              uploadFile = await _compressChatVideoIfNeeded(
+                file,
+                skipCompression: skipCompression,
+              );
+              if (uploadFile.path != file.path) {
+                compressTemp = uploadFile;
+              }
+
+              final uploadResponse = await apiService.uploadAttachment(
+                uploadFile,
+                compressionLevel: compressionLevel,
+                isVoicenote: voiceNote && totalFiles == 1,
+                onSendProgress: onProgress != null
+                    ? (sent, total) {
+                        // Map file progress to overall progress
+                        final fileProgress = sent / total;
+                        final overallProgress = fileStartProgress +
+                            (fileProgress *
+                                (fileEndProgress - fileStartProgress));
+                        onProgress(overallProgress);
+                      }
+                    : null,
+              );
+              final attachmentData = uploadResponse.data;
+              final attachment =
+                  attachmentData is Map && attachmentData['data'] != null
+                      ? attachmentData['data'] as Map<String, dynamic>
+                      : attachmentData as Map<String, dynamic>;
+              if (attachment['id'] == null) {
+                throw Exception('Upload failed: No attachment ID returned');
+              }
+              attachmentIds.add(attachment['id'] as int);
+            } finally {
+              if (compressTemp != null) {
+                try {
+                  await compressTemp.delete();
+                } catch (_) {}
+              }
             }
-            attachmentIds.add(attachment['id'] as int);
             
             // Update progress to show this file is complete
             if (onProgress != null) {
               onProgress(fileEndProgress);
             }
+          } on VideoTooLargeException {
+            rethrow;
+          } on FfmpegNotFoundException {
+            rethrow;
           } catch (e) {
             throw Exception('Failed to upload attachment ${file.path}: $e');
           }
@@ -1125,6 +1195,10 @@ class ChatRepository {
       final message = Message.fromJson(Map<String, dynamic>.from(map));
       unawaited(persistGroupMessages(groupId, [message]));
       return message;
+    } on VideoTooLargeException {
+      rethrow;
+    } on FfmpegNotFoundException {
+      rethrow;
     } catch (e) {
       throw Exception('Failed to send group message: $e');
     }

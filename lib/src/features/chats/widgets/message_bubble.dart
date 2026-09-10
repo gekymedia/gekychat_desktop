@@ -887,12 +887,14 @@ class MessageBubble extends ConsumerWidget {
                       if (msg.id == message.id) onReply!();
                     }
                   : null),
-          onForward: onForwardToMessage ??
-              (onForward != null
-                  ? (msg) async {
-                      if (msg.id == message.id) onForward!();
-                    }
-                  : null),
+          onForward: messageShowsForwardQuickAffordance(message)
+              ? (onForwardToMessage ??
+                  (onForward != null
+                      ? (msg) async {
+                          if (msg.id == message.id) onForward!();
+                        }
+                      : null))
+              : null,
           onDelete: onDeleteMessage ??
               (onDelete != null
                   ? (msg) async {
@@ -1091,13 +1093,14 @@ class MessageBubble extends ConsumerWidget {
   ) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final fg = isDark ? Colors.white : const Color(0xFF111B21);
+    final isCall = Message.isCallMessage(message);
     final items = <DesktopGlassMenuItem>[
       DesktopGlassMenuItem(
         icon: Icons.reply,
         label: 'Reply',
         onTap: () => onReply?.call(),
       ),
-      if (isMeValue && onEdit != null)
+      if (!isCall && isMeValue && onEdit != null)
         DesktopGlassMenuItem(
           icon: Icons.edit_outlined,
           label: 'Edit',
@@ -1109,33 +1112,35 @@ class MessageBubble extends ConsumerWidget {
           label: 'Pin',
           onTap: () => onPin!.call(true),
         ),
-      if (isGroupMessage && isMeValue)
+      if (!isCall && isGroupMessage && isMeValue)
         DesktopGlassMenuItem(
           icon: Icons.info_outline,
           label: 'Message Info',
           onTap: () => _showMessageInfo(context),
         ),
-      if (isGroupMessage && !isMeValue)
+      if (!isCall && isGroupMessage && !isMeValue)
         DesktopGlassMenuItem(
           icon: Icons.person_outline,
           label: 'Reply Privately',
           onTap: () => onReplyPrivately?.call(),
         ),
-      DesktopGlassMenuItem(
-        icon: Icons.copy,
-        label: 'Copy',
-        onTap: () async {
-          await Clipboard.setData(ClipboardData(text: message.body));
-          if (context.mounted) {
-            context.showSuccessToast('Message copied to clipboard');
-          }
-        },
-      ),
-      DesktopGlassMenuItem(
-        leading: DesktopMenuIcons.forward(fg),
-        label: 'Forward',
-        onTap: () => onForward?.call(),
-      ),
+      if (!isCall)
+        DesktopGlassMenuItem(
+          icon: Icons.copy,
+          label: 'Copy',
+          onTap: () async {
+            await Clipboard.setData(ClipboardData(text: message.body));
+            if (context.mounted) {
+              context.showSuccessToast('Message copied to clipboard');
+            }
+          },
+        ),
+      if (!isCall && onForward != null)
+        DesktopGlassMenuItem(
+          leading: DesktopMenuIcons.forward(fg),
+          label: 'Forward',
+          onTap: () => onForward?.call(),
+        ),
       DesktopGlassMenuItem(
         icon: Icons.delete_outline,
         label: 'Delete',

@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/video_compression_service.dart';
 
 class ApiService {
   late final Dio _dio;
@@ -165,8 +166,8 @@ class ApiService {
   }) =>
       _dio.get(_normalize(path), queryParameters: queryParameters);
 
-  Future<Response> post(String path, {dynamic data}) =>
-      _dio.post(_normalize(path), data: data);
+  Future<Response> post(String path, {dynamic data, Options? options}) =>
+      _dio.post(_normalize(path), data: data, options: options);
 
   Future<Response> put(String path, {dynamic data}) =>
       _dio.put(_normalize(path), data: data);
@@ -436,10 +437,19 @@ class ApiService {
     });
     
     debugPrint('📤 [API UPLOAD] Sending to /attachments endpoint');
+    final isVideo = VideoCompressionService.isVideoPath(filename);
     return _dio.post(
       _normalize('/attachments'),
       data: formData,
       onSendProgress: onSendProgress,
+      options: Options(
+        sendTimeout: isVideo
+            ? const Duration(minutes: 10)
+            : const Duration(minutes: 2),
+        receiveTimeout: isVideo
+            ? const Duration(minutes: 3)
+            : const Duration(seconds: 30),
+      ),
     );
   }
 
@@ -866,7 +876,19 @@ class ApiService {
       if (audioVolume != null) 'audio_volume': audioVolume,
       if (audioLoop != null) 'audio_loop': audioLoop,
     });
-    return post('/world-feed/posts', data: formData);
+    final isVideo = VideoCompressionService.isVideoPath(media.path);
+    return post(
+      '/world-feed/posts',
+      data: formData,
+      options: Options(
+        sendTimeout: isVideo
+            ? const Duration(minutes: 10)
+            : const Duration(minutes: 2),
+        receiveTimeout: isVideo
+            ? const Duration(minutes: 3)
+            : const Duration(seconds: 30),
+      ),
+    );
   }
   Future<Response> likeWorldFeedPost(int postId) => post('/world-feed/posts/$postId/like'); // Toggle endpoint - handles both like and unlike
   Future<Response> unlikeWorldFeedPost(int postId) => post('/world-feed/posts/$postId/like'); // Use toggle endpoint for unlike too
@@ -917,6 +939,12 @@ class ApiService {
     post('/live/$broadcastId/join');
   Future<Response> endLiveBroadcast(int broadcastId) =>
     post('/live/$broadcastId/end');
+  Future<Response> startLiveEgressRecord(int id) =>
+      post('/live/$id/egress/record');
+  Future<Response> startLiveEgressRtmp(int id, {required String rtmpUrl}) =>
+      post('/live/$id/egress/rtmp', data: {'rtmp_url': rtmpUrl});
+  Future<Response> stopLiveEgress(int id) => post('/live/$id/egress/stop');
+  Future<Response> createLiveIngress(int id) => post('/live/$id/ingress');
   Future<Response> getActiveLiveBroadcasts() => get('/live/active');
   Future<Response> getLiveBroadcastStats(int id) => get('/live/$id/stats');
   Future<Response> getLiveCreatorAnalytics() => get('/live/creator/analytics');
