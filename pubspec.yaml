@@ -45,9 +45,9 @@ dependencies:
   video_player: ^2.8.1
   video_player_win: ^3.2.0
   video_editor: 1.5.2
-  # Calls: LiveKit. flutter_webrtc 1.4.0 includes Windows platform-thread fix (#1795).
-  flutter_webrtc: 1.4.0
-  livekit_client: ^2.8.1
+  # Calls: LiveKit. flutter_webrtc 1.6.0 matches livekit_client 2.10+.
+  flutter_webrtc: 1.6.0
+  livekit_client: ^2.10.0
   cupertino_icons: ^1.0.8
   google_fonts: ^6.3.2
   json_annotation: ^4.8.1
