@@ -39,6 +39,10 @@ app.*.symbols
 # Obfuscation related
 app.*.map.json
 
+# Bundled FFmpeg binary (fetch via windows/installer/fetch-ffmpeg.ps1)
+/third_party/ffmpeg/*.exe
+/third_party/ffmpeg/*.zip
+
 # Android Studio will place build artifacts here
 /android/app/debug
 /android/app/profile

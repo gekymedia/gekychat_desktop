@@ -926,8 +926,8 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
           _currentUserId != null &&
           message.senderId == _currentUserId) {
         existingIdx = _messages.indexWhere((m) =>
-            m.id == 0 &&
-            m.status == 'sending' &&
+            m.id <= 0 &&
+            (m.status == 'sending' || m.status == 'queued') &&
             m.senderId == _currentUserId &&
             (m.body ?? '') == (message.body ?? ''));
       }
@@ -1263,7 +1263,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
 
         // Optimistic placeholder so the user sees the message immediately
         final tempMessage = Message(
-          id: DateTime.now().millisecondsSinceEpoch,
+          id: 0,
           clientId: clientUuid,
           groupId: widget.groupId,
           senderId: _currentUserId ?? 0,
@@ -1444,7 +1444,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
           );
 
           final tempMessage = Message(
-            id: DateTime.now().millisecondsSinceEpoch,
+            id: 0,
             clientId: clientUuid,
             groupId: widget.groupId,
             senderId: _currentUserId ?? 0,

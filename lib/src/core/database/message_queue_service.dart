@@ -7,7 +7,9 @@ import 'app_database.dart' hide Message;
 import 'local_storage_service.dart';
 import '../../features/chats/chat_providers.dart';
 import '../../features/chats/chat_repo.dart';
+import '../../features/chats/models.dart';
 import '../../core/providers/connectivity_provider.dart';
+import '../../services/message_sync_service.dart';
 
 bool _inferVoiceNote({required String body, List<File>? attachments}) {
   if (body.trim().isNotEmpty) return false;
@@ -25,9 +27,15 @@ class MessageQueueService {
   final AppDatabase _db;
   final ChatRepository _chatRepo;
   final bool Function() _isOnline;
+  final void Function()? _onFlushed;
   static const _uuid = Uuid();
 
-  MessageQueueService(this._db, this._chatRepo, this._isOnline);
+  MessageQueueService(
+    this._db,
+    this._chatRepo,
+    this._isOnline, {
+    void Function()? onFlushed,
+  }) : _onFlushed = onFlushed;
 
   // Queue a message for sending when online.
   // Returns the stable clientUuid that will be sent to the server for idempotency.
@@ -84,7 +92,7 @@ class MessageQueueService {
     await _db.into(_db.offlineMessages).insert(companion);
     return clientId;
   }
-  
+
   // Get all pending messages
   Future<List<OfflineMessage>> getPendingMessages() async {
     return await (_db.select(_db.offlineMessages)
@@ -108,7 +116,7 @@ class MessageQueueService {
     final message = await (_db.select(_db.offlineMessages)
           ..where((tbl) => tbl.id.equals(queueId)))
         .getSingle();
-    
+
     await (_db.update(_db.offlineMessages)
           ..where((tbl) => tbl.id.equals(queueId)))
         .write(OfflineMessagesCompanion(
@@ -117,11 +125,36 @@ class MessageQueueService {
     ));
   }
 
+  Future<void> _ensureClientUuid(OfflineMessage queued) async {
+    if (queued.clientUuid != null && queued.clientUuid!.isNotEmpty) return;
+    final clientUuid = _uuid.v4();
+    await (_db.update(_db.offlineMessages)
+          ..where((tbl) => tbl.id.equals(queued.id)))
+        .write(OfflineMessagesCompanion(clientUuid: Value(clientUuid)));
+  }
+
+  Future<void> _persistReconciled(OfflineMessage queued, Message sent) async {
+    final reconciled = sent.copyWith(
+      clientId: sent.clientId ?? queued.clientUuid,
+      status: 'sent',
+    );
+    if (queued.conversationId != null) {
+      await _chatRepo.persistConversationMessages(
+        queued.conversationId!,
+        [reconciled],
+      );
+    } else if (queued.groupId != null) {
+      await _chatRepo.persistGroupMessages(queued.groupId!, [reconciled]);
+    }
+  }
+
   // Delete sent messages older than 7 days
   Future<void> cleanupOldMessages() async {
     final cutoff = DateTime.now().subtract(const Duration(days: 7));
     await (_db.delete(_db.offlineMessages)
-          ..where((tbl) => tbl.isSent.equals(true) & tbl.createdAt.isSmallerThanValue(cutoff)))
+          ..where((tbl) =>
+              tbl.isSent.equals(true) &
+              tbl.createdAt.isSmallerThanValue(cutoff)))
         .go();
   }
 
@@ -132,7 +165,8 @@ class MessageQueueService {
     }
 
     final pending = await getPendingMessages();
-    
+    var flushedAny = false;
+
     for (final queuedMessage in pending) {
       try {
         // Skip if retry count is too high (more than 5 attempts)
@@ -157,9 +191,12 @@ class MessageQueueService {
           }
         }
 
-        // Use the stable UUID stored at queue time for server-side idempotency.
-        // If the row predates schema v5 it will be null — fall back to a fresh UUID (no dedup, but safe).
-        final clientUuid = queuedMessage.clientUuid ?? _uuid.v4();
+        // Stable UUID for server-side idempotency — never regenerate per attempt.
+        await _ensureClientUuid(queuedMessage);
+        final fresh = await (_db.select(_db.offlineMessages)
+              ..where((tbl) => tbl.id.equals(queuedMessage.id)))
+            .getSingle();
+        final clientUuid = fresh.clientUuid!;
 
         final voiceNote = _inferVoiceNote(
           body: queuedMessage.body,
@@ -201,7 +238,9 @@ class MessageQueueService {
                 : null);
 
         if (sentMessage != null) {
+          await _persistReconciled(fresh, sentMessage);
           await markAsSent(queuedMessage.id, sentMessage.id);
+          flushedAny = true;
         } else {
           await markAsFailed(queuedMessage.id, 'Failed to send message');
         }
@@ -212,6 +251,9 @@ class MessageQueueService {
 
     // Cleanup old sent messages
     await cleanupOldMessages();
+    if (flushedAny) {
+      _onFlushed?.call();
+    }
   }
 }
 
@@ -219,5 +261,12 @@ final messageQueueServiceProvider = Provider<MessageQueueService>((ref) {
   final db = ref.read(appDatabaseProvider);
   final chatRepo = ref.read(chatRepositoryProvider);
   bool isOnline() => ref.read(connectivityProvider);
-  return MessageQueueService(db, chatRepo, isOnline);
+  return MessageQueueService(
+    db,
+    chatRepo,
+    isOnline,
+    onFlushed: () {
+      ref.read(inboxBackgroundSyncTickProvider.notifier).state++;
+    },
+  );
 });

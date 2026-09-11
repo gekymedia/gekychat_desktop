@@ -174,17 +174,31 @@ class ChatRepository {
         if (m.id > 0) m.id: m,
     };
     final apiById = {for (final m in fromApi) m.id: m};
+    final apiClientIds = {
+      for (final m in fromApi)
+        if (m.clientId != null && m.clientId!.isNotEmpty) m.clientId!,
+    };
     final merged = fromApi
         .map((m) => _enrichFromCache(m, cachedById[m.id]))
         .toList();
 
     for (final m in cached) {
-      if (m.id > 0 && !apiById.containsKey(m.id)) {
+      // Server already has this optimistic row — drop the local placeholder.
+      if (m.clientId != null &&
+          m.clientId!.isNotEmpty &&
+          apiClientIds.contains(m.clientId)) {
+        continue;
+      }
+      final isPending = m.id <= 0 ||
+          m.status == 'queued' ||
+          m.status == 'sending' ||
+          m.status == 'failed';
+      if (m.id > 0 && !isPending && !apiById.containsKey(m.id)) {
         merged.add(m);
-      } else if (m.id <= 0 &&
+      } else if (isPending &&
           m.clientId != null &&
           m.clientId!.isNotEmpty &&
-          !fromApi.any((a) => a.clientId == m.clientId)) {
+          !apiClientIds.contains(m.clientId)) {
         merged.add(m);
       }
     }

@@ -1152,8 +1152,8 @@ class _ChatViewState extends ConsumerState<ChatView> {
           _currentUserId != null &&
           message.senderId == _currentUserId) {
         existingIdx = _messages.indexWhere((m) =>
-            m.id == 0 &&
-            m.status == 'sending' &&
+            m.id <= 0 &&
+            (m.status == 'sending' || m.status == 'queued') &&
             m.senderId == _currentUserId &&
             (m.body ?? '') == (message.body ?? ''));
       }
@@ -1690,7 +1690,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
 
         // Create a temporary message object for UI display
         final tempMessage = Message(
-          id: DateTime.now().millisecondsSinceEpoch, // Temporary numeric ID
+          id: 0, // Optimistic placeholder — mergeMessageHistory drops id<=0 when clientId matches
           clientId: queuedClientUuid, // UUID stored for reconciliation when server confirms
           conversationId: widget.conversationId,
           senderId: _currentUserId ?? 0,
@@ -1911,7 +1911,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
           );
 
           final tempMessage = Message(
-            id: DateTime.now().millisecondsSinceEpoch,
+            id: 0,
             clientId: queuedClientUuid,
             conversationId: widget.conversationId,
             senderId: _currentUserId ?? 0,

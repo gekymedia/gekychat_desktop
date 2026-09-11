@@ -345,7 +345,12 @@ class VideoCompressionService {
 
   Future<String?> _findFfmpeg() async {
     final localAppData = Platform.environment['LOCALAPPDATA'];
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
     final candidates = <String>[
+      // Bundled next to the app (installer / Release folder)
+      '$exeDir${Platform.pathSeparator}ffmpeg.exe',
+      '$exeDir${Platform.pathSeparator}ffmpeg${Platform.pathSeparator}ffmpeg.exe',
+      if (Platform.isMacOS) '$exeDir/../Resources/ffmpeg',
       'ffmpeg',
       if (Platform.isWindows) 'ffmpeg.exe',
       if (Platform.isWindows && localAppData != null)

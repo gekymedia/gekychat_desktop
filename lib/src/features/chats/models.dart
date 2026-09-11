@@ -875,6 +875,8 @@ class Message {
   }
 
   Message copyWith({
+    int? id,
+    String? clientId,
     bool? viewOnceOpened,
     List<Reaction>? reactions,
     Map<String, dynamic>? replyToPreview,
@@ -883,8 +885,8 @@ class Message {
     String? status,
   }) {
     return Message(
-      id: id,
-      clientId: clientId,
+      id: id ?? this.id,
+      clientId: clientId ?? this.clientId,
       conversationId: conversationId,
       groupId: groupId,
       senderId: senderId,
