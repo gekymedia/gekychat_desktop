@@ -25,7 +25,7 @@ $isccCandidates = @(
 )
 $iscc = $isccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $iscc) {
-    Write-Host "Inno Setup not found — installing to C:\InnoSetup6 ..." -ForegroundColor Yellow
+    Write-Host "Inno Setup not found - installing to C:\InnoSetup6 ..." -ForegroundColor Yellow
     $installer = Join-Path $env:TEMP "innosetup-6.7.3.exe"
     if (-not (Test-Path $installer)) {
         Invoke-WebRequest -Uri "https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe" -OutFile $installer
@@ -58,12 +58,13 @@ New-Item -ItemType Directory -Force -Path $gekychatPublic | Out-Null
 $setupPath = Join-Path $gekychatPublic $setupName
 Copy-Item -Path $builtInstaller -Destination $setupPath -Force
 
+$sizeMb = [math]::Round((Get-Item $setupPath).Length / 1048576, 1)
 Write-Host ""
-Write-Host "Installer: $setupPath ($([math]::Round((Get-Item $setupPath).Length / 1MB, 1)) MB)" -ForegroundColor Green
-Write-Host "URL:       https://gekychat.com/downloads/$setupName" -ForegroundColor Green
+Write-Host ('Installer: {0} ({1} MB)' -f $setupPath, $sizeMb) -ForegroundColor Green
+Write-Host ('URL:       https://gekychat.com/downloads/{0}' -f $setupName) -ForegroundColor Green
 Write-Host ""
-Write-Host "Set production: APP_VERSION_WINDOWS_LATEST=$versionName+$buildNumber" -ForegroundColor Yellow
-Write-Host "                APP_VERSION_WINDOWS_URL=https://gekychat.com/downloads/$setupName" -ForegroundColor Yellow
+Write-Host ('Set production: APP_VERSION_WINDOWS_LATEST={0}+{1}' -f $versionName, $buildNumber) -ForegroundColor Yellow
+Write-Host ('                APP_VERSION_WINDOWS_URL=https://gekychat.com/downloads/{0}' -f $setupName) -ForegroundColor Yellow
 
 if ($InstallLocal) {
     Write-Host "Running installer silently..." -ForegroundColor Cyan
