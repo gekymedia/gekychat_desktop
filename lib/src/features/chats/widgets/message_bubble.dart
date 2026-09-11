@@ -124,6 +124,7 @@ class MessageBubble extends ConsumerWidget {
   final Function(String)? onEdit;
   final void Function(bool pin)? onPin;
   final VoidCallback? onSelectMode;
+  final VoidCallback? onRetry;
   final bool isSelectionMode;
   final bool isSelected;
   final VoidCallback? onSelectionToggle;
@@ -157,6 +158,7 @@ class MessageBubble extends ConsumerWidget {
     this.onEdit,
     this.onPin,
     this.onSelectMode,
+    this.onRetry,
     this.isSelectionMode = false,
     this.isSelected = false,
     this.onSelectionToggle,
@@ -1235,8 +1237,14 @@ class MessageBubble extends ConsumerWidget {
               if (st == 'queued' || st == 'sending') {
                 return Icon(Icons.schedule, size: 14, color: tickMuted);
               } else if (st == 'failed') {
-                return const Icon(Icons.error_outline,
-                    size: 14, color: Colors.redAccent);
+                return GestureDetector(
+                  onTap: onRetry,
+                  child: const Tooltip(
+                    message: 'Tap to retry',
+                    child: Icon(Icons.error_outline,
+                        size: 14, color: Colors.redAccent),
+                  ),
+                );
               } else if (message.readAt != null || st == 'read') {
                 return const Icon(Icons.done_all,
                     size: 14, color: _kWaReadReceiptBlue);

@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:livekit_client/livekit_client.dart';
+import '../calls/livekit_ice_config.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/providers.dart';
@@ -220,9 +221,13 @@ class _BroadcastStreamingScreenState extends ConsumerState<BroadcastStreamingScr
 
       final room = Room(roomOptions: LiveKitQuality.broadcastHostRoomOptions());
 
+      final rtcConfiguration = await fetchLiveKitRtcConfiguration(
+        ref.read(apiServiceProvider),
+      );
       await room.connect(
         websocketUrl,
         token,
+        connectOptions: ConnectOptions(rtcConfiguration: rtcConfiguration),
       );
 
       await room.localParticipant?.setCameraEnabled(_cameraEnabled);

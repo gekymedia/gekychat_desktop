@@ -2485,6 +2485,53 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
     }
   }
 
+  Future<void> _retryFailedMessage(Message message) async {
+    final idx = _messages.indexWhere(
+      (m) =>
+          (message.clientId != null && m.clientId == message.clientId) ||
+          (m.id == message.id && message.id > 0) ||
+          (m.id <= 0 && m.status == 'failed' && m.body == message.body),
+    );
+    if (idx < 0) return;
+    setState(() {
+      _messages[idx] = message.copyWith(status: 'sending');
+    });
+    try {
+      final repo = ref.read(chatRepositoryProvider);
+      final sent = await repo.sendMessageToGroup(
+        groupId: widget.groupId,
+        body: message.body.isEmpty ? null : message.body,
+        replyToId: message.replyToId,
+        clientUuid: message.clientId,
+      );
+      if (!mounted) return;
+      setState(() {
+        final i = _messages.indexWhere(
+          (m) =>
+              (message.clientId != null && m.clientId == message.clientId) ||
+              m.status == 'sending' && m.body == message.body,
+        );
+        if (i >= 0) {
+          _messages[i] = sent.copyWith(
+            clientId: sent.clientId ?? message.clientId,
+            status: 'sent',
+          );
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        final i = _messages.indexWhere(
+          (m) => m.status == 'sending' && m.body == message.body,
+        );
+        if (i >= 0) {
+          _messages[i] = message.copyWith(status: 'failed');
+        }
+      });
+      context.showErrorToast('Failed to resend message');
+    }
+  }
+
   Future<void> _deleteMessage(Message message) async {
     // PHASE 1: Check if message is less than 1 hour old (for "delete for everyone")
     final messageAge = DateTime.now().difference(message.createdAt);
@@ -3144,6 +3191,9 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                                     ? null
                                     : (newBody) => _editMessage(message, newBody),
                                 onPin: (pin) => _pinMessage(message, pin),
+                                onRetry: message.status == 'failed'
+                                    ? () => unawaited(_retryFailedMessage(message))
+                                    : null,
                                 isSelectionMode: _messageSelection.isSelectionMode &&
                                     messageShowsSelectionChrome(
                                       message: message,

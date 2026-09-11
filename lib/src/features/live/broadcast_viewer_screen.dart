@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:livekit_client/livekit_client.dart';
+import '../calls/livekit_ice_config.dart';
 import 'live_broadcast_repository.dart';
 import 'live_broadcast_social_overlay.dart';
 import 'live_broadcast_screen.dart' show liveBroadcastsProvider;
@@ -127,7 +128,14 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
         final url = widget.joinData['websocket_url'] as String? ?? '';
         final token = widget.joinData['token'] as String? ?? '';
         if (url.isNotEmpty && token.isNotEmpty) {
-          await room.connect(url, token);
+          final rtcConfiguration = await fetchLiveKitRtcConfiguration(
+            ref.read(apiServiceProvider),
+          );
+          await room.connect(
+            url,
+            token,
+            connectOptions: ConnectOptions(rtcConfiguration: rtcConfiguration),
+          );
         }
       } catch (_) {}
     }
@@ -235,9 +243,13 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
       final room = Room(roomOptions: LiveKitQuality.viewerRoomOptions());
       
       // Connect to room with timeout
+      final rtcConfiguration = await fetchLiveKitRtcConfiguration(
+        ref.read(apiServiceProvider),
+      );
       await room.connect(
         websocketUrl,
         token,
+        connectOptions: ConnectOptions(rtcConfiguration: rtcConfiguration),
       ).timeout(
         const Duration(seconds: 10),
         onTimeout: () {
