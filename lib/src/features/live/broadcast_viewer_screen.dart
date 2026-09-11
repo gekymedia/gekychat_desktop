@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:livekit_client/livekit_client.dart';
 import 'live_broadcast_repository.dart';
@@ -34,7 +34,9 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
   String? _errorMessage;
   bool _streamEnded = false;
   bool _hadBroadcaster = false;
+  bool _isReconnecting = false;
   Timer? _statsPollTimer;
+  Timer? _hostAbsentTimer;
   void Function(dynamic)? _endedListener;
 
   @override
@@ -63,16 +65,91 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
     if (_streamEnded || !mounted) return;
     _streamEnded = true;
     _statsPollTimer?.cancel();
+    _hostAbsentTimer?.cancel();
     unawaited(_room?.disconnect());
     ref.invalidate(liveBroadcastsProvider);
     setState(() {
       _broadcaster = null;
+      _isReconnecting = false;
     });
-        context.showInfoToast('This live has ended');    Future<void>.delayed(const Duration(seconds: 2), () {
+    context.showInfoToast('This live has ended');
+    Future<void>.delayed(const Duration(seconds: 2), () {
       if (mounted && Navigator.of(context).canPop()) {
         Navigator.of(context).pop();
       }
     });
+  }
+
+  void _clearReconnecting() {
+    _hostAbsentTimer?.cancel();
+    if (!mounted || _streamEnded || !_isReconnecting) return;
+    setState(() => _isReconnecting = false);
+  }
+
+  void _onHostPossiblyAbsent() {
+    if (_streamEnded || !mounted) return;
+    if (_room?.connectionState == ConnectionState.reconnecting) {
+      setState(() {
+        _isReconnecting = true;
+        _broadcaster = null;
+      });
+      return;
+    }
+    setState(() {
+      _isReconnecting = true;
+      _broadcaster = null;
+    });
+    _hostAbsentTimer?.cancel();
+    _hostAbsentTimer = Timer(const Duration(seconds: 12), () {
+      if (!mounted || _streamEnded) return;
+      unawaited(_confirmStillLiveOrEnd());
+    });
+  }
+
+  Future<void> _confirmStillLiveOrEnd() async {
+    if (!mounted || _streamEnded) return;
+    try {
+      final stats = await ref
+          .read(liveBroadcastRepositoryProvider)
+          .getBroadcastStats(widget.broadcastId);
+      final status = stats['status']?.toString();
+      if (status != null && status != 'live') {
+        _handleStreamEnded();
+        return;
+      }
+    } catch (_) {}
+
+    final room = _room;
+    if (room != null &&
+        room.connectionState == ConnectionState.disconnected &&
+        !_streamEnded) {
+      try {
+        final url = widget.joinData['websocket_url'] as String? ?? '';
+        final token = widget.joinData['token'] as String? ?? '';
+        if (url.isNotEmpty && token.isNotEmpty) {
+          await room.connect(url, token);
+        }
+      } catch (_) {}
+    }
+
+    if (!mounted || _streamEnded) return;
+    if (_room != null && _room!.remoteParticipants.isNotEmpty) {
+      _clearReconnecting();
+    }
+  }
+
+  void _onRoomDisconnected(RoomDisconnectedEvent event) {
+    if (!mounted || _streamEnded) return;
+    final reason = event.reason;
+    if (reason == DisconnectReason.clientInitiated) return;
+    if (reason == DisconnectReason.roomDeleted ||
+        reason == DisconnectReason.serverShutdown ||
+        reason == DisconnectReason.participantRemoved) {
+      _handleStreamEnded();
+      return;
+    }
+    setState(() => _isReconnecting = true);
+    unawaited(_confirmStillLiveOrEnd());
   }
 
   void _startStatsPolling() {
@@ -96,6 +173,7 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
   @override
   void dispose() {
     _statsPollTimer?.cancel();
+    _hostAbsentTimer?.cancel();
     if (_endedListener != null) {
       ref.read(pusherServiceProvider).removeListener(
             'live-broadcasts',
@@ -176,8 +254,10 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
               : null;
           if (next != null) {
             _hadBroadcaster = true;
+            _hostAbsentTimer?.cancel();
+            _isReconnecting = false;
           } else if (_hadBroadcaster) {
-            _handleStreamEnded();
+            _onHostPossiblyAbsent();
             return;
           }
           _broadcaster = next;
@@ -187,10 +267,14 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
       // Listen for participant events
       _listener = room.createListener();
       _listener!
-        ..on<RoomDisconnectedEvent>((event) {
-          if (mounted && !_streamEnded) {
-            _handleStreamEnded();
-          }
+        ..on<RoomDisconnectedEvent>(_onRoomDisconnected)
+        ..on<RoomReconnectingEvent>((_) {
+          if (!mounted || _streamEnded) return;
+          setState(() => _isReconnecting = true);
+        })
+        ..on<RoomReconnectedEvent>((_) {
+          if (!mounted || _streamEnded) return;
+          _clearReconnecting();
         })
         ..on<ParticipantConnectedEvent>((event) {
           if (mounted && !_streamEnded) {
@@ -200,7 +284,9 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
               setState(() {
                 _broadcaster = participant;
                 _hadBroadcaster = true;
+                _isReconnecting = false;
               });
+              _hostAbsentTimer?.cancel();
               // Check for existing tracks and update UI
               _subscribeToParticipantTracks(participant);
               debugPrint('📹 Broadcaster connected: ${participant.identity}, tracks: ${(participant).trackPublications.length}');
@@ -210,8 +296,8 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
         ..on<ParticipantDisconnectedEvent>((event) {
           if (!mounted || _streamEnded) return;
           final left = event.participant;
-          if (_broadcaster?.sid == left.sid || _hadBroadcaster) {
-            _handleStreamEnded();
+          if (_broadcaster?.sid == left.sid) {
+            _onHostPossiblyAbsent();
           }
         })
         ..on<TrackPublishedEvent>((event) {
@@ -343,6 +429,32 @@ class _BroadcastViewerScreenState extends ConsumerState<BroadcastViewerScreen> {
                         const SizedBox(height: 8),
                         Text(
                           'Leaving…',
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.55),
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else if (_isReconnecting)
+                  Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const CircularProgressIndicator(color: Colors.white),
+                        const SizedBox(height: 24),
+                        Text(
+                          'Reconnecting…',
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.85),
+                            fontSize: 22,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Stream connection dropped — trying again',
                           style: TextStyle(
                             color: Colors.white.withOpacity(0.55),
                             fontSize: 16,
