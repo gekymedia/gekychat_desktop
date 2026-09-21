@@ -125,29 +125,41 @@ class DesktopGlassMenuRow extends StatelessWidget {
   /// Shrink row to label width (Telegram-style compact action menu).
   final bool compact;
 
+  /// Fixed slot so every row's glyph shares one vertical axis.
+  static const double iconSlot = 22;
+
   @override
   Widget build(BuildContext context) {
     final fg = accentColor ??
         (isDestructive
             ? const Color(0xFFEA4335)
             : (isDark ? Colors.white : const Color(0xFF111B21)));
-    final iconColor = isDark ? Colors.white70 : const Color(0xFF54656F);
+    final iconColor = isDestructive
+        ? const Color(0xFFEA4335)
+        : (isDark ? Colors.white70 : const Color(0xFF54656F));
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          // Extra left inset so the aligned icon column feels centered in the menu.
+          padding: EdgeInsets.fromLTRB(compact ? 16 : 14, 7, 14, 7),
           child: Row(
             mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
             children: [
-              leading ??
-                  Icon(
-                    icon,
-                    size: 20,
-                    color: accentColor ?? iconColor,
-                  ),
+              SizedBox(
+                width: iconSlot,
+                height: iconSlot,
+                child: Center(
+                  child: leading ??
+                      Icon(
+                        icon,
+                        size: 20,
+                        color: accentColor ?? iconColor,
+                      ),
+                ),
+              ),
               const SizedBox(width: 12),
               if (compact)
                 Text(

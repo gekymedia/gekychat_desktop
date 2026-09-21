@@ -15,8 +15,9 @@ class DesktopGlassContextMenu {
   static const double _menuMinWidth = 148;
 
   static double _computeMenuWidth(List<DesktopGlassMenuItem> items) {
-    const horizontalPad = 24.0; // 12 each side
-    const iconWidth = 20.0;
+    // Match DesktopGlassMenuRow compact padding: 16 left + 14 right.
+    const horizontalPad = 30.0;
+    const iconWidth = DesktopGlassMenuRow.iconSlot;
     const gap = 12.0;
 
     final style = TextStyle(
