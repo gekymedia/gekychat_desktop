@@ -13,6 +13,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   geolocator_windows
   livekit_client
   pasteboard
+  pdfx
   permission_handler_windows
   record_windows
   screen_retriever
