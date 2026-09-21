@@ -13,6 +13,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:video_player/video_player.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:pdfx/pdfx.dart';
 import '../../../services/download_path_service.dart';
 import '../../../utils/desktop_file_actions.dart';
 import '../../../utils/view_once_desktop_policy.dart';
@@ -2910,12 +2911,18 @@ class MessageBubble extends ConsumerWidget {
 }
 
 class _DocumentAttachmentData {
-  const _DocumentAttachmentData({required this.fileExists});
+  const _DocumentAttachmentData({
+    required this.fileExists,
+    this.localPath,
+    this.pdfThumbnail,
+  });
 
   final bool fileExists;
+  final String? localPath;
+  final ({Uint8List bytes, int pageCount})? pdfThumbnail;
 }
 
-/// Document tile with download/open actions and PDF preview after download.
+/// Document tile with download/open actions and PDF first-page preview after download.
 class _DocumentAttachmentTile extends ConsumerStatefulWidget {
   const _DocumentAttachmentTile({
     required this.attachment,
@@ -2937,22 +2944,25 @@ class _DocumentAttachmentTileState extends ConsumerState<_DocumentAttachmentTile
 
   MessageAttachment get attachment => widget.attachment;
 
+  bool get _isPdf {
+    final mime = attachment.mimeType.toLowerCase();
+    final name = (attachment.originalName ?? attachment.url).toLowerCase();
+    return mime.contains('pdf') || name.endsWith('.pdf');
+  }
+
+  String? get _extension {
+    final name = attachment.originalName ??
+        attachment.url.split('/').last.split('?').first;
+    final parts = name.split('.');
+    if (parts.length > 1) return '.${parts.last.toLowerCase()}';
+    return null;
+  }
+
   String get _fileName {
     var fileName = attachment.originalName ??
         attachment.url.split('/').last.split('?').first;
 
-    String? extension;
-    if (attachment.originalName != null) {
-      final parts = attachment.originalName!.split('.');
-      if (parts.length > 1) {
-        extension = '.${parts.last.toLowerCase()}';
-      }
-    } else {
-      final urlParts = fileName.split('.');
-      if (urlParts.length > 1) {
-        extension = '.${urlParts.last.toLowerCase()}';
-      }
-    }
+    final extension = _extension;
 
     const maxLength = 30;
     if (fileName.length > maxLength && extension != null) {
@@ -2991,9 +3001,45 @@ class _DocumentAttachmentTileState extends ConsumerState<_DocumentAttachmentTile
     }
   }
 
+  Future<({Uint8List bytes, int pageCount})?> _loadPdfThumbnail(
+    String filePath,
+  ) async {
+    try {
+      final doc = await PdfDocument.openFile(filePath);
+      try {
+        final pageCount = doc.pagesCount;
+        if (pageCount < 1) return null;
+        final page = await doc.getPage(1);
+        try {
+          // Render larger than the bubble slot; UI crops to the top with BoxFit.cover.
+          const w = 320.0;
+          const h = 420.0;
+          final image = await page.render(width: w, height: h);
+          if (image == null) return null;
+          return (bytes: image.bytes, pageCount: pageCount);
+        } finally {
+          await page.close();
+        }
+      } finally {
+        await doc.close();
+      }
+    } catch (e) {
+      debugPrint('PDF thumbnail error: $e');
+      return null;
+    }
+  }
+
   Future<_DocumentAttachmentData> _loadDocumentData() async {
     final localPath = await _resolveLocalPath();
-    return _DocumentAttachmentData(fileExists: localPath != null);
+    ({Uint8List bytes, int pageCount})? pdfThumbnail;
+    if (_isPdf && localPath != null) {
+      pdfThumbnail = await _loadPdfThumbnail(localPath);
+    }
+    return _DocumentAttachmentData(
+      fileExists: localPath != null,
+      localPath: localPath,
+      pdfThumbnail: pdfThumbnail,
+    );
   }
 
   Future<void> _openFile(String filePath) async {
@@ -3004,10 +3050,11 @@ class _DocumentAttachmentTileState extends ConsumerState<_DocumentAttachmentTile
         throw Exception('File does not exist: $absolutePath');
       }
 
+      // Open with the OS default app (PDF viewer, Word, etc.) — not Explorer.
       if (Platform.isWindows) {
         await Process.start(
-          'explorer.exe',
-          [absolutePath],
+          'cmd',
+          ['/c', 'start', '', absolutePath],
           mode: ProcessStartMode.detached,
         );
       } else if (Platform.isMacOS) {
@@ -3027,8 +3074,30 @@ class _DocumentAttachmentTileState extends ConsumerState<_DocumentAttachmentTile
       }
     } catch (e) {
       if (mounted) {
-                context.showErrorToast('Failed to open file: $e');      }
+        context.showErrorToast('Failed to open file: $e');
+      }
     }
+  }
+
+  String _documentSubtitle({
+    required ({Uint8List bytes, int pageCount})? pdfThumb,
+  }) {
+    final parts = <String>[];
+    if (_isPdf && pdfThumb != null) {
+      final n = pdfThumb.pageCount;
+      parts.add('$n page${n == 1 ? '' : 's'}');
+    }
+    final size = attachment.originalSize ?? attachment.compressedSize;
+    if (size != null) {
+      parts.add(_formatFileSize(size));
+    }
+    final ext = _extension?.replaceFirst('.', '').toLowerCase();
+    if (ext != null && ext.isNotEmpty) {
+      parts.add(ext);
+    } else if (attachment.mimeType.isNotEmpty) {
+      parts.add(attachment.mimeType.split('/').last);
+    }
+    return parts.isEmpty ? 'File' : parts.join(' · ');
   }
 
   Future<void> _handleTap(bool fileExists, String? localPath) async {
@@ -3220,6 +3289,7 @@ class _DocumentAttachmentTileState extends ConsumerState<_DocumentAttachmentTile
   Widget build(BuildContext context) {
     final fileName = _fileName;
     final isDark = widget.isDark;
+    const previewHeight = 190.0;
 
     return FutureBuilder<_DocumentAttachmentData>(
       key: ValueKey('doc_${attachment.id}_$_refreshToken'),
@@ -3227,139 +3297,177 @@ class _DocumentAttachmentTileState extends ConsumerState<_DocumentAttachmentTile
       builder: (context, snapshot) {
         final data = snapshot.data;
         final fileExists = data?.fileExists ?? false;
+        final localPath = data?.localPath;
+        final pdfThumb = data?.pdfThumbnail;
+        final showPdfPreview = _isPdf && fileExists && pdfThumb != null;
         final icon = _isDownloading
             ? Icons.downloading
             : (fileExists ? Icons.open_in_new_rounded : Icons.download_rounded);
         final actionText = _isDownloading
             ? '${(_downloadProgress * 100).toStringAsFixed(0)}%'
             : (fileExists ? 'Open' : 'Download');
-        final subtitleText = attachment.originalSize != null
-            ? _formatFileSize(attachment.originalSize!)
-            : attachment.compressedSize != null
-                ? _formatFileSize(attachment.compressedSize!)
-                : 'File';
-
+        final subtitleText = _documentSubtitle(pdfThumb: pdfThumb);
         final iconColor = _getDocumentIconColor(attachment.mimeType, fileName);
+        final metadataText = isDark
+            ? AppTheme.textPrimaryDark
+            : AppTheme.textPrimaryLight;
+        final metadataSubtext = isDark
+            ? AppTheme.textSecondaryDark
+            : AppTheme.textSecondaryLight;
 
         return GestureDetector(
           onTap: () async {
-            final localPath = await _resolveLocalPath();
-            await _handleTap(fileExists, localPath);
+            final path = localPath ?? await _resolveLocalPath();
+            await _handleTap(fileExists, path);
           },
           onSecondaryTapDown: (details) async {
-            final localPath = await _resolveLocalPath();
+            final path = localPath ?? await _resolveLocalPath();
             if (!mounted) return;
             await _showDocumentContextMenu(
               details.globalPosition,
-              fileExists && localPath != null,
-              localPath,
+              fileExists && path != null,
+              path,
             );
           },
           child: MouseRegion(
             cursor: SystemMouseCursors.click,
             child: Container(
               margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: Colors.black.withOpacity(0.05),
                 borderRadius: BorderRadius.circular(8),
               ),
+              clipBehavior: Clip.antiAlias,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: iconColor.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(
-                          _getDocumentIcon(attachment.mimeType, fileName),
-                          color: iconColor,
-                          size: 24,
+                  if (showPdfPreview)
+                    SizedBox(
+                      width: double.infinity,
+                      height: previewHeight,
+                      child: ColoredBox(
+                        color: isDark
+                            ? const Color(0xFF2A3942)
+                            : Colors.grey.shade200,
+                        child: Image.memory(
+                          pdfThumb.bytes,
+                          fit: BoxFit.cover,
+                          alignment: Alignment.topCenter,
+                          width: double.infinity,
+                          height: previewHeight,
+                          gaplessPlayback: true,
+                          filterQuality: FilterQuality.medium,
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
                           children: [
-                            Text(
-                              fileName,
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                                color: isDark
-                                    ? AppTheme.textPrimaryDark
-                                    : AppTheme.textPrimaryLight,
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: iconColor.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(8),
                               ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                              child: Icon(
+                                _getDocumentIcon(
+                                  attachment.mimeType,
+                                  fileName,
+                                ),
+                                color: iconColor,
+                                size: 24,
+                              ),
                             ),
-                            Text(
-                              subtitleText,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: isDark
-                                    ? AppTheme.textSecondaryDark
-                                    : AppTheme.textSecondaryLight,
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    fileName,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                      color: metadataText,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Text(
+                                    subtitleText,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: metadataSubtext,
+                                    ),
+                                  ),
+                                ],
                               ),
+                            ),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (fileExists)
+                                  IconButton(
+                                    tooltip: 'Show in folder',
+                                    icon: const Icon(
+                                      Icons.folder_open_rounded,
+                                      size: 18,
+                                    ),
+                                    visualDensity: VisualDensity.compact,
+                                    onPressed: () async {
+                                      final path = localPath ??
+                                          await _resolveLocalPath();
+                                      if (path == null) return;
+                                      await DesktopFileActions
+                                          .revealInFileManager(path);
+                                    },
+                                  ),
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 4),
+                                  child: Text(
+                                    actionText,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: AppTheme.primaryGreen,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                                Icon(
+                                  icon,
+                                  size: 20,
+                                  color: fileExists
+                                      ? AppTheme.primaryGreen
+                                      : null,
+                                ),
+                              ],
                             ),
                           ],
                         ),
-                      ),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (fileExists)
-                            IconButton(
-                              tooltip: 'Show in folder',
-                              icon: const Icon(Icons.folder_open_rounded, size: 18),
-                              visualDensity: VisualDensity.compact,
-                              onPressed: () async {
-                                final localPath = await _resolveLocalPath();
-                                if (localPath == null) return;
-                                await DesktopFileActions.revealInFileManager(
-                                  localPath,
-                                );
-                              },
+                        if (_isDownloading) ...[
+                          const SizedBox(height: 8),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: _downloadProgress > 0
+                                  ? _downloadProgress
+                                  : null,
+                              minHeight: 4,
+                              backgroundColor: isDark
+                                  ? const Color(0xFF2A3942)
+                                  : Colors.grey.shade300,
                             ),
-                          Padding(
-                            padding: const EdgeInsets.only(right: 4),
-                            child: Text(
-                              actionText,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: AppTheme.primaryGreen,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                          Icon(
-                            icon,
-                            size: 20,
-                            color: fileExists ? AppTheme.primaryGreen : null,
                           ),
                         ],
-                      ),
-                    ],
-                  ),
-                  if (_isDownloading) ...[
-                    const SizedBox(height: 8),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: LinearProgressIndicator(
-                        value: _downloadProgress > 0 ? _downloadProgress : null,
-                        minHeight: 4,
-                        backgroundColor: isDark
-                            ? const Color(0xFF2A3942)
-                            : Colors.grey.shade300,
-                      ),
+                      ],
                     ),
-                  ],
+                  ),
                 ],
               ),
             ),
