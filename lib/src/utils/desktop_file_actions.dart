@@ -11,26 +11,78 @@ class DesktopFileActions {
   DesktopFileActions._();
 
   /// Opens the parent folder and selects [filePath] (Explorer / Finder).
+  ///
+  /// On Windows this uses `explorer /select,"path"` so the file is highlighted,
+  /// matching Telegram / typical desktop chat apps.
   static Future<bool> revealInFileManager(String filePath) async {
     final file = File(filePath);
     if (!await file.exists()) return false;
 
+    final absolute = file.absolute.path;
+
     try {
       if (Platform.isWindows) {
-        // explorer /select,"C:\path\to\file.ext"
-        await Process.run('explorer.exe', ['/select,${file.path}']);
+        final winPath = absolute.replaceAll('/', r'\');
+        // cmd.exe so quoting + /select work with spaces; explorer often exits 1 on success.
+        await Process.run(
+          'cmd.exe',
+          ['/c', 'start', '', 'explorer.exe', '/select,"$winPath"'],
+          runInShell: false,
+        );
         return true;
       }
       if (Platform.isMacOS) {
-        await Process.run('open', ['-R', file.path]);
+        await Process.run('open', ['-R', absolute]);
         return true;
       }
+      // Prefer selecting the file via D-Bus when available (Nautilus, etc.).
+      final uri = Uri.file(absolute).toString();
+      final dbus = await Process.run(
+        'dbus-send',
+        [
+          '--session',
+          '--dest=org.freedesktop.FileManager1',
+          '--type=method_call',
+          '/org/freedesktop/FileManager1',
+          'org.freedesktop.FileManager1.ShowItems',
+          'array:string:$uri',
+          'string:',
+        ],
+      );
+      if (dbus.exitCode == 0) return true;
       await Process.run('xdg-open', [file.parent.path]);
       return true;
     } catch (e) {
       debugPrint('revealInFileManager failed: $e');
+      try {
+        if (Platform.isWindows) {
+          await Process.run('explorer.exe', [file.parent.path]);
+          return true;
+        }
+      } catch (_) {}
       return false;
     }
+  }
+
+  /// Returns [desiredPath] if free; otherwise `name (1).ext`, `name (2).ext`, …
+  static Future<String> uniqueDownloadPath(String desiredPath) async {
+    final file = File(desiredPath);
+    if (!await file.exists()) return desiredPath;
+
+    final separator = Platform.pathSeparator;
+    final parent = file.parent.path;
+    final fullName = file.uri.pathSegments.isNotEmpty
+        ? file.uri.pathSegments.last
+        : file.path.split(RegExp(r'[/\\]')).last;
+    final dot = fullName.lastIndexOf('.');
+    final stem = dot > 0 ? fullName.substring(0, dot) : fullName;
+    final ext = dot > 0 ? fullName.substring(dot) : '';
+
+    for (var i = 1; i < 1000; i++) {
+      final candidate = '$parent$separator$stem ($i)$ext';
+      if (!await File(candidate).exists()) return candidate;
+    }
+    return '$parent$separator$stem (${DateTime.now().millisecondsSinceEpoch})$ext';
   }
 
   /// Downloads [imageUrl] and copies it to the system clipboard as an image.

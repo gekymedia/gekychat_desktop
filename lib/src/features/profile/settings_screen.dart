@@ -20,7 +20,6 @@ import '../media_auto_download/media_auto_download_screen.dart';
 import '../notifications/notification_settings_screen.dart';
 import '../contacts/contacts_screen.dart';
 import '../settings/language_settings_screen.dart';
-import '../settings/realtime_metrics_screen.dart';
 import '../support/issue_report_flow.dart';
 import '../live/live_analytics_screen.dart';
 import '../../core/theme/theme_provider.dart' as custom_theme;
@@ -414,17 +413,6 @@ class SettingsScreen extends ConsumerWidget {
                         ),
                       );
                     },
-                  ),
-                  _SettingsTile(
-                    icon: Icons.monitor_heart_outlined,
-                    title: 'Realtime Health',
-                    subtitle: 'WebSocket delivery metrics',
-                    onTap: () => showSettingsDetailModal(
-                      context,
-                      title: 'Realtime health',
-                      child: const RealtimeMetricsScreen(),
-                      maxWidth: 720,
-                    ),
                   ),
                   _SettingsTile(
                     icon: Icons.info,

@@ -39,6 +39,7 @@ class AuthState {
 class AuthNotifier extends StateNotifier<AuthState> {
   final ApiService _apiService;
   final Ref _ref;
+  bool _softAuthCheckInFlight = false;
 
   AuthNotifier(this._apiService, this._ref) : super(AuthState()) {
     // Load token from storage immediately on initialization
@@ -46,6 +47,36 @@ class AuthNotifier extends StateNotifier<AuthState> {
     _loadTokenFromStorage();
     // Then validate it asynchronously
     checkAuthStatus();
+  }
+
+  /// Confirm session after a 401 before wiping local auth.
+  /// Transient/proxy 401s keep the user signed in if /me still succeeds.
+  Future<void> handleUnauthorized() async {
+    if (_softAuthCheckInFlight) return;
+    final token = state.token;
+    if (token == null || token.isEmpty) return;
+
+    _softAuthCheckInFlight = true;
+    try {
+      final response = await _apiService.get(
+        '/me',
+        options: Options(extra: {'skipUnauthorizedHandler': true}),
+      );
+      if (response.statusCode == 200) {
+        debugPrint('✅ Soft 401 recovery: /me still valid, keeping session');
+        return;
+      }
+      await logout();
+    } catch (e) {
+      if (e is DioException && e.response?.statusCode == 401) {
+        debugPrint('⚠️ Soft 401 confirmed invalid session');
+        await logout();
+      } else {
+        debugPrint('⚠️ Soft 401 check failed (network), keeping session: $e');
+      }
+    } finally {
+      _softAuthCheckInFlight = false;
+    }
   }
   
   Future<void> _loadTokenFromStorage() async {

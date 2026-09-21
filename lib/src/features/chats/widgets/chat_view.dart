@@ -1642,6 +1642,11 @@ class _ChatViewState extends ConsumerState<ChatView> {
     final idx = _messages.indexWhere((m) => m.clientId == clientUuid);
     if (idx >= 0) {
       _messages[idx] = _messages[idx].copyWith(status: 'failed');
+      unawaited(bumpConversationInSidebar(
+        ref,
+        conversationId: widget.conversationId,
+        message: _messages[idx],
+      ));
     }
   }
 

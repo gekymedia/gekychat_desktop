@@ -109,9 +109,9 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
   void initState() {
     super.initState();
     
-    // When API returns 401, clear auth so router redirects to login
+    // Soft 401: confirm via /me before wiping session (avoids abrupt logout)
     ref.read(apiServiceProvider).setOnUnauthorized(() {
-      ref.read(authProvider.notifier).logout();
+      unawaited(ref.read(authProvider.notifier).handleUnauthorized());
     });
     
     // Set up window listener for close events

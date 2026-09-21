@@ -850,6 +850,7 @@ class MessageBubble extends ConsumerWidget {
     final items = <GalleryMediaItem>[];
     for (final msg in allMessages!) {
       if (msg.isViewOnce) continue;
+      if (msg.isDeleted || msg.deletedForMe) continue;
       for (final attachment in msg.attachments) {
         if (attachment.isImage || attachment.isVideo) {
           items.add(
@@ -919,8 +920,23 @@ class MessageBubble extends ConsumerWidget {
       return;
     }
 
-    final items = _getGalleryMediaItems();
-    if (items.isEmpty) {
+    // Album / this message only — not the whole chat history.
+    final albumItems = <GalleryMediaItem>[];
+    if (!message.isDeleted) {
+      for (final a in message.attachments) {
+        if (a.isImage || a.isVideo) {
+          albumItems.add(
+            GalleryMediaItem(
+              attachment: a,
+              message: message,
+              isSent: isSent,
+            ),
+          );
+        }
+      }
+    }
+
+    if (albumItems.isEmpty) {
       _openMediaGallery(
         context,
         [
@@ -935,8 +951,9 @@ class MessageBubble extends ConsumerWidget {
       return;
     }
 
-    final index = items.indexWhere((item) => item.attachment.id == attachment.id);
-    _openMediaGallery(context, items, index >= 0 ? index : 0);
+    final index =
+        albumItems.indexWhere((item) => item.attachment.id == attachment.id);
+    _openMediaGallery(context, albumItems, index >= 0 ? index : 0);
   }
 
   Widget _buildImageAttachment(
@@ -1096,6 +1113,10 @@ class MessageBubble extends ConsumerWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final fg = isDark ? Colors.white : const Color(0xFF111B21);
     final isCall = Message.isCallMessage(message);
+    final downloadable = message.attachments
+        .where((a) => a.isImage || a.isVideo || a.isDocument)
+        .toList();
+    final isAlbum = downloadable.length > 1;
     final items = <DesktopGlassMenuItem>[
       DesktopGlassMenuItem(
         icon: Icons.reply,
@@ -1143,9 +1164,15 @@ class MessageBubble extends ConsumerWidget {
           label: 'Forward',
           onTap: () => onForward?.call(),
         ),
+      if (!isCall && downloadable.isNotEmpty)
+        DesktopGlassMenuItem(
+          icon: Icons.download_outlined,
+          label: isAlbum ? 'Download all' : 'Download',
+          onTap: () => unawaited(_downloadMessageMedia(context, downloadable)),
+        ),
       DesktopGlassMenuItem(
         icon: Icons.delete_outline,
-        label: 'Delete',
+        label: isAlbum ? 'Delete all' : 'Delete',
         isDestructive: true,
         onTap: () => onDelete?.call(),
       ),
@@ -1173,6 +1200,81 @@ class MessageBubble extends ConsumerWidget {
           : null,
       items: items,
     );
+  }
+
+  Future<void> _downloadMessageMedia(
+    BuildContext context,
+    List<MessageAttachment> attachments,
+  ) async {
+    if (attachments.isEmpty) return;
+
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final downloadDir = Directory('${directory.path}/Downloads/GekyChat');
+      if (!await downloadDir.exists()) {
+        await downloadDir.create(recursive: true);
+      }
+
+      final prefs = await SharedPreferences.getInstance();
+      final downloadPathService = DownloadPathService(prefs);
+      final dio = Dio();
+      var saved = 0;
+      String? lastPath;
+
+      for (final attachment in attachments) {
+        final existing =
+            await downloadPathService.getDownloadPath(attachment.url);
+        if (existing != null && await File(existing).exists()) {
+          saved++;
+          lastPath = existing;
+          continue;
+        }
+
+        final fileName = attachment.originalName?.trim().isNotEmpty == true
+            ? attachment.originalName!
+            : 'gekychat_${attachment.id}${_extensionForAttachment(attachment)}';
+        var savePath = '${downloadDir.path}/$fileName';
+        savePath = await DesktopFileActions.uniqueDownloadPath(savePath);
+
+        await dio.download(attachment.displayUrl, savePath);
+        await downloadPathService.saveDownloadPath(attachment.url, savePath);
+        saved++;
+        lastPath = savePath;
+      }
+
+      if (!context.mounted) return;
+      final label = attachments.length > 1
+          ? 'Downloaded $saved of ${attachments.length}'
+          : 'Downloaded ${lastPath?.split(RegExp(r'[/\\]')).last ?? 'file'}';
+      SnackbarHelper.showSuccess(
+        context,
+        label,
+        duration: const Duration(seconds: 5),
+        action: lastPath != null
+            ? SnackBarAction(
+                label: 'Show in folder',
+                onPressed: () {
+                  unawaited(DesktopFileActions.revealInFileManager(lastPath!));
+                },
+              )
+            : null,
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      context.showErrorToast('Failed to download: $e');
+    }
+  }
+
+  String _extensionForAttachment(MessageAttachment attachment) {
+    final name = attachment.originalName ?? '';
+    final dot = name.lastIndexOf('.');
+    if (dot >= 0 && dot < name.length - 1) {
+      return name.substring(dot);
+    }
+    if (attachment.isImage) return '.jpg';
+    if (attachment.isVideo) return '.mp4';
+    if (attachment.isAudio) return '.m4a';
+    return '';
   }
 
   bool _shouldShowMessageBody(bool isWorldFeedBubble) {
@@ -2938,8 +3040,47 @@ class _DocumentAttachmentTileState extends ConsumerState<_DocumentAttachmentTile
     await _downloadFile();
   }
 
-  Future<void> _downloadFile() async {
+  Future<void> _downloadFile({bool forceNewCopy = false}) async {
     if (_isDownloading) return;
+
+    if (!forceNewCopy) {
+      final existing = await _resolveLocalPath();
+      if (existing != null) {
+        if (!mounted) return;
+        final choice = await showDialog<String>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('File already downloaded'),
+            content: const Text(
+              'This file is already saved on your computer. '
+              'You can open its folder or download another copy.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop('reveal'),
+                child: const Text('Show in folder'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop('again'),
+                child: const Text('Download again'),
+              ),
+            ],
+          ),
+        );
+        if (!mounted || choice == null) return;
+        if (choice == 'reveal') {
+          await DesktopFileActions.revealInFileManager(existing);
+          return;
+        }
+        if (choice != 'again') return;
+        forceNewCopy = true;
+      }
+    }
+
     setState(() {
       _isDownloading = true;
       _downloadProgress = 0;
@@ -2959,7 +3100,10 @@ class _DocumentAttachmentTileState extends ConsumerState<_DocumentAttachmentTile
         await downloadDir.create(recursive: true);
       }
 
-      final savePath = '${downloadDir.path}/$fileName';
+      var savePath = '${downloadDir.path}/$fileName';
+      if (forceNewCopy) {
+        savePath = await DesktopFileActions.uniqueDownloadPath(savePath);
+      }
 
       await apiService.downloadFile(
         attachment.displayUrl,
@@ -2978,9 +3122,10 @@ class _DocumentAttachmentTileState extends ConsumerState<_DocumentAttachmentTile
           _downloadProgress = 0;
           _refreshToken++;
         });
+        final savedName = savePath.split(RegExp(r'[/\\]')).last;
         SnackbarHelper.showSuccess(
           context,
-          'Downloaded $fileName',
+          'Downloaded $savedName',
           duration: const Duration(seconds: 5),
           action: SnackBarAction(
             label: 'Show in folder',
@@ -3031,7 +3176,7 @@ class _DocumentAttachmentTileState extends ConsumerState<_DocumentAttachmentTile
             ],
           ),
         ),
-        if (fileExists && localPath != null)
+        if (fileExists && localPath != null) ...[
           const PopupMenuItem(
             value: 'reveal',
             child: Row(
@@ -3042,6 +3187,17 @@ class _DocumentAttachmentTileState extends ConsumerState<_DocumentAttachmentTile
               ],
             ),
           ),
+          const PopupMenuItem(
+            value: 'download_again',
+            child: Row(
+              children: [
+                Icon(Icons.download_rounded, size: 18),
+                SizedBox(width: 12),
+                Text('Download again'),
+              ],
+            ),
+          ),
+        ],
       ],
     );
 
@@ -3051,6 +3207,8 @@ class _DocumentAttachmentTileState extends ConsumerState<_DocumentAttachmentTile
         if (localPath != null) await _openFile(localPath);
       case 'download':
         await _downloadFile();
+      case 'download_again':
+        await _downloadFile(forceNewCopy: true);
       case 'reveal':
         if (localPath != null) {
           await DesktopFileActions.revealInFileManager(localPath);

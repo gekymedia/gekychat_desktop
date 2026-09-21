@@ -1,7 +1,7 @@
 name: gekychat_desktop
 description: GekyChat Desktop App - WhatsApp-style chat application for desktop
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.0+3
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -94,17 +94,17 @@ flutter:
     - assets/icons/white_with_text/
 
 flutter_launcher_icons:
-  image_path: "assets/icons/gold_no_text/1024x1024.png"
+  image_path: "assets/icons/app_icon_taskbar.png"
   windows:
     generate: true
-    image_path: "assets/icons/gold_no_text/1024x1024.png"
+    image_path: "assets/icons/app_icon_taskbar.png"
     icon_size: 256
   macos:
     generate: true
-    image_path: "assets/icons/gold_no_text/1024x1024.png"
+    image_path: "assets/icons/app_icon_taskbar.png"
   linux:
     generate: true
-    image_path: "assets/icons/gold_no_text/1024x1024.png"
+    image_path: "assets/icons/app_icon_taskbar.png"
 
 # MSIX is optional; public Windows distribution uses Inno Setup (see windows/installer/gekychat.iss).
 # Replace publisher with your Authenticode cert CN when you have a code-signing certificate.
@@ -113,8 +113,8 @@ msix_config:
   publisher_display_name: GekyChat
   identity_name: com.gekychat.desktop
   publisher: CN=GekyChat
-  msix_version: 1.0.0.1
-  logo_path: assets/icons/gold_no_text/1024x1024.png
+  msix_version: 1.0.0.2
+  logo_path: assets/icons/app_icon_taskbar.png
   trim_logo: false
   capabilities: internetClient, microphone, webcam, location
 

@@ -48,11 +48,28 @@ class ChatListLastMessagePreview extends StatelessWidget {
         : const Color(0xFF707579);
     final read = outgoingStatus == 'read';
     final tickColor = read ? AppTheme.primaryGreen : secondary;
-    final icon = outgoingStatus == 'sent' ? Icons.check : Icons.done_all;
+    final IconData icon;
+    switch (outgoingStatus) {
+      case 'sending':
+      case 'queued':
+        icon = Icons.schedule;
+        break;
+      case 'failed':
+        icon = Icons.error_outline;
+        break;
+      case 'sent':
+        icon = Icons.check;
+        break;
+      default:
+        // delivered / read
+        icon = Icons.done_all;
+        break;
+    }
+    final color = outgoingStatus == 'failed' ? Colors.redAccent : tickColor;
 
     return Row(
       children: [
-        Icon(icon, size: 13, color: tickColor),
+        Icon(icon, size: 13, color: color),
         const SizedBox(width: 3),
         Expanded(
           child: Text(

@@ -112,12 +112,12 @@ class ApiService {
             if (!hadBearer) {
               return handler.next(e);
             }
-            _pendingAuthToken = null;
-            final prefs = await SharedPreferences.getInstance();
-            await prefs.remove('auth_token');
-            await prefs.remove('user_id');
-            await prefs.remove('user_data');
-            debugPrint('🚨 401 Unauthorized - auth cleared');
+            // Soft re-auth: do not wipe prefs here. AuthNotifier confirms via /me
+            // before logout so transient/proxy 401s don't kick the user out.
+            if (e.requestOptions.extra['skipUnauthorizedHandler'] == true) {
+              return handler.next(e);
+            }
+            debugPrint('🚨 401 Unauthorized - soft session check');
             onUnauthorized?.call();
           }
           
@@ -163,8 +163,13 @@ class ApiService {
   Future<Response> get(
     String path, {
     Map<String, dynamic>? queryParameters,
+    Options? options,
   }) =>
-      _dio.get(_normalize(path), queryParameters: queryParameters);
+      _dio.get(
+        _normalize(path),
+        queryParameters: queryParameters,
+        options: options,
+      );
 
   Future<Response> post(String path, {dynamic data, Options? options}) =>
       _dio.post(_normalize(path), data: data, options: options);

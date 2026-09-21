@@ -25,7 +25,6 @@ class SideNav extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    final worldFeedEnabled = featureEnabled(ref, 'world_feed');
     final emailChatEnabled = featureEnabled(ref, 'email_chat');
     final advancedAiEnabled = featureEnabled(ref, 'advanced_ai');
     final liveBroadcastEnabled = featureEnabled(ref, 'live_broadcast');
@@ -57,13 +56,12 @@ class SideNav extends ConsumerWidget {
           route: '/channels',
           isActive: currentRoute.startsWith('/channels'),
         ),
-      if (worldFeedEnabled && hasUsername)
-        _NavItem(
-          icon: Icons.explore,
-          label: 'World',
-          route: '/world',
-          isActive: currentRoute == '/world',
-        ),
+      _NavItem(
+        icon: Icons.explore,
+        label: 'World',
+        route: '/world',
+        isActive: currentRoute == '/world',
+      ),
       if (emailChatEnabled && hasUsername)
         _NavItem(
           icon: Icons.mail_outline,

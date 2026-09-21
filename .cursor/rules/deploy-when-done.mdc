@@ -1,0 +1,17 @@
+---
+description: Deploy finished work immediately across backend, mobile, and desktop
+alwaysApply: true
+---
+
+# Deploy when a batch of work is done
+
+Whenever a coherent set of changes is finished (feature, bugfix, or release-ready batch):
+
+1. **Do not wait** for the user to ask again — deploy as part of wrapping up.
+2. **Ship all affected surfaces** that share the change:
+   - Backend (`gekychat`): `deploy.ps1` (commit/push + migrate).
+   - Mobile (`gekychat_mobile`): closed-beta Fastlane + push for Codemagic/iOS.
+   - Desktop (`gekychat_desktop`): bump + Windows release script.
+3. Treat **Android and iOS as one product** for shared Flutter fixes.
+4. Committing is expected when deploying.
+5. Report versions/platforms shipped; do not ask “should I deploy?” when the batch is clearly done.

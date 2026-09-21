@@ -1239,6 +1239,11 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
     final idx = _messages.indexWhere((m) => m.clientId == clientUuid);
     if (idx >= 0) {
       _messages[idx] = _messages[idx].copyWith(status: 'failed');
+      unawaited(bumpGroupInSidebar(
+        ref,
+        groupId: widget.groupId,
+        message: _messages[idx],
+      ));
     }
   }
 

@@ -7,7 +7,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
-import '../../core/feature_flags.dart';
 import '../../core/session.dart';
 import '../../core/providers.dart';
 import 'world_feed_repository.dart';
@@ -409,7 +408,6 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
   @override
   Widget build(BuildContext context) {
     final userProfileAsync = ref.watch(currentUserProvider);
-    final worldFeedEnabled = featureEnabled(ref, 'world_feed');
 
     ref.listen<int?>(worldFeedNavigateToPostProvider, (previous, next) {
       if (next == null) return;
@@ -435,14 +433,6 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
       backgroundColor: Colors.black,
       body: userProfileAsync.when(
         data: (userProfile) {
-          if (!userProfile.hasUsername) {
-            return _buildLockedState(context);
-          }
-
-          if (!worldFeedEnabled) {
-            return _buildFeatureDisabledState(context);
-          }
-
           if (_posts.isEmpty && _isLoading) {
             return Stack(
               children: [
@@ -1225,80 +1215,6 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
       }
     }
     return null;
-  }
-
-  Widget _buildLockedState(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.lock_outline, size: 64, color: Colors.white38),
-            const SizedBox(height: 16),
-            const Text(
-              'Set a username to enable this feature.',
-              style: TextStyle(
-                color: Colors.white70,
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Set a username to share and discover public content.',
-              style: TextStyle(color: Colors.white54, fontSize: 14),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pushNamed('/profile'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF008069),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-              ),
-              child: const Text(
-                'Set Username',
-                style:
-                    TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFeatureDisabledState(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.info_outline, size: 64, color: Colors.white38),
-            const SizedBox(height: 16),
-            const Text(
-              'World is unavailable right now',
-              style: TextStyle(
-                color: Colors.white70,
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'This feature is limited based on server capacity.',
-              style: TextStyle(color: Colors.white54, fontSize: 14),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   Widget _buildEmptyState(BuildContext context) {

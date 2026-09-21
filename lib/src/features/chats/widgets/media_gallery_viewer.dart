@@ -138,10 +138,72 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
             context.showErrorToast('Failed to share: $e');    }
   }
 
-  Future<void> _downloadCurrentMedia() async {
+  Future<String?> _existingDownloadPath() async {
+    final attachment = _currentItem.attachment;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final stored =
+          await DownloadPathService(prefs).getDownloadPath(attachment.url);
+      if (stored != null && await File(stored).exists()) return stored;
+      if (stored != null) {
+        await DownloadPathService(prefs).removeDownloadPath(attachment.url);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<String?> _promptAlreadyDownloaded() {
+    final kind = _isVideo(_currentItem.attachment) ? 'Video' : 'Image';
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('$kind already downloaded'),
+        content: const Text(
+          'This file is already saved on your computer. '
+          'You can open its folder or download another copy.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop('reveal'),
+            child: const Text('Show in folder'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop('again'),
+            child: const Text('Download again'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _downloadCurrentMedia({bool forceNewCopy = false}) async {
     if (_isDownloading) return;
 
     final attachment = _currentItem.attachment;
+
+    if (!forceNewCopy) {
+      final existing = await _existingDownloadPath();
+      if (existing != null) {
+        if (!mounted) return;
+        final choice = await _promptAlreadyDownloaded();
+        if (!mounted || choice == null) return;
+        if (choice == 'reveal') {
+          final ok = await DesktopFileActions.revealInFileManager(existing);
+          if (!mounted) return;
+          if (!ok) {
+            context.showErrorToast('Could not open folder');
+          }
+          return;
+        }
+        if (choice != 'again') return;
+        forceNewCopy = true;
+      }
+    }
+
     setState(() => _isDownloading = true);
 
     try {
@@ -154,7 +216,10 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
       final fileName = attachment.originalName?.trim().isNotEmpty == true
           ? attachment.originalName!
           : 'gekychat_${attachment.id}${_extensionFor(attachment)}';
-      final savePath = '${downloadDir.path}/$fileName';
+      var savePath = '${downloadDir.path}/$fileName';
+      if (forceNewCopy) {
+        savePath = await DesktopFileActions.uniqueDownloadPath(savePath);
+      }
 
       final dio = Dio();
       await dio.download(attachment.displayUrl, savePath);
@@ -166,9 +231,10 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
       } catch (_) {}
 
       if (!mounted) return;
+      final savedName = savePath.split(RegExp(r'[/\\]')).last;
       SnackbarHelper.showSuccess(
         context,
-        'Downloaded $fileName',
+        'Downloaded $savedName',
         duration: const Duration(seconds: 5),
         action: SnackBarAction(
           label: 'Show in folder',
@@ -207,6 +273,11 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
     final attachment = _currentItem.attachment;
     if (_isVideo(attachment) || widget.isViewOnce) return;
 
+    final albumMedia = _currentItem.message.attachments
+        .where((a) => a.isImage || a.isVideo)
+        .toList();
+    final hasAlbum = albumMedia.length > 1;
+
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
     final overlaySize = overlay?.size ?? MediaQuery.sizeOf(context);
 
@@ -218,8 +289,8 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
         overlaySize.width - globalPosition.dx,
         overlaySize.height - globalPosition.dy,
       ),
-      items: const [
-        PopupMenuItem(
+      items: [
+        const PopupMenuItem(
           value: 'copy',
           child: Row(
             children: [
@@ -229,7 +300,7 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
             ],
           ),
         ),
-        PopupMenuItem(
+        const PopupMenuItem(
           value: 'download',
           child: Row(
             children: [
@@ -239,14 +310,100 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
             ],
           ),
         ),
+        if (hasAlbum)
+          const PopupMenuItem(
+            value: 'download_all',
+            child: Row(
+              children: [
+                Icon(Icons.download_for_offline_outlined, size: 18),
+                SizedBox(width: 12),
+                Text('Download all'),
+              ],
+            ),
+          ),
+        const PopupMenuItem(
+          value: 'reveal',
+          child: Row(
+            children: [
+              Icon(Icons.folder_open_rounded, size: 18),
+              SizedBox(width: 12),
+              Text('Show in folder'),
+            ],
+          ),
+        ),
       ],
-    ).then((value) {
+    ).then((value) async {
       if (value == 'copy') {
         unawaited(_copyCurrentImageToClipboard());
       } else if (value == 'download') {
         unawaited(_downloadCurrentMedia());
+      } else if (value == 'download_all') {
+        unawaited(_downloadAlbumMedia(albumMedia));
+      } else if (value == 'reveal') {
+        final existing = await _existingDownloadPath();
+        if (existing != null) {
+          unawaited(DesktopFileActions.revealInFileManager(existing));
+        } else if (mounted) {
+          context.showInfoToast('Download this file first');
+        }
       }
     });
+  }
+
+  Future<void> _downloadAlbumMedia(List<MessageAttachment> attachments) async {
+    if (_isDownloading || attachments.isEmpty) return;
+    setState(() => _isDownloading = true);
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final downloadDir = Directory('${directory.path}/Downloads/GekyChat');
+      if (!await downloadDir.exists()) {
+        await downloadDir.create(recursive: true);
+      }
+      final prefs = await SharedPreferences.getInstance();
+      final downloadPathService = DownloadPathService(prefs);
+      final dio = Dio();
+      var saved = 0;
+      String? lastPath;
+
+      for (final attachment in attachments) {
+        final existing =
+            await downloadPathService.getDownloadPath(attachment.url);
+        if (existing != null && await File(existing).exists()) {
+          saved++;
+          lastPath = existing;
+          continue;
+        }
+        final fileName = attachment.originalName?.trim().isNotEmpty == true
+            ? attachment.originalName!
+            : 'gekychat_${attachment.id}${_extensionFor(attachment)}';
+        var savePath = '${downloadDir.path}/$fileName';
+        savePath = await DesktopFileActions.uniqueDownloadPath(savePath);
+        await dio.download(attachment.displayUrl, savePath);
+        await downloadPathService.saveDownloadPath(attachment.url, savePath);
+        saved++;
+        lastPath = savePath;
+      }
+
+      if (!mounted) return;
+      SnackbarHelper.showSuccess(
+        context,
+        'Downloaded $saved of ${attachments.length}',
+        duration: const Duration(seconds: 5),
+        action: lastPath != null
+            ? SnackBarAction(
+                label: 'Show in folder',
+                onPressed: () {
+                  unawaited(DesktopFileActions.revealInFileManager(lastPath!));
+                },
+              )
+            : null,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      context.showErrorToast('Failed to download: $e');
+    } finally {
+      if (mounted) setState(() => _isDownloading = false);
+    }
   }
 
   String _extensionFor(MessageAttachment attachment) {

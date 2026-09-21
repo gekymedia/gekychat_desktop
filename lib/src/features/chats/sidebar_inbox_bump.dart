@@ -6,6 +6,30 @@ import '../../core/providers.dart';
 import 'chat_providers.dart';
 import 'models.dart';
 
+/// Maps in-chat [Message.status] to sidebar tick state.
+/// Pending/uploading messages must not show a single check.
+String? sidebarOutgoingStatusFromMessage(Message message, {required bool fromMe}) {
+  if (!fromMe) return null;
+  switch (message.status) {
+    case 'queued':
+    case 'sending':
+      return 'sending';
+    case 'failed':
+      return 'failed';
+    case 'delivered':
+      return 'delivered';
+    case 'read':
+      return 'read';
+    case 'sent':
+      return 'sent';
+    default:
+      // Unknown / null: if timestamps say otherwise prefer those, else treat as sent.
+      if (message.readAt != null) return 'read';
+      if (message.deliveredAt != null) return 'delivered';
+      return 'sent';
+  }
+}
+
 /// Optimistic sidebar preview applied before the conversations API catches up.
 class SidebarInboxPatch {
   const SidebarInboxPatch({
@@ -273,7 +297,7 @@ Future<void> bumpConversationInSidebar(
     preview: preview,
     updatedAt: message.createdAt,
     fromMe: isFromMe,
-    outgoingStatus: isFromMe ? 'sent' : null,
+    outgoingStatus: sidebarOutgoingStatusFromMessage(message, fromMe: isFromMe),
     refreshInboxList: refreshInboxList,
   );
 
@@ -349,7 +373,7 @@ Future<void> bumpGroupInSidebar(
     preview: preview,
     updatedAt: message.createdAt,
     fromMe: isFromMe,
-    outgoingStatus: isFromMe ? 'sent' : null,
+    outgoingStatus: sidebarOutgoingStatusFromMessage(message, fromMe: isFromMe),
     refreshInboxList: refreshInboxList,
   );
 
