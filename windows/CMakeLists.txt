@@ -1,5 +1,7 @@
 # Project-level configuration.
 cmake_minimum_required(VERSION 3.14)
+# pdfx downloads pdfium with an old cmake_minimum_required; allow configure on CMake 4+.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 project(gekychat_desktop LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
