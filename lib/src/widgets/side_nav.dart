@@ -7,12 +7,12 @@ import '../core/feature_flags.dart';
 import '../core/session.dart';
 import '../core/providers.dart';
 import '../features/chats/sidebar_inbox_bump.dart';
+import '../features/status/status_list_screen.dart';
 import '../services/product_analytics_service.dart';
 import '../features/multi_account/account_switcher_screen.dart';
 import 'colored_avatar.dart';
 import 'desktop_shell_colors.dart';
 import 'gekychat_ai_icon.dart';
-
 class SideNav extends ConsumerWidget {
   final String currentRoute;
   final Color backgroundColor;
@@ -26,7 +26,6 @@ class SideNav extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final chatsUnread = ref.watch(sidebarUnreadTotalProvider);
 
     final emailChatEnabled = featureEnabled(ref, 'email_chat');
     final advancedAiEnabled = featureEnabled(ref, 'advanced_ai');
@@ -42,11 +41,9 @@ class SideNav extends ConsumerWidget {
     final primaryItems = <_NavItem>[
       _NavItem(
         icon: Icons.chat_bubble_outline,
-        label: chatsUnread > 0 ? 'Chats — $chatsUnread unread' : 'Chats',
+        label: 'Chats',
         route: '/chats',
         isActive: currentRoute == '/chats',
-        badgeCount: chatsUnread,
-        highlightWhenUnread: true,
       ),
       _NavItem(
         imageAsset: 'assets/icons/status_icon.png',
@@ -131,6 +128,7 @@ class SideNav extends ConsumerWidget {
                     (item) => _NavItemWidget(
                       item: item,
                       isDark: isDark,
+                      railBackground: backgroundColor,
                     ),
                   )
                   .toList(),
@@ -149,6 +147,7 @@ class SideNav extends ConsumerWidget {
             child: _NavItemWidget(
               item: bottomWithActive.first,
               isDark: isDark,
+              railBackground: backgroundColor,
             ),
           ),
         ],
@@ -229,11 +228,6 @@ class _NavItem {
   final String label;
   final String route;
   final bool isActive;
-  /// Unread / notification count shown as a green pill on the rail icon.
-  final int badgeCount;
-  /// When true and [badgeCount] > 0 while inactive, tint the icon green
-  /// (same accent as the active rail tile / iOS unread chrome).
-  final bool highlightWhenUnread;
 
   const _NavItem({
     this.icon,
@@ -242,8 +236,6 @@ class _NavItem {
     required this.label,
     required this.route,
     required this.isActive,
-    this.badgeCount = 0,
-    this.highlightWhenUnread = false,
   }) : assert(
           icon != null || imageAsset != null || iconBuilder != null,
           'Provide icon, imageAsset, or iconBuilder',
@@ -253,10 +245,12 @@ class _NavItem {
 class _NavItemWidget extends ConsumerStatefulWidget {
   final _NavItem item;
   final bool isDark;
+  final Color railBackground;
 
   const _NavItemWidget({
     required this.item,
     required this.isDark,
+    required this.railBackground,
   });
 
   @override
@@ -286,15 +280,18 @@ class _NavItemWidgetState extends ConsumerState<_NavItemWidget> {
     final idleIconColor = isDark ? Colors.white70 : const Color(0xFF667781);
     final activeIconColor = Colors.white;
     final isActive = widget.item.isActive;
-    final hasUnread = widget.item.badgeCount > 0;
-    final unreadHighlight =
-        !isActive && hasUnread && widget.item.highlightWhenUnread;
-    final iconColor = isActive
-        ? activeIconColor
-        : (unreadHighlight ? _accent : idleIconColor);
+    final railBg = widget.railBackground;
+
+    final unreadTotal = widget.item.route == '/chats'
+        ? ref.watch(sidebarUnreadTotalProvider)
+        : 0;
+    final showUnreadBadge =
+        widget.item.route == '/chats' && unreadTotal > 0 && !isActive;
+    final showStatusDot = widget.item.route == '/status' &&
+        !isActive &&
+        ref.watch(statusNavHasUnviewedProvider);
 
     final activeBg = _accent;
-    final unreadIdleBg = _accent.withValues(alpha: isDark ? 0.18 : 0.12);
     final hoverBg = isDark
         ? Colors.white.withValues(alpha: 0.08)
         : Colors.black.withValues(alpha: 0.05);
@@ -308,11 +305,11 @@ class _NavItemWidgetState extends ConsumerState<_NavItemWidget> {
         width: 24,
         height: 24,
         fit: BoxFit.contain,
-        color: iconColor,
+        color: isActive ? activeIconColor : idleIconColor,
         errorBuilder: (context, error, stackTrace) {
           return Icon(
             Icons.circle_notifications,
-            color: iconColor,
+            color: isActive ? activeIconColor : idleIconColor,
             size: 24,
           );
         },
@@ -320,28 +317,37 @@ class _NavItemWidgetState extends ConsumerState<_NavItemWidget> {
     } else {
       iconChild = Icon(
         widget.item.icon!,
-        color: iconColor,
+        color: isActive ? activeIconColor : idleIconColor,
         size: 24,
       );
     }
 
-    if (hasUnread) {
-      final label = widget.item.badgeCount > 99
-          ? '99+'
-          : '${widget.item.badgeCount}';
-      iconChild = Badge(
-        backgroundColor: isActive ? Colors.white : _accent,
-        textColor: isActive ? _accent : Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-        label: Text(
-          label,
-          style: const TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
-            height: 1.1,
-          ),
-        ),
-        child: iconChild,
+    if (showUnreadBadge || showStatusDot) {
+      iconChild = Stack(
+        clipBehavior: Clip.none,
+        children: [
+          iconChild,
+          if (showUnreadBadge)
+            Positioned(
+              right: -8,
+              top: -6,
+              child: _UnreadBadge(count: unreadTotal),
+            ),
+          if (showStatusDot)
+            Positioned(
+              right: -2,
+              top: -3,
+              child: Container(
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(
+                  color: _accent,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: railBg, width: 1.5),
+                ),
+              ),
+            ),
+        ],
       );
     }
 
@@ -369,13 +375,40 @@ class _NavItemWidgetState extends ConsumerState<_NavItemWidget> {
             decoration: BoxDecoration(
               color: isActive
                   ? activeBg
-                  : unreadHighlight
-                      ? (_hovered ? hoverBg : unreadIdleBg)
-                      : (_hovered ? hoverBg : Colors.transparent),
+                  : (_hovered ? hoverBg : Colors.transparent),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Center(child: iconChild),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UnreadBadge extends StatelessWidget {
+  const _UnreadBadge({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = count > 99 ? '99+' : '$count';
+    return Container(
+      constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFF25D366),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 9,
+          fontWeight: FontWeight.w700,
+          height: 1.1,
         ),
       ),
     );

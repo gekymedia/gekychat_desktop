@@ -21,6 +21,7 @@ import 'src/core/theme/theme_service.dart';
 import 'src/features/calls/incoming_call_handler.dart';
 import 'src/features/calls/providers.dart';
 import 'src/services/inbox_realtime_sync.dart';
+import 'src/services/status_realtime_sync.dart';
 import 'src/services/background_sync_worker.dart';
 import 'src/widgets/keyboard_shortcuts_dialog.dart';
 import 'src/widgets/livekit_call_overlay.dart';
@@ -217,6 +218,7 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
             unawaited(
               ref.read(inboxRealtimeSyncProvider).initialize(force: true),
             );
+            unawaited(ref.read(statusRealtimeSyncProvider).initialize());
             unawaited(BackgroundSyncWorker.triggerSync());
           }
         } catch (e) {
@@ -276,6 +278,7 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
       unawaited(
         ref.read(inboxRealtimeSyncProvider).initialize(force: true),
       );
+      unawaited(ref.read(statusRealtimeSyncProvider).initialize());
       unawaited(BackgroundSyncWorker.triggerSync());
       unawaited(_retryPendingCallServerActions());
     } catch (_) {}

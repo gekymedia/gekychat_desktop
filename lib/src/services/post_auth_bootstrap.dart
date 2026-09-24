@@ -11,6 +11,7 @@ import '../features/notifications/notification_manager.dart';
 import 'background_sync_worker.dart';
 import 'bot_contact_registry.dart';
 import 'inbox_realtime_sync.dart';
+import 'status_realtime_sync.dart';
 
 /// Runs after login so Pusher and incoming-call listeners wire up even when
 /// the app cold-started on the login screen.
@@ -35,6 +36,12 @@ Future<void> bootstrapAfterAuth(Ref ref) async {
     await ref.read(inboxRealtimeSyncProvider).initialize();
   } catch (e) {
     debugPrint('⚠️ Post-auth InboxRealtimeSync init failed: $e');
+  }
+
+  try {
+    await ref.read(statusRealtimeSyncProvider).initialize();
+  } catch (e) {
+    debugPrint('⚠️ Post-auth StatusRealtimeSync init failed: $e');
   }
 
   try {

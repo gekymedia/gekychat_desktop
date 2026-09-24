@@ -20,6 +20,14 @@ final myStatusProvider = FutureProvider<MyStatus>((ref) async {
   return await repo.getMyStatus();
 });
 
+/// True when any contact status has unviewed updates (rail green dot).
+final statusNavHasUnviewedProvider = Provider<bool>((ref) {
+  return ref.watch(statusListProvider).maybeWhen(
+        data: (list) => list.any((s) => s.hasUnviewed),
+        orElse: () => false,
+      );
+});
+
 class StatusListScreen extends ConsumerWidget {
   const StatusListScreen({super.key});
 
