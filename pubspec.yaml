@@ -1,7 +1,7 @@
 name: gekychat_desktop
 description: GekyChat Desktop App - WhatsApp-style chat application for desktop
 publish_to: 'none'
-version: 1.0.0+6
+version: 1.0.0+7
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -95,6 +95,7 @@ flutter:
     - assets/icons/white_with_text/
 
 flutter_launcher_icons:
+  # Rounded black-bg master (same gold mark as iOS, curved corners for desktop chrome).
   image_path: "assets/icons/app_icon_taskbar.png"
   windows:
     generate: true
