@@ -112,7 +112,6 @@ class DesktopGlassMenuRow extends StatelessWidget {
     required this.onTap,
     this.isDestructive = false,
     this.accentColor,
-    this.compact = false,
   }) : assert(icon != null || leading != null);
 
   final IconData? icon;
@@ -122,8 +121,6 @@ class DesktopGlassMenuRow extends StatelessWidget {
   final VoidCallback onTap;
   final bool isDestructive;
   final Color? accentColor;
-  /// Shrink row to label width (Telegram-style compact action menu).
-  final bool compact;
 
   /// Fixed slot so every row's glyph shares one vertical axis.
   static const double iconSlot = 22;
@@ -143,10 +140,9 @@ class DesktopGlassMenuRow extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          // Extra left inset so the aligned icon column feels centered in the menu.
-          padding: EdgeInsets.fromLTRB(compact ? 16 : 14, 7, 14, 7),
+          // Match chats “more” menu: 14 inset, fixed icon column, 12 gap.
+          padding: const EdgeInsets.fromLTRB(14, 7, 14, 7),
           child: Row(
-            mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
             children: [
               SizedBox(
                 width: iconSlot,
@@ -161,8 +157,8 @@ class DesktopGlassMenuRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              if (compact)
-                Text(
+              Expanded(
+                child: Text(
                   label,
                   style: TextStyle(
                     fontFamily: DesktopTypography.fontFamily,
@@ -170,19 +166,8 @@ class DesktopGlassMenuRow extends StatelessWidget {
                     fontWeight: FontWeight.w500,
                     color: fg,
                   ),
-                )
-              else
-                Expanded(
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      fontFamily: DesktopTypography.fontFamily,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: fg,
-                    ),
-                  ),
                 ),
+              ),
             ],
           ),
         ),

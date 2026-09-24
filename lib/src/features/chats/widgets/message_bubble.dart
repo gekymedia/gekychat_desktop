@@ -1112,7 +1112,6 @@ class MessageBubble extends ConsumerWidget {
     bool isMeValue,
   ) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final fg = isDark ? Colors.white : const Color(0xFF111B21);
     final isCall = Message.isCallMessage(message);
     final downloadable = message.attachments
         .where((a) => a.isImage || a.isVideo || a.isDocument)
@@ -1161,7 +1160,9 @@ class MessageBubble extends ConsumerWidget {
         ),
       if (!isCall && onForward != null)
         DesktopGlassMenuItem(
-          leading: DesktopMenuIcons.forward(fg),
+          leading: DesktopMenuIcons.forward(
+            isDark ? Colors.white70 : const Color(0xFF54656F),
+          ),
           label: 'Forward',
           onTap: () => onForward?.call(),
         ),

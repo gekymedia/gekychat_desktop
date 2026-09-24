@@ -35,9 +35,11 @@ class DesktopGlassMenuItem {
 
 /// Frosted-glass anchored popup menu (iOS-style) for desktop dropdowns.
 class DesktopGlassPopup {
-  static const double _menuWidth = 248;
+  static const double menuWidth = 248;
+  static const double menuRadius = 18;
+  static const double _menuWidth = menuWidth;
   static const double _gap = 6;
-  static const double _menuRadius = 18;
+  static const double _menuRadius = menuRadius;
 
   static Future<void> show({
     required BuildContext context,

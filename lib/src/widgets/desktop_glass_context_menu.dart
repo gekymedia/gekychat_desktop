@@ -4,40 +4,26 @@ import 'package:flutter/material.dart';
 
 import 'desktop_glass_panel.dart';
 import 'desktop_glass_popup.dart';
-import 'desktop_typography.dart';
 
 /// Telegram-style context menu at a screen position (e.g. right-click on a message).
+///
+/// Uses the same [DesktopGlassMenuRow] layout as [DesktopGlassPopup] (fixed icon
+/// column + full-width labels) so icons align and spacing match the chats “more” menu.
 class DesktopGlassContextMenu {
   static const double _reactionBarWidth = 328;
   static const double _reactionBarHeight = 48;
-  static const double _rowHeight = 44;
-  static const double _padding = 6;
-  static const double _menuMinWidth = 148;
+  static const double _rowHeight = 38;
+  static const double _dividerHeight = 5;
+  static const double _padding = 4;
+  static const double _menuWidth = DesktopGlassPopup.menuWidth;
+  static const double _menuRadius = DesktopGlassPopup.menuRadius;
 
-  static double _computeMenuWidth(List<DesktopGlassMenuItem> items) {
-    // Match DesktopGlassMenuRow compact padding: 16 left + 14 right.
-    const horizontalPad = 30.0;
-    const iconWidth = DesktopGlassMenuRow.iconSlot;
-    const gap = 12.0;
-
-    final style = TextStyle(
-      fontFamily: DesktopTypography.fontFamily,
-      fontSize: 14,
-      fontWeight: FontWeight.w500,
-    );
-
-    var maxLabel = 0.0;
+  static double _menuHeight(List<DesktopGlassMenuItem> items) {
+    var height = _padding * 2;
     for (final item in items) {
-      final tp = TextPainter(
-        text: TextSpan(text: item.label, style: style),
-        maxLines: 1,
-        textDirection: TextDirection.ltr,
-      )..layout();
-      maxLabel = math.max(maxLabel, tp.width);
+      height += item.isDivider ? _dividerHeight : _rowHeight;
     }
-
-    return (horizontalPad + iconWidth + gap + maxLabel + 4)
-        .clamp(_menuMinWidth, _reactionBarWidth);
+    return height;
   }
 
   static Future<void> showAtPosition({
@@ -56,11 +42,10 @@ class DesktopGlassContextMenu {
         quickReactions.isNotEmpty &&
         onQuickReaction != null;
 
-    final menuItems = items.where((item) => !item.isDivider).toList();
-    final actionMenuWidth = _computeMenuWidth(menuItems);
-    final stackWidth =
-        hasReactions ? _reactionBarWidth : actionMenuWidth;
-    var menuHeight = _padding * 2 + menuItems.length * _rowHeight;
+    final stackWidth = hasReactions
+        ? math.max(_reactionBarWidth, _menuWidth)
+        : _menuWidth;
+    var menuHeight = _menuHeight(items);
     if (hasReactions) {
       menuHeight += _reactionBarHeight + 8;
     }
@@ -101,7 +86,7 @@ class DesktopGlassContextMenu {
                     onTap: () {},
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         if (hasReactions)
                           SizedBox(
@@ -123,32 +108,47 @@ class DesktopGlassContextMenu {
                           ),
                         if (hasReactions) const SizedBox(height: 8),
                         SizedBox(
-                          width: actionMenuWidth,
+                          width: _menuWidth,
                           child: DesktopGlassPanel(
                             isDark: isDark,
-                            borderRadius: 14,
+                            borderRadius: _menuRadius,
                             prominentShadow: true,
                             solid: true,
                             child: Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: _padding),
+                              padding: const EdgeInsets.symmetric(
+                                vertical: _padding,
+                              ),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  for (final item in menuItems)
-                                    DesktopGlassMenuRow(
-                                      icon: item.icon,
-                                      leading: item.leading,
-                                      label: item.label,
-                                      isDark: isDark,
-                                      isDestructive: item.isDestructive,
-                                      accentColor: item.accentColor,
-                                      compact: true,
-                                      onTap: () {
-                                        Navigator.pop(dialogContext);
-                                        item.onTap();
-                                      },
-                                    ),
+                                  for (final item in items)
+                                    if (item.isDivider)
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 2,
+                                        ),
+                                        child: Divider(
+                                          height: 1,
+                                          thickness: 1,
+                                          color: isDark
+                                              ? const Color(0xFF2A3942)
+                                              : const Color(0xFFE9EDEF),
+                                        ),
+                                      )
+                                    else
+                                      DesktopGlassMenuRow(
+                                        icon: item.icon,
+                                        leading: item.leading,
+                                        label: item.label,
+                                        isDark: isDark,
+                                        isDestructive: item.isDestructive,
+                                        accentColor: item.accentColor,
+                                        onTap: () {
+                                          Navigator.pop(dialogContext);
+                                          item.onTap();
+                                        },
+                                      ),
                                 ],
                               ),
                             ),
