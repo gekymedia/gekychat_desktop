@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import 'display_text.dart';
 
@@ -32,12 +33,21 @@ class TextFormatting {
     for (final segment in segments) {
       TextStyle style = defaultTextStyle;
 
-      // Apply formatting styles
+      // Apply formatting styles. Open Sans on Windows needs an explicit
+      // GoogleFonts face for weight/style — copyWith(fontWeight) alone often
+      // stays on the regular face and bold looks invisible.
       if (segment['bold'] == true) {
-        style = style.copyWith(fontWeight: FontWeight.bold);
+        style = _openSansFace(
+          style,
+          fontWeight: FontWeight.w700,
+        );
       }
       if (segment['italic'] == true) {
-        style = style.copyWith(fontStyle: FontStyle.italic);
+        style = _openSansFace(
+          style,
+          fontWeight: style.fontWeight ?? FontWeight.w400,
+          fontStyle: FontStyle.italic,
+        );
       }
       if (segment['strikethrough'] == true) {
         style = style.copyWith(decoration: TextDecoration.lineThrough);
@@ -55,6 +65,19 @@ class TextFormatting {
     return TextSpan(children: spans);
   }
 
+  /// Resolve an Open Sans face that actually carries [fontWeight]/[fontStyle].
+  static TextStyle _openSansFace(
+    TextStyle base, {
+    required FontWeight fontWeight,
+    FontStyle fontStyle = FontStyle.normal,
+  }) {
+    return GoogleFonts.openSans(
+      textStyle: base,
+      fontWeight: fontWeight,
+      fontStyle: fontStyle,
+    );
+  }
+
   /// Parse text into segments with formatting information
   static List<Map<String, dynamic>> _parseText(String text) {
     final segments = <Map<String, dynamic>>[];
@@ -69,9 +92,18 @@ class TextFormatting {
         final formatType = _getDoubleMarkerFormat(twoChars);
 
         if (formatType != null) {
-          // Double marker found
-          if (formatStack.contains(formatType)) {
-            // Closing marker
+          final isClosing = formatStack.contains(formatType);
+          // Treat marker as formatting only when there is a matching pair.
+          // This avoids leaking style to the rest of the message.
+          if (!isClosing) {
+            final hasMatchingClose = text.indexOf(twoChars, i + 2) != -1;
+            if (!hasMatchingClose) {
+              buffer.write(twoChars);
+              i += 2;
+              continue;
+            }
+          }
+          if (isClosing) {
             segments.add({
               'text': buffer.toString(),
               ...Map.fromEntries(formatStack.map((f) => MapEntry(f, true))),
@@ -79,7 +111,6 @@ class TextFormatting {
             buffer.clear();
             formatStack.remove(formatType);
           } else {
-            // Opening marker
             if (buffer.isNotEmpty) {
               segments.add({
                 'text': buffer.toString(),
@@ -98,20 +129,25 @@ class TextFormatting {
       final char = text[i];
       final formatType = _getSingleMarkerFormat(char);
 
-      if (formatType != null && _isValidMarkerPosition(text, i)) {
-        // Check if this is a closing or opening marker
-        if (formatStack.contains(formatType)) {
-          // Closing marker - ensure there's content before it
+      final isClosing = formatType != null && formatStack.contains(formatType);
+      if (formatType != null &&
+          _isValidMarkerPosition(text, i, marker: char, isClosing: isClosing)) {
+        if (isClosing) {
           if (buffer.isNotEmpty) {
             segments.add({
               'text': buffer.toString(),
               ...Map.fromEntries(formatStack.map((f) => MapEntry(f, true))),
             });
-            buffer.clear();
-            formatStack.remove(formatType);
           }
+          buffer.clear();
+          formatStack.remove(formatType);
         } else {
-          // Opening marker - save current buffer first
+          final hasMatchingClose = text.indexOf(char, i + 1) != -1;
+          if (!hasMatchingClose) {
+            buffer.write(char);
+            i++;
+            continue;
+          }
           if (buffer.isNotEmpty) {
             segments.add({
               'text': buffer.toString(),
@@ -141,26 +177,33 @@ class TextFormatting {
     return segments;
   }
 
-  /// Check if a marker is at a valid position (not part of a word)
-  static bool _isValidMarkerPosition(String text, int pos) {
-    if (pos == 0 || pos >= text.length - 1) {
-      return true;
+  /// Check if a marker is at a valid position (WhatsApp-like open/close rules).
+  static bool _isValidMarkerPosition(
+    String text,
+    int pos, {
+    required String marker,
+    required bool isClosing,
+  }) {
+    final prevChar = pos > 0 ? text[pos - 1] : null;
+    final nextChar = pos + 1 < text.length ? text[pos + 1] : null;
+    final isDoubleMarker = nextChar == marker;
+    if (isDoubleMarker) return false;
+
+    if (!isClosing) {
+      // Opening marker: start-of-text or boundary before, and content after.
+      final leftBoundary = prevChar == null || _isWhitespace(prevChar);
+      final hasContentAfter = nextChar != null && !_isWhitespace(nextChar);
+      return leftBoundary && hasContentAfter;
     }
 
-    final prevChar = text[pos - 1];
-    final nextChar = text[pos + 1];
+    // Closing marker: content before, and boundary/end after.
+    final hasContentBefore = prevChar != null && !_isWhitespace(prevChar);
+    final rightBoundary = nextChar == null || _isWhitespace(nextChar);
+    return hasContentBefore && rightBoundary;
+  }
 
-    // Marker is valid if:
-    // - Previous char is whitespace/punctuation or start of string
-    // - Next char is not the same marker (to avoid matching double markers)
-    final isWordBoundary = prevChar == ' ' || 
-                          prevChar == '\n' || 
-                          prevChar == '\t' ||
-                          pos == 0;
-    
-    final isNotDoubleMarker = nextChar != text[pos];
-
-    return isWordBoundary && isNotDoubleMarker;
+  static bool _isWhitespace(String ch) {
+    return ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r';
   }
 
   /// Get format type from double marker (e.g., **, __, ~~, ``)
@@ -196,7 +239,12 @@ class TextFormatting {
   }
 
   /// Wrap selected text with formatting markers
-  static String wrapTextWithFormatting(String text, int start, int end, String formatType) {
+  static String wrapTextWithFormatting(
+    String text,
+    int start,
+    int end,
+    String formatType,
+  ) {
     if (start < 0 || end > text.length || start >= end) {
       return text;
     }
