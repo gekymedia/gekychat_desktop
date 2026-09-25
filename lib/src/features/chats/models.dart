@@ -814,7 +814,10 @@ class Message {
           ? senderId
           : int.tryParse(senderId?.toString() ?? '') ?? 0,
       sender: senderInfo,
-      body: json['body'] ?? '',
+      body: normalizeBody(
+        (json['body'] ?? '').toString(),
+        hasAttachments: attachments.isNotEmpty,
+      ),
       createdAt: _parseMessageDate(json['created_at'], messageId),
       replyToId: replyToId,
       replyToPreview: replyToPreview,
@@ -872,6 +875,34 @@ class Message {
     if (m.callData != null) return true;
     final mt = (m.messageType ?? '').toLowerCase();
     return _callMessageTypes.contains(mt);
+  }
+
+  /// Inbox/sidebar injects these when the real body is empty but attachments exist.
+  /// They must not render as bubble captions (causes "📷 Photo" under images).
+  static bool isSyntheticMediaCaption(String body) {
+    final t = body.trim();
+    if (t.isEmpty) return false;
+    if (t == '📷 Photo' ||
+        t == '🎬 Video' ||
+        t == '🎤 Voice message' ||
+        t == '📎 Attachment' ||
+        t == '📄 Document') {
+      return true;
+    }
+    if (RegExp(r'^📷 \d+ photos?$').hasMatch(t)) return true;
+    if (RegExp(r'^🎬 \d+ videos?$').hasMatch(t)) return true;
+    if (RegExp(r'^📎 \d+ attachments?$').hasMatch(t)) return true;
+    final lower = t.toLowerCase();
+    return lower == 'photo' ||
+        lower == 'video' ||
+        lower == 'icon photo' ||
+        lower == 'voice message';
+  }
+
+  /// Clear synthetic attachment captions so bubbles show media only.
+  static String normalizeBody(String body, {required bool hasAttachments}) {
+    if (!hasAttachments) return body;
+    return isSyntheticMediaCaption(body) ? '' : body;
   }
 
   Message copyWith({

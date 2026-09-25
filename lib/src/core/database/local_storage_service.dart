@@ -274,6 +274,7 @@ class LocalStorageService {
           Map<String, dynamic>.from(ex!['reply_to'] as Map);
     }
 
+    final rawBody = (r.body as String?) ?? '';
     return Message(
       id: r.id as int? ?? 0,
       clientId: r.clientUuid as String?,
@@ -281,7 +282,10 @@ class LocalStorageService {
       groupId: r.groupId as int?,
       senderId: r.senderId as int,
       sender: sender,
-      body: r.body as String,
+      body: Message.normalizeBody(
+        rawBody,
+        hasAttachments: attachments.isNotEmpty,
+      ),
       status: r.status as String?,
       createdAt: r.createdAt as DateTime,
       replyToId: r.replyToId as int?,
@@ -392,6 +396,10 @@ class LocalStorageService {
     final clientUuid = msg.groupId != null
         ? (msg.clientId ?? 'g${msg.groupId}_m${msg.id}')
         : (msg.clientId ?? 'srv_${msg.id}');
+    final body = Message.normalizeBody(
+      msg.body,
+      hasAttachments: msg.attachments.isNotEmpty,
+    );
     await _db.into(_db.messages).insert(
       MessagesCompanion(
         id: Value(msg.id),
@@ -402,7 +410,7 @@ class LocalStorageService {
         senderName: Value(msg.sender?['name'] as String?),
         senderAvatarUrl: Value(
             (msg.sender?['avatar'] ?? msg.sender?['avatar_url']) as String?),
-        body: Value(msg.body),
+        body: Value(body),
         status: Value(msg.status ?? 'delivered'),
         createdAt: Value(msg.createdAt),
         serverCreatedAt: Value(msg.createdAt),

@@ -1013,6 +1013,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
             ..clear()
             ..addAll(cached);
           _sortMessagesInPlace();
+          _dedupeMessagesInPlace();
         });
         _scheduleScrollAfterLoad(targetId: widget.initialScrollToMessageId);
       }
@@ -1032,6 +1033,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
             ..clear()
             ..addAll(messages);
           _sortMessagesInPlace();
+          _dedupeMessagesInPlace();
           _hasMoreOlder = messages.length >= 100;
         }
         _isLoading = false;
@@ -1174,16 +1176,26 @@ class _ChatViewState extends ConsumerState<ChatView> {
     );
   }
 
-  /// Collapse accidental optimistic + MessageSent duplicates (same server id).
+  /// Collapse optimistic + server duplicates (same id or clientId).
   void _dedupeMessagesInPlace() {
     if (_messages.length < 2) return;
-    final seen = <int>{};
+    final serverClientIds = <String>{
+      for (final m in _messages)
+        if (m.id > 0 && (m.clientId?.isNotEmpty ?? false)) m.clientId!,
+    };
+    final seenIds = <int>{};
+    final seenPendingClients = <String>{};
     final kept = <Message>[];
-    // Walk newest-first so the merged server row wins over stale optimistic.
     for (final m in _messages.reversed) {
       if (m.id > 0) {
-        if (seen.contains(m.id)) continue;
-        seen.add(m.id);
+        if (!seenIds.add(m.id)) continue;
+        kept.add(m);
+        continue;
+      }
+      final cid = m.clientId;
+      if (cid != null && cid.isNotEmpty) {
+        if (serverClientIds.contains(cid)) continue;
+        if (!seenPendingClients.add(cid)) continue;
       }
       kept.add(m);
     }

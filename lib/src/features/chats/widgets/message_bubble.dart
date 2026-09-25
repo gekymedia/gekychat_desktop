@@ -1555,10 +1555,18 @@ class MessageBubble extends ConsumerWidget {
     if (message.callData != null) return true;
     // Check if message body is just a placeholder for special content
     final body = message.body.toLowerCase().trim();
-    return body == '👤 shared contact' || 
-           body == '📍 shared location' || 
-           body.contains('shared contact') ||
-           body.contains('shared location');
+    if (body == '👤 shared contact' ||
+        body == '📍 shared location' ||
+        body.contains('shared contact') ||
+        body.contains('shared location')) {
+      return true;
+    }
+    // Inbox injects "📷 Photo" etc. — never show as caption under media.
+    if (message.attachments.isNotEmpty &&
+        Message.isSyntheticMediaCaption(message.body)) {
+      return true;
+    }
+    return false;
   }
 
   Widget _buildPollCard(Message message, bool isDark, WidgetRef ref) {
@@ -2251,20 +2259,22 @@ class MessageBubble extends ConsumerWidget {
 
   Widget _buildSystemMessage(BuildContext context, bool isDark) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
+      // Keep system lines tight — close to normal messageBlockGap, not 3× taller.
+      padding: const EdgeInsets.symmetric(vertical: 2.0, horizontal: 16.0),
       child: Center(
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
           decoration: BoxDecoration(
             color: (isDark ? Colors.grey[800] : Colors.grey[200])?.withOpacity(0.7),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(10),
           ),
           child: SelectableText(
             sanitizeDisplayText(message.body),
             style: TextStyle(
               color: isDark ? Colors.white70 : Colors.grey[700],
-              fontSize: 13,
+              fontSize: 12.5,
               fontStyle: FontStyle.italic,
+              height: 1.25,
             ),
             textAlign: TextAlign.center,
           ),

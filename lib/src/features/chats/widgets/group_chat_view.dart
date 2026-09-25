@@ -837,6 +837,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
           _messages
             ..clear()
             ..addAll(cached);
+          _dedupeMessagesInPlace();
         });
         unawaited(_refreshContactNames());
         _scheduleScrollAfterLoad(targetId: widget.initialScrollToMessageId);
@@ -856,6 +857,7 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
           _messages
             ..clear()
             ..addAll(messages);
+          _dedupeMessagesInPlace();
           _hasMoreOlder = messages.length >= 100;
         }
         _isLoading = false;
@@ -949,12 +951,23 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
 
   void _dedupeMessagesInPlace() {
     if (_messages.length < 2) return;
-    final seen = <int>{};
+    final serverClientIds = <String>{
+      for (final m in _messages)
+        if (m.id > 0 && (m.clientId?.isNotEmpty ?? false)) m.clientId!,
+    };
+    final seenIds = <int>{};
+    final seenPendingClients = <String>{};
     final kept = <Message>[];
     for (final m in _messages.reversed) {
       if (m.id > 0) {
-        if (seen.contains(m.id)) continue;
-        seen.add(m.id);
+        if (!seenIds.add(m.id)) continue;
+        kept.add(m);
+        continue;
+      }
+      final cid = m.clientId;
+      if (cid != null && cid.isNotEmpty) {
+        if (serverClientIds.contains(cid)) continue;
+        if (!seenPendingClients.add(cid)) continue;
       }
       kept.add(m);
     }
