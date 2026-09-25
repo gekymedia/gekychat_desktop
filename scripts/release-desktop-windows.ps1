@@ -109,7 +109,7 @@ $sshHost = if ($env:GEKYCHAT_SSH_HOST) { $env:GEKYCHAT_SSH_HOST } else { "root@1
 $remoteDownloads = "/var/www/chat.gekychat.com/public/downloads"
 $appUser = "gekychat"
 Write-Host ""
-Write-Host "Uploading installers to $sshHost:$remoteDownloads ..." -ForegroundColor Cyan
+Write-Host "Uploading installers to ${sshHost}:${remoteDownloads} ..." -ForegroundColor Cyan
 ssh $sshHost "mkdir -p $remoteDownloads/archive && chown -R ${appUser}:${appUser} $remoteDownloads"
 if ($LASTEXITCODE -ne 0) { throw "ssh mkdir downloads failed" }
 scp $versionedPath "${sshHost}:${remoteDownloads}/"
