@@ -104,6 +104,21 @@ Write-Host ""
 Write-Host ('Set production: APP_VERSION_WINDOWS_LATEST={0}+{1}' -f $versionName, $buildNumber) -ForegroundColor Yellow
 Write-Host ('                APP_VERSION_WINDOWS_URL={0}' -f $publicUrl) -ForegroundColor Yellow
 
+# EXEs are gitignored — scp them to production so versioned URLs do not 404.
+$sshHost = if ($env:GEKYCHAT_SSH_HOST) { $env:GEKYCHAT_SSH_HOST } else { "root@159.195.249.203" }
+$remoteDownloads = "/var/www/chat.gekychat.com/public/downloads"
+$appUser = "gekychat"
+Write-Host ""
+Write-Host "Uploading installers to $sshHost:$remoteDownloads ..." -ForegroundColor Cyan
+ssh $sshHost "mkdir -p $remoteDownloads/archive && chown -R ${appUser}:${appUser} $remoteDownloads"
+if ($LASTEXITCODE -ne 0) { throw "ssh mkdir downloads failed" }
+scp $versionedPath "${sshHost}:${remoteDownloads}/"
+if ($LASTEXITCODE -ne 0) { throw "scp failed for $versionedSetupName" }
+scp $latestPath "${sshHost}:${remoteDownloads}/"
+if ($LASTEXITCODE -ne 0) { throw "scp failed for $latestSetupName" }
+ssh $sshHost "chown -R ${appUser}:${appUser} $remoteDownloads 2>/dev/null || true; chmod 644 $remoteDownloads/$versionedSetupName $remoteDownloads/$latestSetupName 2>/dev/null || true"
+Write-Host "Desktop downloads uploaded." -ForegroundColor Green
+
 # Sync version + download URL when deploy token is available (same as mobile).
 $syncScript = Join-Path $root "scripts\sync-server-app-version.ps1"
 if (-not (Test-Path $syncScript)) {
