@@ -8,6 +8,7 @@ import '../../theme/app_theme.dart';
 import '../chats/models.dart';
 import '../chats/chat_providers.dart';
 import '../media/media_gallery_screen.dart';
+import '../media/media_repository.dart';
 import '../../widgets/constrained_slide_route.dart';
 import 'contacts_repository.dart';
 import 'edit_gekychat_contact_dialog.dart';
@@ -336,6 +337,147 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
   int? get _resolvedConversationId =>
       widget.conversationId ?? _currentConversationId;
 
+  Widget _buildCompactActionButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    required bool isDark,
+  }) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryGreen.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  icon,
+                  color: AppTheme.primaryGreen,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMediaPreviewSection(bool isDark) {
+    final conversationId = _resolvedConversationId;
+    if (conversationId == null || conversationId <= 0) {
+      return const SizedBox.shrink();
+    }
+
+    final galleryAsync = ref.watch(conversationMediaGalleryProvider(conversationId));
+
+    return galleryAsync.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.all(16),
+        child: Center(
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      ),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (gallery) {
+        final allMedia = [
+          ...gallery.images,
+          ...gallery.videos,
+        ];
+
+        if (allMedia.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        // Extract first 3 media items for preview
+        final previewItems = allMedia.take(3).toList();
+
+        return Container(
+          height: 80,
+          padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12),
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: previewItems.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (context, index) {
+              final attachment = previewItems[index];
+              final isVideo = attachment.isVideo ||
+                  attachment.mimeType.toLowerCase().startsWith('video/');
+              final imageUrl = attachment.thumbnailUrl ?? 
+                               attachment.compressedUrl ?? 
+                               attachment.url;
+
+              return GestureDetector(
+                onTap: () => _openMediaGallery(context),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: Stack(
+                    children: [
+                      CachedNetworkImage(
+                        imageUrl: imageUrl,
+                        width: 70,
+                        height: 80,
+                        fit: BoxFit.cover,
+                        placeholder: (_, __) => Container(
+                          width: 70,
+                          height: 80,
+                          color: isDark
+                              ? Colors.grey[800]
+                              : Colors.grey[300],
+                        ),
+                        errorWidget: (_, __, ___) => Container(
+                          width: 70,
+                          height: 80,
+                          color: isDark
+                              ? Colors.grey[800]
+                              : Colors.grey[300],
+                          child: const Icon(
+                            Icons.broken_image,
+                            color: Colors.white54,
+                          ),
+                        ),
+                      ),
+                      if (isVideo)
+                        const Positioned.fill(
+                          child: Center(
+                            child: Icon(
+                              Icons.play_circle_outline,
+                              color: Colors.white,
+                              size: 32,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
   void _openMediaGallery(BuildContext context) {
     final conversationId = _resolvedConversationId;
     if (conversationId == null || conversationId <= 0) {
@@ -385,165 +527,244 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Contact Header
-            Container(
-              padding: const EdgeInsets.all(24),
-              color: isDark ? const Color(0xFF202C33) : Colors.white,
-              child: Column(
-                children: [
-                  CircleAvatar(
-                    radius: 50,
-                    backgroundColor: isSelfChat
-                        ? AppTheme.primaryGreen.withValues(alpha: 0.15)
-                        : null,
-                    backgroundImage: !isSelfChat && user.avatarUrl != null
-                        ? CachedNetworkImageProvider(user.avatarUrl!)
-                        : null,
-                    child: isSelfChat
-                        ? const Icon(
-                            Icons.bookmark,
-                            size: 44,
-                            color: AppTheme.primaryGreen,
-                          )
-                        : user.avatarUrl == null
-                        ? Text(
-                            user.name.isNotEmpty
-                                ? user.name[0].toUpperCase()
-                                : '?',
-                            style: const TextStyle(fontSize: 40),
-                          )
-                        : null,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    displayName,
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : Colors.black,
-                    ),
-                  ),
-                  if (!isSelfChat && user.phone != null) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      user.phone!,
-                      style: TextStyle(
-                        color: isDark ? Colors.white70 : Colors.grey[700],
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isNarrow = constraints.maxWidth < 400;
+                final avatarRadius = isNarrow ? 42.0 : 50.0;
+                final nameFontSize = isNarrow ? 20.0 : 24.0;
+                final phoneFontSize = isNarrow ? 13.0 : 14.0;
+                final verticalPadding = isNarrow ? 16.0 : 24.0;
+
+                return Container(
+                  padding: EdgeInsets.all(verticalPadding),
+                  color: isDark ? const Color(0xFF202C33) : Colors.white,
+                  child: Column(
+                    children: [
+                      CircleAvatar(
+                        radius: avatarRadius,
+                        backgroundColor: isSelfChat
+                            ? AppTheme.primaryGreen.withValues(alpha: 0.15)
+                            : null,
+                        backgroundImage: !isSelfChat && user.avatarUrl != null
+                            ? CachedNetworkImageProvider(user.avatarUrl!)
+                            : null,
+                        child: isSelfChat
+                            ? Icon(
+                                Icons.bookmark,
+                                size: avatarRadius * 0.88,
+                                color: AppTheme.primaryGreen,
+                              )
+                            : user.avatarUrl == null
+                            ? Text(
+                                user.name.isNotEmpty
+                                    ? user.name[0].toUpperCase()
+                                    : '?',
+                                style: TextStyle(fontSize: avatarRadius * 0.8),
+                              )
+                            : null,
                       ),
-                    ),
-                  ],
-                  if (!isSelfChat && user.isOnline == true)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: const BoxDecoration(
-                              color: AppTheme.primaryGreen,
-                              shape: BoxShape.circle,
-                            ),
+                      SizedBox(height: isNarrow ? 12 : 16),
+                      Text(
+                        displayName,
+                        style: TextStyle(
+                          fontSize: nameFontSize,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white : Colors.black,
+                        ),
+                      ),
+                      if (!isSelfChat && user.phone != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          user.phone!,
+                          style: TextStyle(
+                            fontSize: phoneFontSize,
+                            color: isDark ? Colors.white70 : Colors.grey[700],
                           ),
-                          const SizedBox(width: 6),
-                          const Text(
-                            'Online',
-                            style: TextStyle(
-                              color: AppTheme.primaryGreen,
-                              fontSize: 14,
-                            ),
+                        ),
+                      ],
+                      if (!isSelfChat && user.isOnline == true)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: const BoxDecoration(
+                                  color: AppTheme.primaryGreen,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Online',
+                                style: TextStyle(
+                                  color: AppTheme.primaryGreen,
+                                  fontSize: phoneFontSize,
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                    )
-                  else if (!isSelfChat && user.lastSeenAt != null) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      'Last seen ${_formatLastSeen(user.lastSeenAt!)}',
-                      style: TextStyle(
-                        color: isDark ? Colors.white54 : Colors.grey[600],
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
+                        )
+                      else if (!isSelfChat && user.lastSeenAt != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'Last seen ${_formatLastSeen(user.lastSeenAt!)}',
+                          style: TextStyle(
+                            color: isDark ? Colors.white54 : Colors.grey[600],
+                            fontSize: phoneFontSize - 1,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 8),
 
             // Actions
             if (!isSelfChat)
-            Card(
-              color: isDark ? const Color(0xFF202C33) : Colors.white,
-              child: Column(
-                children: [
-                  if (!_isChecking && !_isContact && user.phone != null)
-                    ListTile(
-                      leading: _isSaving 
-                          ? const SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.person_add),
-                      title: Text(_isSaving ? 'Saving...' : 'Save to Contacts'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: _isSaving ? null : _saveContact,
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isNarrow = constraints.maxWidth < 400;
+
+                if (isNarrow) {
+                  // Compact horizontal action buttons for narrow screens
+                  return Card(
+                    color: isDark ? const Color(0xFF202C33) : Colors.white,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          _buildCompactActionButton(
+                            icon: Icons.message,
+                            label: 'Message',
+                            onTap: () async {
+                              try {
+                                final chatRepo = ref.read(chatRepositoryProvider);
+                                final conversationId = await chatRepo.startConversation(user.id);
+                                if (mounted) {
+                                  Navigator.pop(context);
+                                  context.go('/chats');
+                                  ref.read(selectedConversationProvider.notifier).selectConversation(conversationId);
+                                }
+                              } catch (e) {
+                                if (mounted) {
+                                  context.showErrorToast('Failed to start conversation: $e');
+                                }
+                              }
+                            },
+                            isDark: isDark,
+                          ),
+                          _buildCompactActionButton(
+                            icon: Icons.call,
+                            label: 'Audio',
+                            onTap: () {
+                              // Start voice call
+                            },
+                            isDark: isDark,
+                          ),
+                          _buildCompactActionButton(
+                            icon: Icons.videocam,
+                            label: 'Video',
+                            onTap: () {
+                              // Start video call
+                            },
+                            isDark: isDark,
+                          ),
+                        ],
+                      ),
                     ),
-                  ListTile(
-                    leading: const Icon(Icons.message),
-                    title: const Text('Message'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () async {
-                      try {
-                        final chatRepo = ref.read(chatRepositoryProvider);
-                        // Start or get existing conversation
-                        final conversationId = await chatRepo.startConversation(user.id);
-                        
-                        if (mounted) {
-                          Navigator.pop(context); // Close contact info
-                          // Navigate to chats
-                          context.go('/chats');
-                          // Select the conversation programmatically
-                          ref.read(selectedConversationProvider.notifier).selectConversation(conversationId);
-                        }
-                      } catch (e) {
-                        if (mounted) {
-                                                    context.showErrorToast('Failed to start conversation: $e');                        }
-                      }
-                    },
+                  );
+                }
+
+                // Regular list tiles for wider screens
+                return Card(
+                  color: isDark ? const Color(0xFF202C33) : Colors.white,
+                  child: Column(
+                    children: [
+                      if (!_isChecking && !_isContact && user.phone != null)
+                        ListTile(
+                          leading: _isSaving 
+                              ? const SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.person_add),
+                          title: Text(_isSaving ? 'Saving...' : 'Save to Contacts'),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: _isSaving ? null : _saveContact,
+                        ),
+                      ListTile(
+                        leading: const Icon(Icons.message),
+                        title: const Text('Message'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () async {
+                          try {
+                            final chatRepo = ref.read(chatRepositoryProvider);
+                            final conversationId = await chatRepo.startConversation(user.id);
+                            
+                            if (mounted) {
+                              Navigator.pop(context);
+                              context.go('/chats');
+                              ref.read(selectedConversationProvider.notifier).selectConversation(conversationId);
+                            }
+                          } catch (e) {
+                            if (mounted) {
+                              context.showErrorToast('Failed to start conversation: $e');
+                            }
+                          }
+                        },
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.call),
+                        title: const Text('Voice Call'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () {
+                          // Start voice call
+                        },
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.videocam),
+                        title: const Text('Video Call'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () {
+                          // Start video call
+                        },
+                      ),
+                    ],
                   ),
-                  ListTile(
-                    leading: const Icon(Icons.call),
-                    title: const Text('Voice Call'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () {
-                      // Start voice call
-                    },
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.videocam),
-                    title: const Text('Video Call'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () {
-                      // Start video call
-                    },
-                  ),
-                ],
-              ),
+                );
+              },
             ),
             if (!isSelfChat) const SizedBox(height: 8),
 
             // Media, Links, and Docs (DM + Saved Messages)
             if (_resolvedConversationId != null && _resolvedConversationId! > 0)
-              Card(
-                color: isDark ? const Color(0xFF202C33) : Colors.white,
-                child: ListTile(
-                  leading: const Icon(Icons.photo_library),
-                  title: const Text('Media, Links, and Docs'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _openMediaGallery(context),
-                ),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final isNarrow = constraints.maxWidth < 400;
+
+                  return Card(
+                    color: isDark ? const Color(0xFF202C33) : Colors.white,
+                    child: Column(
+                      children: [
+                        ListTile(
+                          leading: const Icon(Icons.photo_library),
+                          title: const Text('Media, Links, and Docs'),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => _openMediaGallery(context),
+                        ),
+                        if (isNarrow)
+                          _buildMediaPreviewSection(isDark),
+                      ],
+                    ),
+                  );
+                },
               ),
             if (_resolvedConversationId != null && _resolvedConversationId! > 0)
               const SizedBox(height: 8),

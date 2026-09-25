@@ -56,6 +56,9 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
   final Map<int, VideoPlayerController?> _videoControllers = {};
   bool _showControls = true;
   bool _isDownloading = false;
+  double _currentZoom = 1.0;
+  bool _showThumbnails = true;
+  late TransformationController _transformationController;
 
   GalleryMediaItem get _currentItem => widget.items[_currentIndex];
 
@@ -64,11 +67,13 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
     super.initState();
     _currentIndex = widget.initialIndex.clamp(0, widget.items.length - 1);
     _pageController = PageController(initialPage: _currentIndex);
+    _transformationController = TransformationController();
   }
 
   @override
   void dispose() {
     _pageController.dispose();
+    _transformationController.dispose();
     // Controllers are owned by [_VideoPlayerWidget]; only clear the map.
     _videoControllers.clear();
     super.dispose();
@@ -442,12 +447,197 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
     callback(message);
   }
 
+  void _zoomIn() {
+    setState(() {
+      _currentZoom = (_currentZoom + 0.5).clamp(1.0, 4.0);
+      final newMatrix = Matrix4.identity()..scale(_currentZoom, _currentZoom);
+      _transformationController.value = newMatrix;
+    });
+  }
+
+  void _zoomOut() {
+    setState(() {
+      _currentZoom = (_currentZoom - 0.5).clamp(1.0, 4.0);
+      final newMatrix = Matrix4.identity()..scale(_currentZoom, _currentZoom);
+      _transformationController.value = newMatrix;
+    });
+  }
+
+  void _showMoreOptions() {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.download),
+                title: const Text('Save to gallery'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _downloadCurrentMedia();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.chat),
+                title: const Text('View in chat'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Navigator.pop(context);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.info_outline),
+                title: const Text('Media info'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showMediaInfo();
+                },
+              ),
+              if (widget.onDelete != null)
+                ListTile(
+                  leading: const Icon(Icons.delete, color: Colors.red),
+                  title: const Text(
+                    'Delete',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _runDelete();
+                  },
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showMediaInfo() {
+    final attachment = _currentItem.attachment;
+    final message = _currentItem.message;
+    final isSent = _currentItem.isSent;
+
+    final senderName = isSent ? 'You' : (message.sender?['name']?.toString() ?? 'Unknown');
+    final timestamp = _formatTimestamp(message.createdAt);
+    final fileSize = _formatFileSize(attachment.compressedSize ?? attachment.originalSize);
+    final mediaName = attachment.originalName ?? 'Unknown';
+    final mediaType = _isVideo(attachment) ? 'Video' : 'Image';
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Media info'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Name: $mediaName'),
+              const SizedBox(height: 8),
+              Text('Type: $mediaType'),
+              const SizedBox(height: 8),
+              Text('Size: $fileSize'),
+              const SizedBox(height: 8),
+              Text('Sent: $timestamp'),
+              const SizedBox(height: 8),
+              Text('From: $senderName'),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  String _formatFileSize(int? bytes) {
+    if (bytes == null || bytes == 0) return 'Unknown';
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+
+  String _formatTimestamp(DateTime? dateTime) {
+    if (dateTime == null) return 'Unknown';
+    final now = DateTime.now();
+    final diff = now.difference(dateTime);
+
+    if (diff.inDays == 0) {
+      return 'Today at ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+    } else if (diff.inDays == 1) {
+      return 'Yesterday at ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+    } else {
+      return '${dateTime.day}/${dateTime.month}/${dateTime.year} at ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+    }
+  }
+
+  Widget _buildThumbnail(int index) {
+    final item = widget.items[index];
+    final attachment = item.attachment;
+    final isVideo = _isVideo(attachment);
+    final isSelected = index == _currentIndex;
+
+    return GestureDetector(
+      onTap: () => _goToPage(index),
+      child: Container(
+        width: 60,
+        height: 60,
+        margin: const EdgeInsets.symmetric(horizontal: 4),
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: isSelected ? const Color(0xFF00A884) : Colors.transparent,
+            width: 2,
+          ),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              CachedNetworkImage(
+                imageUrl: attachment.thumbnailUrl ?? attachment.displayUrl,
+                fit: BoxFit.cover,
+                placeholder: (_, __) => Container(
+                  color: Colors.grey[300],
+                ),
+                errorWidget: (_, __, ___) => Container(
+                  color: Colors.grey[300],
+                  child: const Icon(
+                    Icons.broken_image,
+                    color: Colors.white54,
+                  ),
+                ),
+              ),
+              if (isVideo)
+                const Center(
+                  child: Icon(
+                    Icons.play_circle_outline,
+                    color: Colors.white,
+                    size: 24,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final totalCount = widget.items.length;
     const backdrop = Colors.white;
     const onBackdrop = Color(0xFF111B21);
-    const mutedOnBackdrop = Color(0xFF667781);
 
     return CallbackShortcuts(
       bindings: {
@@ -508,6 +698,18 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
                           tooltip: 'Forward',
                           onPressed: _runForward,
                         ),
+                      if (!_isVideo(_currentItem.attachment)) ...[
+                        IconButton(
+                          icon: const Icon(Icons.zoom_in, color: onBackdrop),
+                          tooltip: 'Zoom in',
+                          onPressed: _currentZoom < 4.0 ? _zoomIn : null,
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.zoom_out, color: onBackdrop),
+                          tooltip: 'Zoom out',
+                          onPressed: _currentZoom > 1.0 ? _zoomOut : null,
+                        ),
+                      ],
                       IconButton(
                         icon: _isDownloading
                             ? const SizedBox(
@@ -522,18 +724,17 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
                         tooltip: 'Download',
                         onPressed: _isDownloading ? null : _downloadCurrentMedia,
                       ),
-                      if (!_isVideo(_currentItem.attachment))
-                        IconButton(
-                          icon: const Icon(Icons.copy_rounded, color: onBackdrop),
-                          tooltip: 'Copy image',
-                          onPressed: _copyCurrentImageToClipboard,
-                        ),
                       IconButton(
                         icon: const Icon(Icons.share, color: onBackdrop),
                         tooltip: 'Share',
                         onPressed: _shareCurrentMedia,
                       ),
-                      if (widget.onDelete != null)
+                      IconButton(
+                        icon: const Icon(Icons.more_vert, color: onBackdrop),
+                        tooltip: 'More options',
+                        onPressed: _showMoreOptions,
+                      ),
+                      if (false) // Keep old delete menu structure for reference
                         PopupMenuButton<String>(
                           icon: const Icon(Icons.more_vert, color: onBackdrop),
                           color: Colors.white,
@@ -575,24 +776,31 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
                   return _buildImageViewer(item.attachment);
                 },
               ),
-              if (_showControls && totalCount > 1 && totalCount <= 10)
+              if (_showControls && _showThumbnails && totalCount > 1)
                 Positioned(
                   left: 0,
                   right: 0,
-                  bottom: 40,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: List.generate(
-                      totalCount,
-                      (index) => Container(
-                        width: 8,
-                        height: 8,
-                        margin: const EdgeInsets.symmetric(horizontal: 4),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: index == _currentIndex
-                              ? onBackdrop
-                              : mutedOnBackdrop.withValues(alpha: 0.45),
+                  bottom: 20,
+                  child: Container(
+                    height: 80,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.6),
+                          Colors.transparent,
+                        ],
+                      ),
+                    ),
+                    child: Center(
+                      child: SizedBox(
+                        height: 70,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          shrinkWrap: true,
+                          itemCount: totalCount,
+                          itemBuilder: (context, index) => _buildThumbnail(index),
                         ),
                       ),
                     ),
