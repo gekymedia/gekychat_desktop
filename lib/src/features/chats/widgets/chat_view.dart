@@ -1336,6 +1336,8 @@ class _ChatViewState extends ConsumerState<ChatView> {
         onForwardToMessage:
             Message.isCallMessage(message) ? null : _forwardMessage,
         onDeleteMessage: _deleteMessage,
+        onReactToMessage: _reactToMessage,
+        onPinToMessage: _pinMessage,
         onEdit: Message.isCallMessage(message)
             ? null
             : (newBody) => _editMessage(message, newBody),

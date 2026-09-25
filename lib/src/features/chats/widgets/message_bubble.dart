@@ -142,6 +142,8 @@ class MessageBubble extends ConsumerWidget {
   final void Function(Message message)? onReplyToMessage;
   final Future<void> Function(Message message)? onForwardToMessage;
   final Future<void> Function(Message message)? onDeleteMessage;
+  final void Function(Message message, String emoji)? onReactToMessage;
+  final void Function(Message message, bool pin)? onPinToMessage;
   /// Map of sender user ID → contact-book display name for group senders.
   final Map<int, String>? contactNames;
   final Message? previousMessage;
@@ -176,6 +178,8 @@ class MessageBubble extends ConsumerWidget {
     this.onReplyToMessage,
     this.onForwardToMessage,
     this.onDeleteMessage,
+    this.onReactToMessage,
+    this.onPinToMessage,
     this.contactNames,
     this.previousMessage,
     this.nextMessage,
@@ -891,20 +895,35 @@ class MessageBubble extends ConsumerWidget {
                       if (msg.id == message.id) onReply!();
                     }
                   : null),
-          onForward: messageShowsForwardQuickAffordance(message)
-              ? (onForwardToMessage ??
-                  (onForward != null
-                      ? (msg) async {
-                          if (msg.id == message.id) onForward!();
-                        }
-                      : null))
-              : null,
+          onForward: onForwardToMessage ??
+              (onForward != null
+                  ? (msg) async {
+                      if (msg.id == message.id) onForward!();
+                    }
+                  : null),
           onDelete: onDeleteMessage ??
               (onDelete != null
                   ? (msg) async {
                       if (msg.id == message.id) onDelete!();
                     }
                   : null),
+          onReact: onReactToMessage ??
+              (onReact != null
+                  ? (msg, emoji) {
+                      if (msg.id == message.id) onReact!(emoji);
+                    }
+                  : null),
+          onPin: onPinToMessage ??
+              (onPin != null
+                  ? (msg, pin) {
+                      if (msg.id == message.id) onPin!(pin);
+                    }
+                  : null),
+          onGoToMessage: onReplyPreviewTap != null
+              ? (msg) {
+                  if (msg.id > 0) onReplyPreviewTap!(msg.id);
+                }
+              : null,
         ),
       ),
     );
@@ -921,23 +940,21 @@ class MessageBubble extends ConsumerWidget {
       return;
     }
 
-    // Album / this message only — not the whole chat history.
-    final albumItems = <GalleryMediaItem>[];
-    if (!message.isDeleted) {
-      for (final a in message.attachments) {
-        if (a.isImage || a.isVideo) {
-          albumItems.add(
-            GalleryMediaItem(
-              attachment: a,
-              message: message,
-              isSent: isSent,
-            ),
-          );
-        }
-      }
-    }
+    // Prefer full chat media strip (WhatsApp-style carousel); fall back to album.
+    final chatItems = _getGalleryMediaItems();
+    final items = chatItems.isNotEmpty
+        ? chatItems
+        : <GalleryMediaItem>[
+            for (final a in message.attachments)
+              if (a.isImage || a.isVideo)
+                GalleryMediaItem(
+                  attachment: a,
+                  message: message,
+                  isSent: isSent,
+                ),
+          ];
 
-    if (albumItems.isEmpty) {
+    if (items.isEmpty) {
       _openMediaGallery(
         context,
         [
@@ -953,8 +970,8 @@ class MessageBubble extends ConsumerWidget {
     }
 
     final index =
-        albumItems.indexWhere((item) => item.attachment.id == attachment.id);
-    _openMediaGallery(context, albumItems, index >= 0 ? index : 0);
+        items.indexWhere((item) => item.attachment.id == attachment.id);
+    _openMediaGallery(context, items, index >= 0 ? index : 0);
   }
 
   Widget _buildImageAttachment(

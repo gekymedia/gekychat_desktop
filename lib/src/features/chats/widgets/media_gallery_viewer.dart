@@ -35,6 +35,9 @@ class MediaGalleryViewer extends StatefulWidget {
   final void Function(Message message)? onReply;
   final Future<void> Function(Message message)? onForward;
   final Future<void> Function(Message message)? onDelete;
+  final void Function(Message message, String emoji)? onReact;
+  final void Function(Message message, bool pin)? onPin;
+  final void Function(Message message)? onGoToMessage;
 
   const MediaGalleryViewer({
     super.key,
@@ -44,6 +47,9 @@ class MediaGalleryViewer extends StatefulWidget {
     this.onReply,
     this.onForward,
     this.onDelete,
+    this.onReact,
+    this.onPin,
+    this.onGoToMessage,
   });
 
   @override
@@ -52,27 +58,35 @@ class MediaGalleryViewer extends StatefulWidget {
 
 class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
   late PageController _pageController;
+  late ScrollController _thumbnailScrollController;
   late int _currentIndex;
   final Map<int, VideoPlayerController?> _videoControllers = {};
   bool _showControls = true;
   bool _isDownloading = false;
   double _currentZoom = 1.0;
-  bool _showThumbnails = true;
   late TransformationController _transformationController;
 
   GalleryMediaItem get _currentItem => widget.items[_currentIndex];
+
+  static const double _thumbSize = 56;
+  static const double _thumbGap = 6;
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex.clamp(0, widget.items.length - 1);
     _pageController = PageController(initialPage: _currentIndex);
+    _thumbnailScrollController = ScrollController();
     _transformationController = TransformationController();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollThumbnailIntoView(_currentIndex, animate: false);
+    });
   }
 
   @override
   void dispose() {
     _pageController.dispose();
+    _thumbnailScrollController.dispose();
     _transformationController.dispose();
     // Controllers are owned by [_VideoPlayerWidget]; only clear the map.
     _videoControllers.clear();
@@ -81,7 +95,32 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
 
   void _onPageChanged(int index) {
     _videoControllers[_currentIndex]?.pause();
-    setState(() => _currentIndex = index);
+    setState(() {
+      _currentIndex = index;
+      _currentZoom = 1.0;
+      _transformationController.value = Matrix4.identity();
+    });
+    _scrollThumbnailIntoView(index);
+  }
+
+  void _scrollThumbnailIntoView(int index, {bool animate = true}) {
+    if (!_thumbnailScrollController.hasClients) return;
+    final target = (index * (_thumbSize + _thumbGap)) -
+        (_thumbnailScrollController.position.viewportDimension / 2) +
+        (_thumbSize / 2);
+    final offset = target.clamp(
+      0.0,
+      _thumbnailScrollController.position.maxScrollExtent,
+    );
+    if (animate) {
+      _thumbnailScrollController.animateTo(
+        offset,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    } else {
+      _thumbnailScrollController.jumpTo(offset);
+    }
   }
 
   void _toggleControls() {
@@ -431,12 +470,12 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
     callback(message);
   }
 
-  void _runForward() {
+  Future<void> _runForward() async {
     final callback = widget.onForward;
     if (callback == null) return;
     final message = _currentItem.message;
     Navigator.pop(context);
-    callback(message);
+    await callback(message);
   }
 
   void _runDelete() {
@@ -447,71 +486,68 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
     callback(message);
   }
 
+  void _goToMessage() {
+    final message = _currentItem.message;
+    Navigator.pop(context);
+    widget.onGoToMessage?.call(message);
+  }
+
+  void _runPin() {
+    final callback = widget.onPin;
+    if (callback == null) return;
+    final message = _currentItem.message;
+    Navigator.pop(context);
+    callback(message, true);
+  }
+
   void _zoomIn() {
     setState(() {
       _currentZoom = (_currentZoom + 0.5).clamp(1.0, 4.0);
-      final newMatrix = Matrix4.identity()..scale(_currentZoom, _currentZoom);
-      _transformationController.value = newMatrix;
+      _transformationController.value =
+          Matrix4.identity()..scaleByDouble(_currentZoom, _currentZoom, 1.0, 1.0);
     });
   }
 
   void _zoomOut() {
     setState(() {
       _currentZoom = (_currentZoom - 0.5).clamp(1.0, 4.0);
-      final newMatrix = Matrix4.identity()..scale(_currentZoom, _currentZoom);
-      _transformationController.value = newMatrix;
+      _transformationController.value =
+          Matrix4.identity()..scaleByDouble(_currentZoom, _currentZoom, 1.0, 1.0);
     });
   }
 
-  void _showMoreOptions() {
-    showModalBottomSheet(
+  void _showReactionPicker() {
+    final callback = widget.onReact;
+    if (callback == null) return;
+    final message = _currentItem.message;
+    const emojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
+    showDialog<String>(
       context: context,
-      builder: (ctx) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.download),
-                title: const Text('Save to gallery'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _downloadCurrentMedia();
-                },
+      barrierColor: Colors.black54,
+      builder: (ctx) => AlertDialog(
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+        content: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          mainAxisSize: MainAxisSize.min,
+          children: emojis.map((emoji) {
+            return InkWell(
+              onTap: () => Navigator.pop(ctx, emoji),
+              borderRadius: BorderRadius.circular(28),
+              child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: Text(emoji, style: const TextStyle(fontSize: 28)),
               ),
-              ListTile(
-                leading: const Icon(Icons.chat),
-                title: const Text('View in chat'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  Navigator.pop(context);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.info_outline),
-                title: const Text('Media info'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showMediaInfo();
-                },
-              ),
-              if (widget.onDelete != null)
-                ListTile(
-                  leading: const Icon(Icons.delete, color: Colors.red),
-                  title: const Text(
-                    'Delete',
-                    style: TextStyle(color: Colors.red),
-                  ),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _runDelete();
-                  },
-                ),
-            ],
-          ),
-        );
-      },
-    );
+            );
+          }).toList(),
+        ),
+      ),
+    ).then((emoji) {
+      if (emoji == null || !mounted) return;
+      Navigator.pop(context);
+      callback(message, emoji);
+    });
   }
 
   void _showMediaInfo() {
@@ -519,9 +555,11 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
     final message = _currentItem.message;
     final isSent = _currentItem.isSent;
 
-    final senderName = isSent ? 'You' : (message.sender?['name']?.toString() ?? 'Unknown');
-    final timestamp = _formatTimestamp(message.createdAt);
-    final fileSize = _formatFileSize(attachment.compressedSize ?? attachment.originalSize);
+    final senderName =
+        isSent ? 'You' : (message.sender?['name']?.toString() ?? 'Unknown');
+    final timestamp = _formatHeaderTimestamp(message.createdAt);
+    final fileSize =
+        _formatFileSize(attachment.compressedSize ?? attachment.originalSize);
     final mediaName = attachment.originalName ?? 'Unknown';
     final mediaType = _isVideo(attachment) ? 'Video' : 'Image';
 
@@ -566,18 +604,84 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 
-  String _formatTimestamp(DateTime? dateTime) {
-    if (dateTime == null) return 'Unknown';
-    final now = DateTime.now();
-    final diff = now.difference(dateTime);
+  String _formatHeaderTimestamp(DateTime dateTime) {
+    final local = dateTime.toLocal();
+    final hour = local.hour;
+    final hour12 = hour % 12 == 0 ? 12 : hour % 12;
+    final ampm = hour >= 12 ? 'PM' : 'AM';
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '${local.month}/${local.day}/${local.year} at $hour12:$minute $ampm';
+  }
 
-    if (diff.inDays == 0) {
-      return 'Today at ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
-    } else if (diff.inDays == 1) {
-      return 'Yesterday at ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
-    } else {
-      return '${dateTime.day}/${dateTime.month}/${dateTime.year} at ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
-    }
+  String? _senderAvatarUrl(Message message) {
+    final sender = message.sender;
+    if (sender == null) return null;
+    final url = sender['avatar_url']?.toString() ??
+        sender['avatar_path']?.toString();
+    if (url == null || url.isEmpty) return null;
+    return url;
+  }
+
+  String _senderDisplayName() {
+    if (_currentItem.isSent) return 'You';
+    return _currentItem.message.sender?['name']?.toString() ?? 'Unknown';
+  }
+
+  Widget _buildSenderHeader(Color onBackdrop) {
+    final avatarUrl = _senderAvatarUrl(_currentItem.message);
+    final name = _senderDisplayName();
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+    final dateText = _formatHeaderTimestamp(_currentItem.message.createdAt);
+
+    return Row(
+      children: [
+        CircleAvatar(
+          radius: 18,
+          backgroundColor: const Color(0xFFDFE5E7),
+          backgroundImage:
+              avatarUrl != null ? CachedNetworkImageProvider(avatarUrl) : null,
+          child: avatarUrl == null
+              ? Text(
+                  initial,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF54656F),
+                  ),
+                )
+              : null,
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: onBackdrop,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                dateText,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: onBackdrop.withValues(alpha: 0.65),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildThumbnail(int index) {
@@ -588,16 +692,19 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
 
     return GestureDetector(
       onTap: () => _goToPage(index),
-      child: Container(
-        width: 60,
-        height: 60,
-        margin: const EdgeInsets.symmetric(horizontal: 4),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        width: _thumbSize,
+        height: _thumbSize,
+        margin: EdgeInsets.only(
+          right: index == widget.items.length - 1 ? 0 : _thumbGap,
+        ),
         decoration: BoxDecoration(
           border: Border.all(
             color: isSelected ? const Color(0xFF00A884) : Colors.transparent,
-            width: 2,
+            width: 2.5,
           ),
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(6),
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(4),
@@ -607,23 +714,28 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
               CachedNetworkImage(
                 imageUrl: attachment.thumbnailUrl ?? attachment.displayUrl,
                 fit: BoxFit.cover,
-                placeholder: (_, __) => Container(
-                  color: Colors.grey[300],
-                ),
+                placeholder: (_, __) => Container(color: Colors.grey[300]),
                 errorWidget: (_, __, ___) => Container(
                   color: Colors.grey[300],
-                  child: const Icon(
-                    Icons.broken_image,
-                    color: Colors.white54,
-                  ),
+                  child: const Icon(Icons.broken_image, color: Colors.white54),
                 ),
               ),
               if (isVideo)
-                const Center(
-                  child: Icon(
-                    Icons.play_circle_outline,
-                    color: Colors.white,
-                    size: 24,
+                Positioned(
+                  left: 4,
+                  bottom: 4,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    child: const Icon(
+                      Icons.play_arrow,
+                      color: Colors.white,
+                      size: 12,
+                    ),
                   ),
                 ),
             ],
@@ -633,11 +745,106 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
     );
   }
 
+  Widget _navChevron({
+    required IconData icon,
+    required VoidCallback onPressed,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: const Color(0xFF3B4A54).withValues(alpha: 0.85),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, color: Colors.white, size: 28),
+        ),
+      ),
+    );
+  }
+
+  List<PopupMenuEntry<String>> _moreMenuItems() {
+    return [
+      const PopupMenuItem(
+        value: 'download',
+        child: Row(
+          children: [
+            Icon(Icons.download_rounded, size: 18),
+            SizedBox(width: 12),
+            Text('Download'),
+          ],
+        ),
+      ),
+      if (!_isVideo(_currentItem.attachment))
+        const PopupMenuItem(
+          value: 'copy',
+          child: Row(
+            children: [
+              Icon(Icons.copy_rounded, size: 18),
+              SizedBox(width: 12),
+              Text('Copy image'),
+            ],
+          ),
+        ),
+      const PopupMenuItem(
+        value: 'share',
+        child: Row(
+          children: [
+            Icon(Icons.share_outlined, size: 18),
+            SizedBox(width: 12),
+            Text('Share'),
+          ],
+        ),
+      ),
+      const PopupMenuItem(
+        value: 'info',
+        child: Row(
+          children: [
+            Icon(Icons.info_outline, size: 18),
+            SizedBox(width: 12),
+            Text('Media info'),
+          ],
+        ),
+      ),
+      if (widget.onDelete != null)
+        const PopupMenuItem(
+          value: 'delete',
+          child: Row(
+            children: [
+              Icon(Icons.delete_outline, color: Colors.redAccent, size: 18),
+              SizedBox(width: 12),
+              Text('Delete', style: TextStyle(color: Colors.redAccent)),
+            ],
+          ),
+        ),
+    ];
+  }
+
+  Future<void> _onMoreSelected(String value) async {
+    switch (value) {
+      case 'download':
+        await _downloadCurrentMedia();
+      case 'copy':
+        await _copyCurrentImageToClipboard();
+      case 'share':
+        await _shareCurrentMedia();
+      case 'info':
+        _showMediaInfo();
+      case 'delete':
+        _runDelete();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final totalCount = widget.items.length;
     const backdrop = Colors.white;
     const onBackdrop = Color(0xFF111B21);
+    final isImage = !_isVideo(_currentItem.attachment);
 
     return CallbackShortcuts(
       bindings: {
@@ -650,7 +857,7 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
           if (!widget.isViewOnce) _goNext();
         },
         const SingleActivator(LogicalKeyboardKey.keyC, control: true): () {
-          if (!widget.isViewOnce && !_isVideo(_currentItem.attachment)) {
+          if (!widget.isViewOnce && isImage) {
             unawaited(_copyCurrentImageToClipboard());
           }
         },
@@ -658,221 +865,188 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
       child: Focus(
         autofocus: true,
         child: ExcludeSemantics(
-          // Windows AXTree frequently errors on fullscreen media; keep UI usable.
           child: Scaffold(
-          backgroundColor: backdrop,
-          extendBodyBehindAppBar: false,
-          appBar: AppBar(
-                  backgroundColor: backdrop,
-                  foregroundColor: onBackdrop,
-                  surfaceTintColor: backdrop,
-                  elevation: 0,
-                  scrolledUnderElevation: 0,
-                  automaticallyImplyLeading: true,
-                  leading: IconButton(
-                    icon: const Icon(Icons.arrow_back),
-                    color: onBackdrop,
-                    tooltip: 'Back',
-                    onPressed: () => Navigator.of(context).maybePop(),
+            backgroundColor: backdrop,
+            extendBodyBehindAppBar: false,
+            appBar: AppBar(
+              backgroundColor: backdrop,
+              foregroundColor: onBackdrop,
+              surfaceTintColor: backdrop,
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              automaticallyImplyLeading: false,
+              centerTitle: false,
+              titleSpacing: 16,
+              title: _buildSenderHeader(onBackdrop),
+              actions: [
+                if (_showControls && !widget.isViewOnce) ...[
+                  if (isImage) ...[
+                    IconButton(
+                      icon: const Icon(Icons.zoom_out, color: onBackdrop),
+                      tooltip: 'Zoom out',
+                      onPressed: _currentZoom > 1.0 ? _zoomOut : null,
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.zoom_in, color: onBackdrop),
+                      tooltip: 'Zoom in',
+                      onPressed: _currentZoom < 4.0 ? _zoomIn : null,
+                    ),
+                  ],
+                  IconButton(
+                    icon: const Icon(
+                      Icons.chat_bubble_outline,
+                      color: onBackdrop,
+                    ),
+                    tooltip: 'Go to message',
+                    onPressed: _goToMessage,
                   ),
-                  iconTheme: const IconThemeData(color: onBackdrop),
-                  title: Text(
-                    '${_currentIndex + 1} / $totalCount',
-                    style: const TextStyle(color: onBackdrop, fontSize: 16),
-                  ),
-                  centerTitle: true,
-                  actions: [
-                    if (_showControls && !widget.isViewOnce) ...[
-                      if (widget.onReply != null)
-                        IconButton(
-                          icon: const Icon(Icons.reply, color: onBackdrop),
-                          tooltip: 'Reply',
-                          onPressed: _runReply,
-                        ),
-                      if (widget.onForward != null)
-                        IconButton(
-                          icon: Transform.flip(
-                            flipX: true,
-                            child: const Icon(Icons.reply, color: onBackdrop),
-                          ),
-                          tooltip: 'Forward',
-                          onPressed: _runForward,
-                        ),
-                      if (!_isVideo(_currentItem.attachment)) ...[
-                        IconButton(
-                          icon: const Icon(Icons.zoom_in, color: onBackdrop),
-                          tooltip: 'Zoom in',
-                          onPressed: _currentZoom < 4.0 ? _zoomIn : null,
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.zoom_out, color: onBackdrop),
-                          tooltip: 'Zoom out',
-                          onPressed: _currentZoom > 1.0 ? _zoomOut : null,
-                        ),
-                      ],
-                      IconButton(
-                        icon: _isDownloading
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: onBackdrop,
-                                ),
-                              )
-                            : const Icon(Icons.download, color: onBackdrop),
-                        tooltip: 'Download',
-                        onPressed: _isDownloading ? null : _downloadCurrentMedia,
+                  if (widget.onReply != null)
+                    IconButton(
+                      icon: const Icon(Icons.reply, color: onBackdrop),
+                      tooltip: 'Reply',
+                      onPressed: _runReply,
+                    ),
+                  if (widget.onPin != null)
+                    IconButton(
+                      icon: const Icon(
+                        Icons.push_pin_outlined,
+                        color: onBackdrop,
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.share, color: onBackdrop),
-                        tooltip: 'Share',
-                        onPressed: _shareCurrentMedia,
+                      tooltip: 'Pin',
+                      onPressed: _runPin,
+                    ),
+                  if (widget.onReact != null)
+                    IconButton(
+                      icon: const Icon(
+                        Icons.add_reaction_outlined,
+                        color: onBackdrop,
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.more_vert, color: onBackdrop),
-                        tooltip: 'More options',
-                        onPressed: _showMoreOptions,
+                      tooltip: 'React',
+                      onPressed: _showReactionPicker,
+                    ),
+                  if (widget.onForward != null)
+                    IconButton(
+                      icon: Transform.flip(
+                        flipX: true,
+                        child: const Icon(Icons.reply, color: onBackdrop),
                       ),
-                      if (false) // Keep old delete menu structure for reference
-                        PopupMenuButton<String>(
-                          icon: const Icon(Icons.more_vert, color: onBackdrop),
-                          color: Colors.white,
-                          onSelected: (value) {
-                            if (value == 'delete') _runDelete();
-                          },
-                          itemBuilder: (context) => [
-                            const PopupMenuItem(
-                              value: 'delete',
-                              child: Row(
-                                children: [
-                                  Icon(Icons.delete_outline, color: Colors.redAccent),
-                                  SizedBox(width: 12),
-                                  Text('Delete'),
-                                ],
-                              ),
+                      tooltip: 'Forward',
+                      onPressed: _runForward,
+                    ),
+                  IconButton(
+                    icon: _isDownloading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: onBackdrop,
                             ),
+                          )
+                        : const Icon(Icons.download, color: onBackdrop),
+                    tooltip: 'Download',
+                    onPressed:
+                        _isDownloading ? null : _downloadCurrentMedia,
+                  ),
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert, color: onBackdrop),
+                    tooltip: 'More options',
+                    color: Colors.white,
+                    offset: const Offset(0, 48),
+                    onSelected: (value) => unawaited(_onMoreSelected(value)),
+                    itemBuilder: (_) => _moreMenuItems(),
+                  ),
+                ],
+                IconButton(
+                  icon: const Icon(Icons.close, color: onBackdrop),
+                  tooltip: 'Close',
+                  onPressed: () => Navigator.of(context).maybePop(),
+                ),
+                const SizedBox(width: 4),
+              ],
+            ),
+            body: Stack(
+              children: [
+                PageView.builder(
+                  controller: _pageController,
+                  physics: widget.isViewOnce
+                      ? const NeverScrollableScrollPhysics()
+                      : const PageScrollPhysics(),
+                  onPageChanged: _onPageChanged,
+                  itemCount: widget.items.length,
+                  itemBuilder: (context, index) {
+                    final item = widget.items[index];
+                    if (_isVideo(item.attachment)) {
+                      return _buildPageBackdrop(
+                        child: _buildVideoPlayer(index, item.attachment),
+                      );
+                    }
+                    return _buildImageViewer(item.attachment);
+                  },
+                ),
+                if (_showControls && totalCount > 1 && !widget.isViewOnce) ...[
+                  if (_currentIndex > 0)
+                    Positioned(
+                      left: 16,
+                      top: 0,
+                      bottom: 100,
+                      child: Center(
+                        child: _navChevron(
+                          icon: Icons.chevron_left,
+                          onPressed: _goPrevious,
+                        ),
+                      ),
+                    ),
+                  if (_currentIndex < totalCount - 1)
+                    Positioned(
+                      right: 16,
+                      top: 0,
+                      bottom: 100,
+                      child: Center(
+                        child: _navChevron(
+                          icon: Icons.chevron_right,
+                          onPressed: _goNext,
+                        ),
+                      ),
+                    ),
+                ],
+                if (_showControls && totalCount > 1)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      height: 88,
+                      padding: const EdgeInsets.only(bottom: 16, top: 8),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
+                          colors: [
+                            Colors.black.withValues(alpha: 0.45),
+                            Colors.transparent,
                           ],
                         ),
-                    ],
-                  ],
-                ),
-          body: Stack(
-            children: [
-              PageView.builder(
-                controller: _pageController,
-                physics: widget.isViewOnce
-                    ? const NeverScrollableScrollPhysics()
-                    : const PageScrollPhysics(),
-                onPageChanged: _onPageChanged,
-                itemCount: widget.items.length,
-                itemBuilder: (context, index) {
-                  final item = widget.items[index];
-                  if (_isVideo(item.attachment)) {
-                    return _buildPageBackdrop(
-                      child: _buildVideoPlayer(index, item.attachment),
-                    );
-                  }
-                  return _buildImageViewer(item.attachment);
-                },
-              ),
-              if (_showControls && _showThumbnails && totalCount > 1)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 20,
-                  child: Container(
-                    height: 80,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.bottomCenter,
-                        end: Alignment.topCenter,
-                        colors: [
-                          Colors.black.withValues(alpha: 0.6),
-                          Colors.transparent,
-                        ],
                       ),
-                    ),
-                    child: Center(
-                      child: SizedBox(
-                        height: 70,
-                        child: ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          shrinkWrap: true,
-                          itemCount: totalCount,
-                          itemBuilder: (context, index) => _buildThumbnail(index),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              if (_showControls && totalCount > 1 && !widget.isViewOnce) ...[
-                if (_currentIndex > 0)
-                  Positioned(
-                    left: 8,
-                    top: 0,
-                    bottom: 0,
-                    child: Center(
-                      child: IconButton(
-                        icon: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: const Color(0xFFE9EDEF)),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.08),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: const Icon(
-                            Icons.chevron_left,
-                            color: onBackdrop,
-                            size: 32,
+                      child: Center(
+                        child: SizedBox(
+                          height: _thumbSize + 6,
+                          child: ListView.builder(
+                            controller: _thumbnailScrollController,
+                            scrollDirection: Axis.horizontal,
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 24),
+                            itemCount: totalCount,
+                            itemBuilder: (context, index) =>
+                                _buildThumbnail(index),
                           ),
                         ),
-                        onPressed: _goPrevious,
-                      ),
-                    ),
-                  ),
-                if (_currentIndex < totalCount - 1)
-                  Positioned(
-                    right: 8,
-                    top: 0,
-                    bottom: 0,
-                    child: Center(
-                      child: IconButton(
-                        icon: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: const Color(0xFFE9EDEF)),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.08),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: const Icon(
-                            Icons.chevron_right,
-                            color: onBackdrop,
-                            size: 32,
-                          ),
-                        ),
-                        onPressed: _goNext,
                       ),
                     ),
                   ),
               ],
-            ],
+            ),
           ),
-        ),
         ),
       ),
     );
@@ -905,9 +1079,16 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
         LayoutBuilder(
           builder: (context, constraints) {
             return InteractiveViewer(
+              transformationController: _transformationController,
               minScale: 0.5,
               maxScale: 4.0,
               boundaryMargin: const EdgeInsets.all(48),
+              onInteractionEnd: (_) {
+                final scale = _transformationController.value.getMaxScaleOnAxis();
+                if ((scale - _currentZoom).abs() > 0.01) {
+                  setState(() => _currentZoom = scale.clamp(1.0, 4.0));
+                }
+              },
               child: SizedBox(
                 width: constraints.maxWidth,
                 height: constraints.maxHeight,

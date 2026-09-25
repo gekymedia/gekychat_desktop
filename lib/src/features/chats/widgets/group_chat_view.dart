@@ -3205,6 +3205,8 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                                     ? null
                                     : _forwardMessage,
                                 onDeleteMessage: _deleteMessage,
+                                onReactToMessage: _reactToMessage,
+                                onPinToMessage: _pinMessage,
                                 onEdit: Message.isCallMessage(message)
                                     ? null
                                     : (newBody) => _editMessage(message, newBody),
