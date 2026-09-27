@@ -566,7 +566,24 @@ class ChatRepository {
           ? raw['data']
           : raw;
       return map['id'] as int;
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      String? apiMessage;
+      if (data is Map) {
+        apiMessage = data['message']?.toString();
+        final error = data['error'];
+        if ((apiMessage == null || apiMessage.isEmpty) && error is Map) {
+          apiMessage = error['message']?.toString();
+        }
+      }
+      if (apiMessage != null && apiMessage.isNotEmpty) {
+        throw Exception(apiMessage);
+      }
+      throw Exception('Failed to start conversation');
     } catch (e) {
+      if (e is Exception && e.toString().startsWith('Exception: ')) {
+        rethrow;
+      }
       throw Exception('Failed to start conversation: $e');
     }
   }
