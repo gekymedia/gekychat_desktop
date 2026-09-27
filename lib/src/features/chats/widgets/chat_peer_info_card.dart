@@ -52,7 +52,9 @@ class ChatPeerInfoCard extends StatelessWidget {
     final groupsLabel = commonGroupsCount <= 0
         ? 'No common groups'
         : (commonGroupsCount == 1
-            ? '1 group in common'
+            ? (commonGroupNames.isNotEmpty
+                ? '1 group in common: ${commonGroupNames.first}'
+                : '1 group in common')
             : '$commonGroupsCount groups in common');
 
     return Padding(
@@ -126,17 +128,6 @@ class ChatPeerInfoCard extends StatelessWidget {
                     ),
                     textAlign: TextAlign.center,
                   ),
-                if (!loading &&
-                    commonGroupNames.isNotEmpty &&
-                    commonGroupsCount > 0) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    commonGroupNames.take(3).join(', ') +
-                        (commonGroupNames.length > 3 ? '…' : ''),
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: muted, fontSize: 12.5),
-                  ),
-                ],
                 const SizedBox(height: 14),
                 InkWell(
                   onTap: onSafetyTools,
