@@ -1158,13 +1158,11 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
                       _greenAction(
                         label: 'Share contact',
                         onTap: _shareContact,
-                        isDark: isDark,
                       ),
                       _divider(isDark),
                       _greenAction(
                         label: 'Add to list',
                         onTap: _addToList,
-                        isDark: isDark,
                       ),
                       if (_resolvedConversationId != null &&
                           _resolvedConversationId! > 0) ...[
@@ -1172,7 +1170,6 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
                         _greenAction(
                           label: 'Export chat',
                           onTap: _exportChat,
-                          isDark: isDark,
                         ),
                         _divider(isDark),
                         _redAction(
