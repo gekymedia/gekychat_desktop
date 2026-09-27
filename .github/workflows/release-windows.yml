@@ -60,8 +60,14 @@ jobs:
       - name: Install Inno Setup
         shell: pwsh
         run: |
-          $installer = Join-Path $env:TEMP "innosetup.exe"
-          Invoke-WebRequest -Uri "https://jrsoftware.org/download.php/is.exe" -OutFile $installer
+          $installer = Join-Path $env:TEMP "innosetup-6.7.3.exe"
+          $uri = "https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe"
+          Write-Host "Downloading Inno Setup from $uri"
+          Invoke-WebRequest -Uri $uri -OutFile $installer
+          $size = (Get-Item $installer).Length
+          if ($size -lt 1MB) {
+            throw "Inno Setup download looks too small ($size bytes)"
+          }
           Start-Process -FilePath $installer -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/DIR=C:\InnoSetup6" -Wait
           if (-not (Test-Path "C:\InnoSetup6\ISCC.exe")) {
             throw "ISCC.exe not found after Inno Setup install"
