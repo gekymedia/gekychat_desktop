@@ -209,7 +209,7 @@ class _SikaWalletSheetState extends ConsumerState<SikaWalletSheet> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Paid with Priority Bank on web. Apple Pay and Google Pay will be available through App Store / Play Billing on mobile builds.',
+                    'Paid with your Priority Bank wallet.',
                     style: TextStyle(
                       fontSize: 12,
                       height: 1.35,
