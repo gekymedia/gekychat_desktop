@@ -6,6 +6,7 @@ import '../../widgets/colored_avatar.dart';
 import '../auth/auth_provider.dart';
 import '../chats/chat_providers.dart';
 import '../../core/session.dart';
+import '../../services/hidden_chat_service.dart';
 import 'account_repository.dart';
 import '../../utils/snackbar_helper.dart';
 
@@ -320,6 +321,8 @@ class _AccountSwitcherScreenState extends ConsumerState<AccountSwitcherScreen> {
       ref.invalidate(currentUserProvider);
       ref.invalidate(accountsProvider);
       ref.invalidate(chatRepositoryProvider);
+      ref.invalidate(hiddenConversationIdsProvider);
+      ref.read(hiddenChatServiceProvider).notifyListeners();
       if (mounted) {
         context.go('/chats');
                 context.showSuccessToast('Account switched successfully');      }
