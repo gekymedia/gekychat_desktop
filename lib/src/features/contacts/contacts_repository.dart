@@ -128,8 +128,13 @@ class ContactsRepository {
   }
 
   /// Fresh profile with online/last-seen and whether they are in your contacts.
-  Future<({User user, bool isContact, GekyContact? gekyContact})>
-      getUserProfile(int userId) async {
+  Future<
+      ({
+        User user,
+        bool isContact,
+        GekyContact? gekyContact,
+        String? username,
+      })> getUserProfile(int userId) async {
     try {
       final r = await api.get('/contacts/user/$userId/profile');
       final data = r.data;
@@ -145,6 +150,7 @@ class ContactsRepository {
       final user = User.fromJson(userMap);
       final isContact =
           userMap['is_contact'] == true || map['is_contact'] == true;
+      final username = userMap['username']?.toString().trim();
 
       GekyContact? gekyContact;
       final contactData = userMap['contact_data'];
@@ -164,7 +170,12 @@ class ContactsRepository {
         }
       }
 
-      return (user: user, isContact: isContact, gekyContact: gekyContact);
+      return (
+        user: user,
+        isContact: isContact,
+        gekyContact: gekyContact,
+        username: (username != null && username.isNotEmpty) ? username : null,
+      );
     } catch (e) {
       throw ContactsException('Failed to load user profile: $e');
     }

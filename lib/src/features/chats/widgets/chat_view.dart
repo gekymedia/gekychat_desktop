@@ -48,6 +48,8 @@ import 'desktop_voice_recording.dart';
 import '../../media/media_gallery_screen.dart';
 import 'search_in_chat_screen.dart';
 import '../../contacts/contact_info_screen.dart';
+import 'chat_peer_info_card.dart';
+import '../../../utils/snackbar_helper.dart';
 import 'chat_side_panel_layout.dart';
 import '../../../widgets/constrained_slide_route.dart';
 import '../../quick_replies/quick_replies_repository.dart' show QuickReply, quickRepliesRepositoryProvider;
@@ -78,7 +80,6 @@ import 'desktop_chat_metrics.dart';
 import '../../embedded_apps/embedded_app_launcher.dart';
 import '../../sika/sika_send_coins_sheet.dart';
 import '../../../widgets/batch_selection_mode.dart';
-import '../../../utils/snackbar_helper.dart';
 
 class _SendMessageIntent extends Intent {
   const _SendMessageIntent();
@@ -146,6 +147,12 @@ class _ChatViewState extends ConsumerState<ChatView> {
   bool _loadingOlder = false;
   static const double _loadOlderThreshold = 200;
   bool _otherUserIsBot = false;
+  bool _peerIsContact = false;
+  bool _peerInfoLoading = false;
+  String? _peerUsername;
+  int _commonGroupsCount = 0;
+  List<String> _commonGroupNames = const [];
+  bool _peerInfoDismissed = false;
   int? _highlightedMessageId;
   
   // Quick replies
@@ -233,15 +240,34 @@ class _ChatViewState extends ConsumerState<ChatView> {
     final other = widget.otherUser ?? _peerUser;
     if (other == null || other.id <= 0) return;
     if (_otherUserIsBot) return;
+    if (mounted) {
+      setState(() => _peerInfoLoading = true);
+    }
     try {
       final profile =
           await ref.read(contactsRepositoryProvider).getUserProfile(other.id);
+      List<String> groupNames = const [];
+      var groupsCount = 0;
+      try {
+        final groupsRes =
+            await ref.read(apiServiceProvider).getCommonGroups(other.id);
+        final raw = groupsRes.data;
+        final list = raw is Map && raw['data'] is List
+            ? raw['data'] as List
+            : (raw is List ? raw : const []);
+        groupNames = list
+            .map((e) => e is Map ? (e['name']?.toString() ?? '') : '')
+            .where((n) => n.isNotEmpty)
+            .toList();
+        groupsCount = groupNames.length;
+      } catch (_) {}
+
       if (!mounted) return;
       final lastSeen =
           profile.user.lastSeenAt?.toLocal() ?? other.lastSeenAt?.toLocal();
-      // Match conversation API: treat recent last_seen as online when cache flag lags.
       final recentlyActive = lastSeen != null &&
           DateTime.now().difference(lastSeen) < const Duration(minutes: 5);
+
       setState(() {
         _peerUser = User(
           id: profile.user.id,
@@ -255,10 +281,16 @@ class _ChatViewState extends ConsumerState<ChatView> {
           isOnline: profile.user.isOnline == true || recentlyActive,
           lastSeenAt: lastSeen,
         );
+        _peerIsContact = profile.isContact || profile.gekyContact != null;
+        _peerUsername = profile.username;
+        _commonGroupsCount = groupsCount;
+        _commonGroupNames = groupNames;
+        _peerInfoLoading = false;
         _syncBotFlag();
       });
     } catch (e) {
       debugPrint('chat_view: refresh peer profile: $e');
+      if (mounted) setState(() => _peerInfoLoading = false);
     }
   }
 
@@ -2572,6 +2604,115 @@ class _ChatViewState extends ConsumerState<ChatView> {
     return '${local.day}/${local.month}/${local.year}';
   }
 
+  Future<void> _showPeerSafetyTools() async {
+    if (!mounted) return;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF1F2C34) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Safety tools',
+                  style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Only chat with people you trust. If someone asks for money, codes, or personal details, be careful.',
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'You can block this person to stop messages and calls from them.',
+                ),
+                const SizedBox(height: 16),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.block, color: Color(0xFFD32F2F)),
+                  title: const Text('Block this person'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _confirmBlockPeer();
+                  },
+                ),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.close),
+                  title: const Text('Hide this card'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    if (mounted) setState(() => _peerInfoDismissed = true);
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _confirmBlockPeer() async {
+    final peer = _effectiveOtherUser;
+    if (peer == null || peer.id <= 0 || !mounted) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Block this person?'),
+        content: Text(
+          'Blocked contacts can no longer message or call you. You can unblock them later in settings.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Block'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await ref.read(apiServiceProvider).blockUser(peer.id);
+      if (!mounted) return;
+      context.showInfoToast('Blocked ${peer.name}');
+      setState(() => _peerInfoDismissed = true);
+    } catch (e) {
+      if (mounted) context.showErrorToast('Could not block: $e');
+    }
+  }
+
+  Future<void> _addPeerToContacts() async {
+    final peer = _effectiveOtherUser;
+    if (peer == null || peer.id <= 0) return;
+    try {
+      await ref.read(contactsRepositoryProvider).saveContact(
+            displayName: peer.name,
+            phone: peer.phone ?? '',
+            contactUserId: peer.id,
+          );
+      if (!mounted) return;
+      setState(() => _peerIsContact = true);
+      context.showInfoToast('Added to contacts');
+    } catch (e) {
+      if (mounted) context.showErrorToast('Could not add contact: $e');
+    }
+  }
+
   Future<void> _startCall(String type) async {
     if (_otherUserIsBot) {
       if (mounted) {
@@ -3518,6 +3659,26 @@ class _ChatViewState extends ConsumerState<ChatView> {
           messages: _messages,
           conversationId: widget.conversationId,
         ),
+
+        if (!widget.isSavedMessages &&
+            !_otherUserIsBot &&
+            !_peerInfoDismissed &&
+            _effectiveOtherUser != null &&
+            (_effectiveOtherUser!.id > 0))
+          ChatPeerInfoCard(
+            user: _effectiveOtherUser!,
+            username: _peerUsername,
+            isContact: _peerIsContact,
+            commonGroupsCount: _commonGroupsCount,
+            commonGroupNames: _commonGroupNames,
+            loading: _peerInfoLoading,
+            onOpenProfile: () {
+              setState(() => _showInfoPanel = true);
+            },
+            onSafetyTools: _showPeerSafetyTools,
+            onBlock: _confirmBlockPeer,
+            onAddContact: _peerIsContact ? null : _addPeerToContacts,
+          ),
 
         // Messages List with drag and drop support
         Expanded(
