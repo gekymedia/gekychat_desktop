@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers.dart';
 import 'sika_providers.dart';
 import 'sika_repository.dart';
+import 'sika_terms.dart';
+import 'sika_terms_acceptance_card.dart';
 import '../../utils/snackbar_helper.dart';
 
 class SikaSendCoinsSheet extends ConsumerStatefulWidget {
@@ -36,6 +38,8 @@ class _SikaSendCoinsSheetState extends ConsumerState<SikaSendCoinsSheet> {
   bool _isSending = false;
   bool _isSearching = false;
   List<dynamic> _searchResults = [];
+  bool _termsAccepted = false;
+  bool _termsLoaded = false;
 
   final List<int> _quickAmounts = [10, 50, 100, 500, 1000];
 
@@ -46,6 +50,22 @@ class _SikaSendCoinsSheetState extends ConsumerState<SikaSendCoinsSheet> {
       _selectedUserId = widget.preselectedUserId;
       _selectedUserName = widget.preselectedUserName;
     }
+    _loadTermsAcceptance();
+  }
+
+  Future<void> _loadTermsAcceptance() async {
+    final accepted = await isSikaTermsAccepted();
+    if (!mounted) return;
+    setState(() {
+      _termsAccepted = accepted;
+      _termsLoaded = true;
+    });
+  }
+
+  Future<void> _setTermsAccepted(bool value) async {
+    await setSikaTermsAccepted(value);
+    if (!mounted) return;
+    setState(() => _termsAccepted = value);
   }
 
   @override
@@ -332,6 +352,13 @@ class _SikaSendCoinsSheetState extends ConsumerState<SikaSendCoinsSheet> {
                       fillColor: colorScheme.surfaceContainerHighest,
                     ),
                   ),
+                  if (_termsLoaded) ...[
+                    const SizedBox(height: 16),
+                    SikaTermsAcceptanceCard(
+                      accepted: _termsAccepted,
+                      onChanged: _setTermsAccepted,
+                    ),
+                  ],
                   const SizedBox(height: 20),
                 ],
               ),
@@ -392,6 +419,7 @@ class _SikaSendCoinsSheetState extends ConsumerState<SikaSendCoinsSheet> {
   }
 
   bool _canSend() {
+    if (!_termsAccepted) return false;
     if (_selectedUserId == null) return false;
     final coins = int.tryParse(_coinsController.text) ?? 0;
     return coins > 0;
@@ -432,6 +460,10 @@ class _SikaSendCoinsSheetState extends ConsumerState<SikaSendCoinsSheet> {
   }
 
   Future<void> _sendCoins() async {
+    if (!_termsAccepted) {
+      context.showInfoToast('Please accept the Sika Wallet terms first');
+      return;
+    }
     if (!_canSend()) return;
 
     final coins = int.parse(_coinsController.text);

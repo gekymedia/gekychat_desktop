@@ -1,15 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../utils/snackbar_helper.dart';
 import 'sika_providers.dart';
 import 'sika_repository.dart';
 import 'sika_send_coins_sheet.dart';
-
-const _sikaTermsAcceptedKey = 'sika_wallet_terms_accepted_v1';
-const _sikaTermsUrl = 'https://gekychat.com/terms-of-service';
+import 'sika_terms.dart';
+import 'sika_terms_acceptance_card.dart';
 
 /// Wallet hub opened from the chat attachment menu.
 class SikaWalletSheet extends ConsumerStatefulWidget {
@@ -39,24 +36,18 @@ class _SikaWalletSheetState extends ConsumerState<SikaWalletSheet> {
   }
 
   Future<void> _loadTermsAcceptance() async {
-    final prefs = await SharedPreferences.getInstance();
+    final accepted = await isSikaTermsAccepted();
     if (!mounted) return;
     setState(() {
-      _termsAccepted = prefs.getBool(_sikaTermsAcceptedKey) ?? false;
+      _termsAccepted = accepted;
       _termsLoaded = true;
     });
   }
 
   Future<void> _setTermsAccepted(bool value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_sikaTermsAcceptedKey, value);
+    await setSikaTermsAccepted(value);
     if (!mounted) return;
     setState(() => _termsAccepted = value);
-  }
-
-  Future<void> _openTerms() async {
-    final uri = Uri.parse(_sikaTermsUrl);
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   void _openSend({bool isGift = false}) {
@@ -183,10 +174,9 @@ class _SikaWalletSheetState extends ConsumerState<SikaWalletSheet> {
                   ),
                   const SizedBox(height: 16),
                   if (_termsLoaded)
-                    _TermsCard(
+                    SikaTermsAcceptanceCard(
                       accepted: _termsAccepted,
                       onChanged: _setTermsAccepted,
-                      onOpenTerms: _openTerms,
                     ),
                   const SizedBox(height: 16),
                   Row(
@@ -368,69 +358,3 @@ class _BalanceCard extends StatelessWidget {
   }
 }
 
-class _TermsCard extends StatelessWidget {
-  const _TermsCard({
-    required this.accepted,
-    required this.onChanged,
-    required this.onOpenTerms,
-  });
-
-  final bool accepted;
-  final ValueChanged<bool> onChanged;
-  final VoidCallback onOpenTerms;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: colorScheme.outline.withValues(alpha: 0.2),
-        ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Checkbox(
-            value: accepted,
-            onChanged: (value) => onChanged(value ?? false),
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(top: 12, bottom: 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'I agree to the Sika Wallet terms: coins are virtual, non-refundable except where required by law, and purchases are final.',
-                    style: TextStyle(
-                      fontSize: 13,
-                      height: 1.35,
-                      color: colorScheme.onSurface.withValues(alpha: 0.8),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  GestureDetector(
-                    onTap: onOpenTerms,
-                    child: Text(
-                      'View full Terms',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: colorScheme.primary,
-                        decoration: TextDecoration.underline,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
