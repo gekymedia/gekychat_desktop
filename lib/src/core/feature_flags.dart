@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -24,16 +26,26 @@ bool featureFlagsClientBypassAll() {
   }
 }
 
+/// Platform string expected by GET /api/v1/feature-flags.
+String featureFlagsClientPlatform() {
+  if (kIsWeb) return 'web';
+  try {
+    if (Platform.isIOS || Platform.isAndroid) return 'mobile';
+  } catch (_) {}
+  return 'desktop';
+}
+
 /// PHASE 2: Feature Flags Service
 class FeatureFlagService {
   final ApiService _apiService;
 
   FeatureFlagService(this._apiService);
 
-  Future<Map<String, bool>> getFeatureFlags({String platform = 'desktop'}) async {
+  Future<Map<String, bool>> getFeatureFlags({String? platform}) async {
+    final resolved = platform ?? featureFlagsClientPlatform();
     try {
-      final response = await _apiService.getFeatureFlags(platform: platform);
-      
+      final response = await _apiService.getFeatureFlags(platform: resolved);
+
       // Handle different response formats
       if (response.data is Map) {
         // Check if response has 'data' key (new format)
@@ -42,7 +54,9 @@ class FeatureFlagService {
           final Map<String, bool> result = {};
           for (var flag in flags) {
             if (flag is Map) {
-              result[flag['key'] as String] = flag['enabled'] as bool? ?? false;
+              final key = flag['key']?.toString();
+              if (key == null || key.isEmpty) continue;
+              result[key] = flag['enabled'] as bool? ?? true;
             }
           }
           return result;
@@ -58,13 +72,15 @@ class FeatureFlagService {
           return result;
         }
       }
-      
+
       // Empty result if format is unexpected
       return {};
     } catch (e) {
       // Silently handle errors (401 unauthenticated, network errors, etc.)
       // Features will be disabled by default until user authenticates
-      debugPrint('⚠️ Feature flags error (this is normal if not authenticated): ${e.toString()}');
+      debugPrint(
+        '⚠️ Feature flags error (this is normal if not authenticated): ${e.toString()}',
+      );
       return {};
     }
   }
@@ -78,7 +94,7 @@ final featureFlagServiceProvider = Provider<FeatureFlagService>((ref) {
 final featureFlagsProvider = FutureProvider<Map<String, bool>>((ref) async {
   try {
     final service = ref.read(featureFlagServiceProvider);
-    return await service.getFeatureFlags(platform: 'desktop');
+    return await service.getFeatureFlags();
   } catch (e) {
     // Return empty map on any error (401 unauthenticated, network errors, etc.)
     // Features will be disabled by default until user is authenticated
@@ -86,6 +102,12 @@ final featureFlagsProvider = FutureProvider<Map<String, bool>>((ref) async {
     return {};
   }
 });
+
+/// Force a fresh fetch from the API (e.g. when opening the attach menu).
+Future<Map<String, bool>> refreshFeatureFlags(WidgetRef ref) async {
+  ref.invalidate(featureFlagsProvider);
+  return ref.read(featureFlagsProvider.future);
+}
 
 /// Helper function to check if a feature is enabled
 bool featureEnabled(WidgetRef ref, String featureName) {
@@ -99,4 +121,3 @@ bool featureEnabled(WidgetRef ref, String featureName) {
     error: (_, __) => false,
   );
 }
-
