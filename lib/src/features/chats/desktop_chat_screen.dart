@@ -392,8 +392,10 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
         limit: 50,
       );
       if (!mounted) return;
+      final hiddenIds =
+          await ref.read(hiddenChatServiceProvider).hiddenConversationIds();
       setState(() {
-        _searchResults = results;
+        _searchResults = filterHiddenFromSearchResults(results, hiddenIds);
         _isSearching = false;
       });
     } catch (e) {
@@ -410,6 +412,13 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     int conversationId, {
     int? messageId,
   }) async {
+    final isHidden =
+        await ref.read(hiddenChatServiceProvider).isHidden(conversationId);
+    if (isHidden) {
+      if (!mounted) return;
+      await HiddenChatSetupFlow.openVault(context, ref);
+      return;
+    }
     _clearSidebarSearch();
     ref.read(selectedConversationProvider.notifier).selectConversation(conversationId);
     await _selectConversationById(conversationId, scrollToMessageId: messageId);
@@ -592,9 +601,15 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     List<ConversationSummary> filteredConversations = [];
     List<GroupSummary> filteredGroups = [];
 
-    // Hide locked chats from the main inbox (device-local Hidden Chat).
-    final hiddenIds =
-        ref.watch(hiddenConversationIdsProvider).valueOrNull ?? const <int>{};
+    // Fail closed: do not render inbox rows until locked-chat IDs are known.
+    final hiddenAsync = ref.watch(hiddenConversationIdsProvider);
+    if (!hiddenAsync.hasValue) {
+      return const SkeletonList(
+        skeletonItem: SkeletonConversationItem(),
+        itemCount: 8,
+      );
+    }
+    final hiddenIds = hiddenAsync.requireValue;
     final visibleConversations =
         conversations.where((c) => !hiddenIds.contains(c.id)).toList();
     

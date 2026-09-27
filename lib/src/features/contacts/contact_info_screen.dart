@@ -1059,27 +1059,6 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
                 ),
                 const SizedBox(height: 8),
 
-                if (!isSelfChat)
-                  _sectionCard(
-                    isDark: isDark,
-                    children: [
-                      ListTile(
-                        leading: Icon(Icons.lock_outline, color: muted),
-                        title: Text(
-                          'Encryption',
-                          style: TextStyle(
-                            color: isDark ? Colors.white : Colors.black,
-                          ),
-                        ),
-                        subtitle: Text(
-                          'Messages and calls are end-to-end encrypted.',
-                          style: TextStyle(color: muted, fontSize: 13),
-                        ),
-                      ),
-                    ],
-                  ),
-                if (!isSelfChat) const SizedBox(height: 8),
-
                 if (!isSelfChat && !_isChecking && !_isContact && user.phone != null)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
