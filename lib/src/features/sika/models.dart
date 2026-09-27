@@ -25,14 +25,14 @@ class SikaPack {
 
   factory SikaPack.fromJson(Map<String, dynamic> json) {
     return SikaPack(
-      id: json['id'] as int,
+      id: _asInt(json['id']),
       name: json['name'] as String,
       description: json['description'] as String?,
-      priceGhs: (json['price_ghs'] as num).toDouble(),
-      coins: json['coins'] as int,
-      bonusCoins: json['bonus_coins'] as int? ?? 0,
-      totalCoins: json['total_coins'] as int,
-      coinsPerGhs: (json['coins_per_ghs'] as num?)?.toDouble() ?? 0,
+      priceGhs: _asDouble(json['price_ghs']),
+      coins: _asInt(json['coins']),
+      bonusCoins: _asInt(json['bonus_coins'], fallback: 0),
+      totalCoins: _asInt(json['total_coins']),
+      coinsPerGhs: _asDouble(json['coins_per_ghs']),
       icon: json['icon'] as String?,
       isPopular: json['is_popular'] as bool? ?? false,
     );
@@ -150,12 +150,12 @@ class PurchaseResult {
   factory PurchaseResult.fromJson(Map<String, dynamic> json) {
     return PurchaseResult(
       success: json['success'] as bool? ?? true,
-      entryId: json['entry_id'] as int,
-      coinsCredited: json['coins_credited'] as int,
-      newBalance: json['new_balance'] as int,
-      packId: json['pack_id'] as int,
-      packName: json['pack_name'] as String,
-      priceGhs: (json['price_ghs'] as num).toDouble(),
+      entryId: _asInt(json['entry_id']),
+      coinsCredited: _asInt(json['coins_credited']),
+      newBalance: _asInt(json['new_balance']),
+      packId: _asInt(json['pack_id']),
+      packName: json['pack_name']?.toString() ?? '',
+      priceGhs: _asDouble(json['price_ghs']),
       pbgReference: json['pbg_reference'] as String? ?? '',
       createdAt: DateTime.parse(json['created_at'] as String),
     );
@@ -230,4 +230,17 @@ class GiftResult {
       createdAt: DateTime.parse(json['created_at'] as String),
     );
   }
+}
+
+double _asDouble(dynamic value, {double fallback = 0}) {
+  if (value is num) return value.toDouble();
+  if (value == null) return fallback;
+  return double.tryParse(value.toString()) ?? fallback;
+}
+
+int _asInt(dynamic value, {int fallback = 0}) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value == null) return fallback;
+  return int.tryParse(value.toString()) ?? fallback;
 }
