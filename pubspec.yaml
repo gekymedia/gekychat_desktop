@@ -1,7 +1,7 @@
 name: gekychat_desktop
 description: GekyChat Desktop App - WhatsApp-style chat application for desktop
 publish_to: 'none'
-version: 1.0.0+13
+version: 1.0.0+14
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -115,7 +115,7 @@ msix_config:
   publisher_display_name: GekyChat
   identity_name: com.gekychat.desktop
   publisher: CN=GekyChat
-  msix_version: 1.0.0.2
+  msix_version: 1.0.0.14
   logo_path: assets/icons/app_icon_taskbar.png
   trim_logo: false
   capabilities: internetClient, microphone, webcam, location

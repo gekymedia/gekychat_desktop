@@ -1,0 +1,112 @@
+name: Release Windows desktop
+
+# Builds the Inno Setup installer for the pubspec version and uploads it as a
+# workflow artifact (and optional GitHub Release asset). Production upload +
+# app-version sync can be done by the release agent using that artifact.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'desktop-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Parse pubspec version
+        id: ver
+        shell: pwsh
+        run: |
+          $pubspec = Get-Content pubspec.yaml -Raw
+          if ($pubspec -notmatch 'version:\s*([\d.]+)\+(\d+)') {
+            throw "Could not parse version from pubspec.yaml"
+          }
+          $versionName = $Matches[1]
+          $buildNumber = $Matches[2]
+          $innoVersion = "$versionName.$buildNumber"
+          $setupName = "GekyChat-Setup-$versionName-$buildNumber.exe"
+          "version_name=$versionName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "build_number=$buildNumber" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "inno_version=$innoVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "setup_name=$setupName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Building $versionName+$buildNumber (Inno $innoVersion)"
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Build Windows release
+        run: flutter build windows --release
+
+      - name: Fetch ffmpeg sidecar (optional)
+        shell: pwsh
+        run: |
+          if (Test-Path "windows/installer/fetch-ffmpeg.ps1") {
+            & "windows/installer/fetch-ffmpeg.ps1"
+          }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:TEMP "innosetup.exe"
+          Invoke-WebRequest -Uri "https://jrsoftware.org/download.php/is.exe" -OutFile $installer
+          Start-Process -FilePath $installer -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/DIR=C:\InnoSetup6" -Wait
+          if (-not (Test-Path "C:\InnoSetup6\ISCC.exe")) {
+            throw "ISCC.exe not found after Inno Setup install"
+          }
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $innoVersion = "${{ steps.ver.outputs.inno_version }}"
+          & "C:\InnoSetup6\ISCC.exe" "/DMyAppVersion=$innoVersion" "windows\installer\gekychat.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Stage installer artifact
+        shell: pwsh
+        run: |
+          $innoVersion = "${{ steps.ver.outputs.inno_version }}"
+          $versionName = "${{ steps.ver.outputs.version_name }}"
+          $setupName = "${{ steps.ver.outputs.setup_name }}"
+          $installerDir = "build\windows\x64\installer\Release"
+          $built = Join-Path $installerDir "GekyChat-x64-$innoVersion-Installer.exe"
+          if (-not (Test-Path $built)) {
+            $built = Join-Path $installerDir "GekyChat-x64-$versionName-Installer.exe"
+          }
+          if (-not (Test-Path $built)) {
+            Get-ChildItem $installerDir -ErrorAction SilentlyContinue
+            throw "Installer not found"
+          }
+          New-Item -ItemType Directory -Force -Path "dist" | Out-Null
+          Copy-Item $built (Join-Path "dist" $setupName) -Force
+          Copy-Item $built (Join-Path "dist" "GekyChat-Setup-latest.exe") -Force
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gekychat-windows-installer
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/${{ steps.ver.outputs.setup_name }}
+            dist/GekyChat-Setup-latest.exe
+          generate_release_notes: true
