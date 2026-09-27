@@ -542,6 +542,10 @@ class ApiService {
 
   Future<Response> unblockUser(int userId) => delete('/blocks/$userId');
 
+  /// Groups shared between the current user and [userId].
+  Future<Response> getCommonGroups(int userId) =>
+      get('/users/$userId/common-groups');
+
   // ---------------------------------------------------------------------------
   // Reports
   // ---------------------------------------------------------------------------
