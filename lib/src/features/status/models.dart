@@ -48,9 +48,26 @@ class StatusUpdate {
   });
 
   factory StatusUpdate.fromJson(Map<String, dynamic> json) {
+    int parseInt(dynamic v, {int fallback = 0}) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      if (v is String) return int.tryParse(v) ?? fallback;
+      return fallback;
+    }
+
+    DateTime parseDate(dynamic v, {DateTime? fallback}) {
+      if (v is DateTime) return v;
+      if (v != null) {
+        final parsed = DateTime.tryParse(v.toString());
+        if (parsed != null) return parsed;
+      }
+      return fallback ?? DateTime.now();
+    }
+
+    final createdAt = parseDate(json['created_at']);
     return StatusUpdate(
-      id: json['id'],
-      userId: json['user_id'],
+      id: parseInt(json['id']),
+      userId: parseInt(json['user_id']),
       type: () {
         final t = json['type']?.toString();
         for (final e in StatusType.values) {
@@ -58,23 +75,29 @@ class StatusUpdate {
         }
         return StatusType.text;
       }(),
-      text: json['text'],
-      mediaUrl: json['media_url'],
-      thumbnailUrl: json['thumbnail_url'],
-      backgroundColor: json['background_color'] as String?,
-      textColor: json['text_color'] as String?,
+      text: json['text']?.toString(),
+      mediaUrl: json['media_url']?.toString(),
+      thumbnailUrl: json['thumbnail_url']?.toString(),
+      backgroundColor: json['background_color']?.toString(),
+      textColor: json['text_color']?.toString(),
       fontSize: () {
         final v = json['font_size'];
         if (v is int) return v;
+        if (v is num) return v.toInt();
         if (v is String) return int.tryParse(v);
         return null;
       }(),
-      fontFamily: json['font_family'] as String?,
-      createdAt: DateTime.parse(json['created_at']),
-      expiresAt: DateTime.parse(json['expires_at']),
-      viewCount: json['view_count'] ?? 0,
-      viewed: json['viewed'] ?? false,
-      allowDownload: json['allow_download'],
+      fontFamily: json['font_family']?.toString(),
+      createdAt: createdAt,
+      expiresAt: parseDate(
+        json['expires_at'],
+        fallback: createdAt.add(const Duration(hours: 24)),
+      ),
+      viewCount: parseInt(json['view_count']),
+      viewed: json['viewed'] == true || json['viewed'] == 1 || json['viewed'] == '1',
+      allowDownload: json['allow_download'] is bool
+          ? json['allow_download'] as bool
+          : null,
     );
   }
 

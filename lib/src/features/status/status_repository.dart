@@ -84,23 +84,7 @@ class StatusRepository {
         if (fontSize != null) 'font_size': fontSize,
         if (audience != null) ...audience,
       });
-      
-      final raw = response.data;
-      Map<String, dynamic> statusData;
-      if (raw is Map) {
-        final rawMap = Map<String, dynamic>.from(raw);
-        if (rawMap['status'] != null) {
-          statusData = Map<String, dynamic>.from(rawMap['status'] as Map);
-        } else if (rawMap['data'] != null && rawMap['data'] is Map) {
-          statusData = Map<String, dynamic>.from(rawMap['data'] as Map);
-        } else {
-          statusData = rawMap;
-        }
-      } else {
-        throw Exception('Unexpected response format: ${raw.runtimeType}');
-      }
-      
-      return StatusUpdate.fromJson(statusData);
+      return _parseCreatedStatus(response.data);
     } catch (e) {
       throw Exception('Failed to create text status: $e');
     }
@@ -122,24 +106,15 @@ class StatusRepository {
         if (audience != null) ...audience,
       });
 
-      final response = await _api.post('/statuses', data: formData);
-      final raw = response.data;
-      
-      Map<String, dynamic> statusData;
-      if (raw is Map) {
-        final rawMap = Map<String, dynamic>.from(raw);
-        if (rawMap['status'] != null) {
-          statusData = Map<String, dynamic>.from(rawMap['status'] as Map);
-        } else if (rawMap['data'] != null && rawMap['data'] is Map) {
-          statusData = Map<String, dynamic>.from(rawMap['data'] as Map);
-        } else {
-          statusData = rawMap;
-        }
-      } else {
-        throw Exception('Unexpected response format: ${raw.runtimeType}');
-      }
-      
-      return StatusUpdate.fromJson(statusData);
+      final response = await _api.post(
+        '/statuses',
+        data: formData,
+        options: Options(
+          sendTimeout: const Duration(minutes: 5),
+          receiveTimeout: const Duration(minutes: 3),
+        ),
+      );
+      return _parseCreatedStatus(response.data);
     } catch (e) {
       throw Exception('Failed to create image status: $e');
     }
@@ -214,23 +189,54 @@ class StatusRepository {
         receiveTimeout: const Duration(minutes: 3),
       ),
     );
-    final raw = response.data;
+    return _parseCreatedStatus(response.data);
+  }
 
-    Map<String, dynamic> statusData;
-    if (raw is Map) {
-      final rawMap = Map<String, dynamic>.from(raw);
-      if (rawMap['status'] != null) {
-        statusData = Map<String, dynamic>.from(rawMap['status'] as Map);
-      } else if (rawMap['data'] != null && rawMap['data'] is Map) {
-        statusData = Map<String, dynamic>.from(rawMap['data'] as Map);
-      } else {
-        statusData = rawMap;
-      }
-    } else {
+  /// Parse create-status API payloads without failing on minor shape differences.
+  StatusUpdate _parseCreatedStatus(dynamic raw) {
+    if (raw is! Map) {
       throw Exception('Unexpected response format: ${raw.runtimeType}');
     }
+    final rawMap = Map<String, dynamic>.from(raw);
+    Map<String, dynamic> statusData;
+    final nestedStatus = rawMap['status'];
+    final nestedData = rawMap['data'];
+    if (nestedStatus is Map) {
+      statusData = Map<String, dynamic>.from(nestedStatus);
+    } else if (nestedData is Map) {
+      statusData = Map<String, dynamic>.from(nestedData);
+    } else {
+      statusData = rawMap;
+    }
 
-    return StatusUpdate.fromJson(statusData);
+    try {
+      final parsed = StatusUpdate.fromJson(statusData);
+      if (parsed.id > 0) return parsed;
+    } catch (_) {
+      // Fall through to id-only recovery when full parse fails.
+    }
+
+    final idRaw = statusData['id'] ?? rawMap['id'];
+    final id = idRaw is int
+        ? idRaw
+        : idRaw is num
+            ? idRaw.toInt()
+            : int.tryParse(idRaw?.toString() ?? '');
+    if (id != null && id > 0) {
+      final now = DateTime.now();
+      return StatusUpdate(
+        id: id,
+        userId: 0,
+        type: StatusType.text,
+        text: statusData['text']?.toString(),
+        mediaUrl: statusData['media_url']?.toString(),
+        createdAt: now,
+        expiresAt: now.add(const Duration(hours: 24)),
+        viewCount: 0,
+      );
+    }
+
+    throw Exception('Status create response missing id');
   }
 
   /// Mark a status as viewed

@@ -426,6 +426,7 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
     }
 
     setState(() => _isLoading = true);
+    final messengerContext = context;
 
     try {
       final repo = ref.read(statusRepositoryProvider);
@@ -470,19 +471,28 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
             .id;
       }
 
+      // Mentions / analytics must not turn a successful post into an error toast.
       if (_mentionedTargets.isNotEmpty) {
-        await _sendStatusMentionAlerts(createdStatusId);
+        try {
+          await _sendStatusMentionAlerts(createdStatusId);
+        } catch (e) {
+          debugPrint('Status mention alerts failed after post: $e');
+        }
       }
 
-      ProductAnalytics.action('status_posted', feature: 'status');
+      try {
+        ProductAnalytics.action('status_posted', feature: 'status');
+      } catch (_) {}
 
-      if (mounted) {
-        Navigator.pop(context, true);
-                context.showSuccessToast(
-              _mentionedTargets.isNotEmpty
-                  ? 'Status posted. Mention alerts sent to ${_mentionedTargets.length} contact(s).'
-                  : 'Status posted successfully',
-            );      }
+      if (!mounted) return;
+      final successMessage = _mentionedTargets.isNotEmpty
+          ? 'Status posted. Mention alerts sent to ${_mentionedTargets.length} contact(s).'
+          : 'Status posted successfully';
+      Navigator.pop(context, true);
+      // Use a still-mounted ancestor context after closing the composer.
+      if (messengerContext.mounted) {
+        messengerContext.showSuccessToast(successMessage);
+      }
     } on VideoTooLargeException catch (e) {
       _showError(e.toString());
     } on FfmpegNotFoundException catch (e) {
@@ -501,7 +511,9 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
   }
 
   void _showError(String message) {
-        context.showInfoToast(message);  }
+    if (!mounted) return;
+    context.showErrorToast(message);
+  }
 
   Future<void> _pickMentionTargets() async {
     final selected = await showDialog<List<_StatusMentionTarget>>(
