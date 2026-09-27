@@ -16,6 +16,7 @@ import 'src/core/providers.dart';
 import 'src/core/services/taskbar_badge_service.dart';
 import 'src/features/chats/sidebar_inbox_bump.dart';
 import 'src/core/services/deep_link_service.dart';
+import 'src/services/ios_spotlight_service.dart';
 import 'src/core/theme/theme_provider.dart' as custom_theme;
 import 'src/core/theme/theme_service.dart';
 import 'src/features/calls/incoming_call_handler.dart';
@@ -157,6 +158,11 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
     widget.deepLinkService.setLinkHandler((link) {
       _handleDeepLink(link);
     });
+
+    // iOS Spotlight taps arrive as gekychat:// deep links.
+    IosSpotlightService.instance.setOpenHandler((link) {
+      widget.deepLinkService.handleLink(link);
+    });
   }
   
   void _handleDeepLink(String link) {
@@ -198,8 +204,19 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
         } else {
           router.go(route);
         }
-        // If there's a conversation/group/channel ID, we might need to handle it
-        // in the specific screen
+
+        final conversationId = int.tryParse(parsed['conversationId'] ?? '');
+        if (conversationId != null) {
+          ref
+              .read(selectedConversationProvider.notifier)
+              .selectConversation(conversationId);
+          ref.read(selectedGroupIdProvider.notifier).state = null;
+        }
+        final groupId = int.tryParse(parsed['groupId'] ?? '');
+        if (groupId != null) {
+          ref.read(selectedGroupIdProvider.notifier).state = groupId;
+          ref.read(selectedConversationProvider.notifier).clearSelection();
+        }
         debugPrint('🔗 Navigated to: $route');
       }
     }

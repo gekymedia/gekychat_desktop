@@ -8,9 +8,11 @@ import '../features/calls/incoming_call_handler.dart';
 import '../features/calls/join_call_from_link.dart';
 import '../features/notifications/desktop_inbox_notification.dart';
 import '../features/notifications/notification_manager.dart';
+import '../features/chats/chat_providers.dart';
 import 'background_sync_worker.dart';
 import 'bot_contact_registry.dart';
 import 'inbox_realtime_sync.dart';
+import 'ios_spotlight_service.dart';
 import 'status_realtime_sync.dart';
 
 /// Runs after login so Pusher and incoming-call listeners wire up even when
@@ -69,5 +71,17 @@ Future<void> bootstrapAfterAuth(Ref ref) async {
     unawaited(registry.syncFromApi(ref.read(apiServiceProvider)));
   } catch (e) {
     debugPrint('⚠️ Post-auth bot registry sync failed: $e');
+  }
+
+  try {
+    final conversations =
+        await ref.read(chatRepositoryProvider).getConversations();
+    final groups = await ref.read(chatRepositoryProvider).getGroups();
+    await IosSpotlightService.instance.indexInbox(
+      conversations: conversations,
+      groups: groups,
+    );
+  } catch (e) {
+    debugPrint('⚠️ Post-auth Spotlight index failed: $e');
   }
 }

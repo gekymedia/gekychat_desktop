@@ -7,6 +7,7 @@ import '../../core/api_service.dart';
 import '../../core/device_id.dart';
 import '../../features/notifications/notification_manager.dart';
 import '../../services/post_auth_bootstrap.dart';
+import '../../services/ios_spotlight_service.dart';
 
 /// Sentinel so `copyWith(token: null)` / `copyWith(error: null)` actually clear fields.
 const Object _authFieldUnset = Object();
@@ -303,6 +304,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
       NotificationManager.reset();
     } catch (e) {
       debugPrint('⚠️ Logout realtime cleanup: $e');
+    }
+    try {
+      await IosSpotlightService.instance.clearAll();
+    } catch (e) {
+      debugPrint('⚠️ Logout Spotlight clear: $e');
     }
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');

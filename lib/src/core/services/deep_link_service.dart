@@ -109,24 +109,30 @@ class DeepLinkService {
       }
 
       // Parse direct protocol routes
-      // gekychat://chat/{conversationId}
+      // gekychat://chat/{conversationId}  (host=chat, path=/id)
+      // gekychat:///chat/{conversationId} (path=/chat/id)
       // gekychat://group/{groupId}
       // gekychat://channel/{channelId}
       // gekychat://user/{userId}
       // gekychat://settings
       // gekychat://calls
 
-      if (path.isEmpty || path == '/') {
-        return {'route': '/chats'};
+      final pathSegments =
+          path.split('/').where((s) => s.isNotEmpty).toList();
+
+      String? routeType;
+      String? routeId;
+      if (uri.host.isNotEmpty) {
+        routeType = uri.host;
+        routeId = pathSegments.isNotEmpty ? pathSegments.first : null;
+      } else if (pathSegments.isNotEmpty) {
+        routeType = pathSegments[0];
+        routeId = pathSegments.length > 1 ? pathSegments[1] : null;
       }
 
-      final segments = path.split('/').where((s) => s.isNotEmpty).toList();
-      if (segments.isEmpty) {
+      if (routeType == null || routeType.isEmpty) {
         return {'route': '/chats'};
       }
-
-      final routeType = segments[0];
-      final routeId = segments.length > 1 ? segments[1] : null;
 
       switch (routeType) {
         case 'chat':

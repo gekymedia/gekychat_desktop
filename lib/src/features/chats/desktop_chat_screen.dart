@@ -38,6 +38,7 @@ import '../notifications/notification_settings_screen.dart';
 import '../media_auto_download/media_auto_download_screen.dart';
 import '../storage/storage_usage_screen.dart';
 import '../world/world_feed_screen.dart';
+import '../../services/ios_spotlight_service.dart';
 import '../world/world_feed_repository.dart';
 import '../mail/mail_screen.dart';
 import '../../core/services/deep_link_service.dart';
@@ -316,6 +317,14 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
       });
       ref.read(selectedGroupIdProvider.notifier).state = null;
       _switchToChatsView();
+      final title = conversation.isSavedMessages
+          ? 'Saved Messages'
+          : conversation.otherUser.name;
+      unawaited(IosSpotlightService.instance.donateOpen(
+        uniqueId: 'chat:$conversationId',
+        title: title,
+        link: 'gekychat://chat/$conversationId',
+      ));
     } catch (e) {
       debugPrint('Failed to select conversation: $e');
     }
@@ -749,6 +758,11 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                   _selectedConversationId = null;
                   _groupInitialScrollMessageId = null;
                 });
+                unawaited(IosSpotlightService.instance.donateOpen(
+                  uniqueId: 'group:${item.id}',
+                  title: item.name,
+                  link: 'gekychat://group/${item.id}',
+                ));
                 _switchToChatsView();
               },
             );

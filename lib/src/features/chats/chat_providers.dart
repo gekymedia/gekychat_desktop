@@ -5,6 +5,23 @@ import 'chat_repo.dart';
 import 'models.dart';
 import '../../core/providers.dart';
 import '../../core/providers/connectivity_provider.dart';
+import '../../services/ios_spotlight_service.dart';
+
+void _scheduleSpotlightIndex(Ref ref) {
+  unawaited(() async {
+    try {
+      final conversations =
+          ref.read(optimizedConversationsProvider).valueOrNull ??
+              await ref.read(chatRepositoryProvider).getConversations();
+      final groups = ref.read(optimizedGroupsProvider).valueOrNull ??
+          await ref.read(chatRepositoryProvider).getGroups();
+      await IosSpotlightService.instance.indexInbox(
+        conversations: conversations,
+        groups: groups,
+      );
+    } catch (_) {}
+  }());
+}
 
 /// Provider for chat repository
 final chatRepositoryProvider = Provider<ChatRepository>((ref) {
@@ -64,7 +81,9 @@ class OptimizedConversationsNotifier
       }
     });
     ref.watch(chatRepositoryProvider);
-    return ref.read(chatRepositoryProvider).getConversations();
+    final list = await ref.read(chatRepositoryProvider).getConversations();
+    _scheduleSpotlightIndex(ref);
+    return list;
   }
 
   /// Refetch without clearing the sidebar (no skeleton flash).
@@ -73,6 +92,7 @@ class OptimizedConversationsNotifier
     try {
       final fresh = await ref.read(chatRepositoryProvider).getConversations();
       state = AsyncData(fresh);
+      _scheduleSpotlightIndex(ref);
     } catch (e, st) {
       state = AsyncValue<List<ConversationSummary>>.error(
         e,
@@ -96,7 +116,9 @@ class OptimizedGroupsNotifier extends AsyncNotifier<List<GroupSummary>> {
       }
     });
     ref.watch(chatRepositoryProvider);
-    return ref.read(chatRepositoryProvider).getGroups();
+    final list = await ref.read(chatRepositoryProvider).getGroups();
+    _scheduleSpotlightIndex(ref);
+    return list;
   }
 
   Future<void> refreshSilently() async {
@@ -104,6 +126,7 @@ class OptimizedGroupsNotifier extends AsyncNotifier<List<GroupSummary>> {
     try {
       final fresh = await ref.read(chatRepositoryProvider).getGroups();
       state = AsyncData(fresh);
+      _scheduleSpotlightIndex(ref);
     } catch (e, st) {
       state = AsyncValue<List<GroupSummary>>.error(e, st).copyWithPrevious(state);
     }
