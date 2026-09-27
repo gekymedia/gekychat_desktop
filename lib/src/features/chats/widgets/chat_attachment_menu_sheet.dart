@@ -63,7 +63,17 @@ class ChatAttachmentMenuSheet extends ConsumerWidget {
     WidgetRef ref,
     ChatAttachmentMenuCallbacks callbacks, {
     required BuildContext anchorContext,
-  }) {
+  }) async {
+    // Pull latest flags so newly enabled features (e.g. sika_wallet) appear
+    // without forcing an app restart.
+    try {
+      await refreshFeatureFlags(ref);
+    } catch (_) {
+      // Keep previously cached flags if the refresh fails.
+    }
+
+    if (!context.mounted) return;
+
     final anchorBox = anchorContext.findRenderObject() as RenderBox?;
     final screenSize = MediaQuery.sizeOf(context);
 

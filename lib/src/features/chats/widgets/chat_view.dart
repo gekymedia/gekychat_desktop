@@ -78,7 +78,7 @@ import 'desktop_composer_trailing_action.dart';
 import 'desktop_message_composer_pill.dart';
 import 'desktop_chat_metrics.dart';
 import '../../embedded_apps/embedded_app_launcher.dart';
-import '../../sika/sika_send_coins_sheet.dart';
+import '../../sika/sika_wallet_sheet.dart';
 import '../../../widgets/batch_selection_mode.dart';
 
 class _SendMessageIntent extends Intent {
@@ -2233,10 +2233,10 @@ class _ChatViewState extends ConsumerState<ChatView> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.7,
+        initialChildSize: 0.75,
         minChildSize: 0.5,
         maxChildSize: 0.95,
-        builder: (context, scrollController) => SikaSendCoinsSheet(
+        builder: (context, scrollController) => SikaWalletSheet(
           preselectedUserId: widget.otherUser?.id,
           preselectedUserName: widget.contactName,
         ),

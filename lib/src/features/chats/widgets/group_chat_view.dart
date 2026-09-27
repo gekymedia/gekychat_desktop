@@ -70,7 +70,7 @@ import 'desktop_message_composer_pill.dart';
 import 'desktop_chat_metrics.dart';
 import 'date_divider.dart';
 import '../../embedded_apps/embedded_app_launcher.dart';
-import '../../sika/sika_send_coins_sheet.dart';
+import '../../sika/sika_wallet_sheet.dart';
 import '../../../utils/snackbar_helper.dart';
 import '../../../widgets/batch_selection_mode.dart';
 import 'chat_attachment_thumb.dart';
@@ -1713,10 +1713,10 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.7,
+        initialChildSize: 0.75,
         minChildSize: 0.5,
         maxChildSize: 0.95,
-        builder: (context, scrollController) => const SikaSendCoinsSheet(),
+        builder: (context, scrollController) => const SikaWalletSheet(),
       ),
     );
   }
