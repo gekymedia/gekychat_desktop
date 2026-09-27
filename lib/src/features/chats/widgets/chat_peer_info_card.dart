@@ -1,9 +1,9 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../../utils/avatar_utils.dart';
-import '../../utils/phone_country.dart';
-import '../chats/models.dart';
+import '../../../utils/avatar_utils.dart';
+import '../../../utils/phone_country.dart';
+import '../models.dart';
 
 /// WhatsApp-style peer info card shown at the top of a DM thread.
 class ChatPeerInfoCard extends StatelessWidget {
