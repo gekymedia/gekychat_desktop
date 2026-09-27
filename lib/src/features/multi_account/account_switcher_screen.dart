@@ -359,6 +359,14 @@ class _AccountSwitcherScreenState extends ConsumerState<AccountSwitcherScreen> {
       try {
         final repository = ref.read(accountRepositoryProvider);
         await repository.removeAccount(accountId);
+        try {
+          await ref.read(hiddenChatServiceProvider).clearScopedDataForAccount(
+                accountId: accountId,
+              );
+          ref.invalidate(hiddenConversationIdsProvider);
+        } catch (e) {
+          debugPrint('⚠️ Hidden chat cleanup on account remove: $e');
+        }
         ref.invalidate(accountsProvider);
         if (mounted) {
                     context.showSuccessToast('Account removed successfully');        }

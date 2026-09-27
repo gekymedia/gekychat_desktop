@@ -148,6 +148,24 @@ class HiddenChatService extends ChangeNotifier {
     );
     notifyListeners();
   }
+
+  /// Drop scoped Hidden Chat prefs for a removed account (and optional user id).
+  Future<void> clearScopedDataForAccount({
+    required int accountId,
+    int? userId,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final suffixes = <String>{'a$accountId'};
+    if (userId != null) suffixes.add('u$userId');
+    for (final key in prefs.getKeys().toList()) {
+      for (final suffix in suffixes) {
+        if (key.endsWith('_$suffix')) {
+          await prefs.remove(key);
+        }
+      }
+    }
+    notifyListeners();
+  }
 }
 
 /// Parse a conversation id from a global-search result item.

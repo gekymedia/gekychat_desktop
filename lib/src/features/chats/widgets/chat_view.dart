@@ -3665,19 +3665,31 @@ class _ChatViewState extends ConsumerState<ChatView> {
             !_peerInfoDismissed &&
             _effectiveOtherUser != null &&
             (_effectiveOtherUser!.id > 0))
-          ChatPeerInfoCard(
-            user: _effectiveOtherUser!,
-            username: _peerUsername,
-            isContact: _peerIsContact,
-            commonGroupsCount: _commonGroupsCount,
-            commonGroupNames: _commonGroupNames,
-            loading: _peerInfoLoading,
-            onOpenProfile: () {
-              setState(() => _showInfoPanel = true);
+          Builder(
+            builder: (context) {
+              final screenH = MediaQuery.sizeOf(context).height;
+              final maxCardH = (screenH * 0.38).clamp(120.0, 360.0);
+              return ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: maxCardH),
+                child: SingleChildScrollView(
+                  physics: const ClampingScrollPhysics(),
+                  child: ChatPeerInfoCard(
+                    user: _effectiveOtherUser!,
+                    username: _peerUsername,
+                    isContact: _peerIsContact,
+                    commonGroupsCount: _commonGroupsCount,
+                    commonGroupNames: _commonGroupNames,
+                    loading: _peerInfoLoading,
+                    onOpenProfile: () {
+                      setState(() => _showInfoPanel = true);
+                    },
+                    onSafetyTools: _showPeerSafetyTools,
+                    onBlock: _confirmBlockPeer,
+                    onAddContact: _peerIsContact ? null : _addPeerToContacts,
+                  ),
+                ),
+              );
             },
-            onSafetyTools: _showPeerSafetyTools,
-            onBlock: _confirmBlockPeer,
-            onAddContact: _peerIsContact ? null : _addPeerToContacts,
           ),
 
         // Messages List with drag and drop support
@@ -4200,6 +4212,12 @@ class _ChatViewState extends ConsumerState<ChatView> {
         embedded: true,
         isSavedMessages: widget.isSavedMessages,
         conversationId: widget.conversationId,
+        onChatCleared: () {
+          if (!mounted) return;
+          setState(() {
+            _messages.clear();
+          });
+        },
         onClose: () {
           if (!mounted) return;
           setState(() => _showInfoPanel = false);

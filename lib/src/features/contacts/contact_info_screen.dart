@@ -34,6 +34,7 @@ class ContactInfoScreen extends ConsumerStatefulWidget {
   final VoidCallback? onClose;
   final bool isSavedMessages;
   final int? conversationId;
+  final VoidCallback? onChatCleared;
 
   const ContactInfoScreen({
     super.key,
@@ -42,6 +43,7 @@ class ContactInfoScreen extends ConsumerStatefulWidget {
     this.onClose,
     this.isSavedMessages = false,
     this.conversationId,
+    this.onChatCleared,
   });
 
   @override
@@ -635,7 +637,12 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
     if (confirmed != true || !mounted) return;
     try {
       await ref.read(chatRepositoryProvider).clearConversation(conversationId);
-      if (mounted) context.showSuccessToast('Chat cleared');
+      if (!mounted) return;
+      context.showSuccessToast('Chat cleared');
+      widget.onChatCleared?.call();
+      if (!widget.embedded && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop('cleared');
+      }
     } catch (e) {
       if (mounted) context.showErrorToast('Failed to clear chat: $e');
     }
