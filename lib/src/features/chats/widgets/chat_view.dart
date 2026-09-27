@@ -106,6 +106,11 @@ class _MessageBubbleSlot extends _MessageSlot {
   const _MessageBubbleSlot(this.message);
 }
 
+/// First chronological item in the DM thread (scrolls away with history).
+class _PeerInfoCardSlot extends _MessageSlot {
+  const _PeerInfoCardSlot();
+}
+
 class ChatView extends ConsumerStatefulWidget {
   final int conversationId;
   final String contactName;
@@ -1300,8 +1305,11 @@ class _ChatViewState extends ConsumerState<ChatView> {
 
   /// Build the list of slots (dates + messages) once. Used for itemCount and per-item build.
   List<_MessageSlot> _buildMessageSlots() {
-    if (_messages.isEmpty) return [];
     final List<_MessageSlot> slots = [];
+    if (_shouldShowPeerInfoCard) {
+      slots.add(const _PeerInfoCardSlot());
+    }
+    if (_messages.isEmpty) return slots;
     DateTime? previousDate;
     for (final message in _messages) {
       final messageDate = DateTime(
@@ -1318,9 +1326,38 @@ class _ChatViewState extends ConsumerState<ChatView> {
     return slots;
   }
 
+  bool get _shouldShowPeerInfoCard =>
+      !widget.isSavedMessages &&
+      !_otherUserIsBot &&
+      !_peerInfoDismissed &&
+      _effectiveOtherUser != null &&
+      (_effectiveOtherUser!.id > 0);
+
+  Widget _buildPeerInfoCardInList() {
+    final peer = _effectiveOtherUser;
+    if (peer == null) return const SizedBox.shrink();
+    return ChatPeerInfoCard(
+      user: peer,
+      username: _peerUsername,
+      isContact: _peerIsContact,
+      commonGroupsCount: _commonGroupsCount,
+      commonGroupNames: _commonGroupNames,
+      loading: _peerInfoLoading,
+      onOpenProfile: () {
+        setState(() => _showInfoPanel = true);
+      },
+      onSafetyTools: _showPeerSafetyTools,
+      onBlock: _confirmBlockPeer,
+      onAddContact: _peerIsContact ? null : _addPeerToContacts,
+    );
+  }
+
   /// Build a single list item from a slot. Used with slots built once per ListView build.
   Widget _buildItemFromSlot(List<_MessageSlot> slots, int index) {
     final slot = slots[index];
+    if (slot is _PeerInfoCardSlot) {
+      return _buildPeerInfoCardInList();
+    }
     if (slot is _DateSlot) {
       return DateDivider(
         key: ValueKey('date-${widget.conversationId}-$index'),
@@ -1445,6 +1482,17 @@ class _ChatViewState extends ConsumerState<ChatView> {
     }
 
     if (_messages.isEmpty) {
+      final slots = _buildMessageSlots();
+      if (slots.isNotEmpty) {
+        return ListView.builder(
+          key: ValueKey('chat-peer-empty-${widget.conversationId}'),
+          controller: _scrollController,
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: DesktopChatMetrics.messageListPadding,
+          itemCount: slots.length,
+          itemBuilder: (context, index) => _buildItemFromSlot(slots, index),
+        );
+      }
       return ListView(
         key: ValueKey('chat-empty-${widget.conversationId}'),
         physics: const AlwaysScrollableScrollPhysics(),
@@ -3659,38 +3707,6 @@ class _ChatViewState extends ConsumerState<ChatView> {
           messages: _messages,
           conversationId: widget.conversationId,
         ),
-
-        if (!widget.isSavedMessages &&
-            !_otherUserIsBot &&
-            !_peerInfoDismissed &&
-            _effectiveOtherUser != null &&
-            (_effectiveOtherUser!.id > 0))
-          Builder(
-            builder: (context) {
-              final screenH = MediaQuery.sizeOf(context).height;
-              final maxCardH = (screenH * 0.38).clamp(120.0, 360.0);
-              return ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: maxCardH),
-                child: SingleChildScrollView(
-                  physics: const ClampingScrollPhysics(),
-                  child: ChatPeerInfoCard(
-                    user: _effectiveOtherUser!,
-                    username: _peerUsername,
-                    isContact: _peerIsContact,
-                    commonGroupsCount: _commonGroupsCount,
-                    commonGroupNames: _commonGroupNames,
-                    loading: _peerInfoLoading,
-                    onOpenProfile: () {
-                      setState(() => _showInfoPanel = true);
-                    },
-                    onSafetyTools: _showPeerSafetyTools,
-                    onBlock: _confirmBlockPeer,
-                    onAddContact: _peerIsContact ? null : _addPeerToContacts,
-                  ),
-                ),
-              );
-            },
-          ),
 
         // Messages List with drag and drop support
         Expanded(
