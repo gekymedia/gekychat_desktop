@@ -39,7 +39,15 @@ String featureFlagsClientPlatform() {
 class FeatureFlagService {
   final ApiService _apiService;
 
+  /// Last successful fetch — preserved across failed refreshes so UI gates
+  /// (e.g. Sika) are not wiped when attach opens offline / with a bad token.
+  Map<String, bool>? _cachedFlags;
+
   FeatureFlagService(this._apiService);
+
+  void clearCache() {
+    _cachedFlags = null;
+  }
 
   Future<Map<String, bool>> getFeatureFlags({String? platform}) async {
     final resolved = platform ?? featureFlagsClientPlatform();
@@ -59,6 +67,7 @@ class FeatureFlagService {
               result[key] = flag['enabled'] as bool? ?? true;
             }
           }
+          _cachedFlags = Map<String, bool>.from(result);
           return result;
         }
         // Check if response is direct map (old format)
@@ -69,19 +78,26 @@ class FeatureFlagService {
               result[key] = value;
             }
           });
+          _cachedFlags = Map<String, bool>.from(result);
           return result;
         }
       }
 
-      // Empty result if format is unexpected
+      // Unexpected format: keep prior cache if any.
+      if (_cachedFlags != null) {
+        return Map<String, bool>.from(_cachedFlags!);
+      }
       return {};
     } catch (e) {
-      // Silently handle errors (401 unauthenticated, network errors, etc.)
-      // Features will be disabled by default until user authenticates
       debugPrint(
         '⚠️ Feature flags error (this is normal if not authenticated): ${e.toString()}',
       );
-      return {};
+      if (_cachedFlags != null) {
+        return Map<String, bool>.from(_cachedFlags!);
+      }
+      // No prior cache — rethrow so refreshFeatureFlags callers can catch
+      // without replacing a previous AsyncData with empty flags.
+      rethrow;
     }
   }
 }
@@ -92,21 +108,22 @@ final featureFlagServiceProvider = Provider<FeatureFlagService>((ref) {
 });
 
 final featureFlagsProvider = FutureProvider<Map<String, bool>>((ref) async {
-  try {
-    final service = ref.read(featureFlagServiceProvider);
-    return await service.getFeatureFlags();
-  } catch (e) {
-    // Return empty map on any error (401 unauthenticated, network errors, etc.)
-    // Features will be disabled by default until user is authenticated
-    debugPrint('⚠️ Error loading feature flags: $e');
-    return {};
-  }
+  final service = ref.read(featureFlagServiceProvider);
+  return await service.getFeatureFlags();
 });
 
 /// Force a fresh fetch from the API (e.g. when opening the attach menu).
+/// Fetches before invalidating so a failure never replaces good cached flags
+/// with `{}`. Rethrows only when there was nothing to preserve.
 Future<Map<String, bool>> refreshFeatureFlags(WidgetRef ref) async {
+  final service = ref.read(featureFlagServiceProvider);
+  final flags = await service.getFeatureFlags();
   ref.invalidate(featureFlagsProvider);
-  return ref.read(featureFlagsProvider.future);
+  try {
+    return await ref.read(featureFlagsProvider.future);
+  } catch (_) {
+    return flags;
+  }
 }
 
 /// Helper function to check if a feature is enabled

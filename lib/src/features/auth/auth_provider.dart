@@ -8,6 +8,8 @@ import '../../core/device_id.dart';
 import '../../features/notifications/notification_manager.dart';
 import '../../services/post_auth_bootstrap.dart';
 import '../../services/ios_spotlight_service.dart';
+import '../../core/feature_flags.dart';
+import '../sika/sika_terms.dart';
 
 /// Sentinel so `copyWith(token: null)` / `copyWith(error: null)` actually clear fields.
 const Object _authFieldUnset = Object();
@@ -315,6 +317,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
     await prefs.remove('user_id');
     await prefs.remove('user_phone'); // Clear phone number on logout
     await prefs.remove('current_account_id');
+    await clearLegacySikaTermsAcceptance();
+    try {
+      _ref.read(featureFlagServiceProvider).clearCache();
+    } catch (e) {
+      debugPrint('⚠️ Error clearing feature flags cache on logout: $e');
+    }
     state = AuthState();
   }
 }
