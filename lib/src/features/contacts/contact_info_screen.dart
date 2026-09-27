@@ -731,7 +731,6 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
   Widget _greenAction({
     required String label,
     required VoidCallback onTap,
-    required bool isDark,
   }) {
     return InkWell(
       onTap: onTap,
