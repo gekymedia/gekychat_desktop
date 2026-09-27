@@ -20,6 +20,8 @@ import 'models.dart';
 import 'chat_repo.dart';
 import 'chat_providers.dart';
 import 'sidebar_inbox_bump.dart';
+import '../../services/hidden_chat_service.dart';
+import 'hidden_chat/hidden_chat_setup_flow.dart';
 import 'widgets/conversation_list_item.dart';
 import 'widgets/group_list_item.dart';
 import 'providers/typing_status_provider.dart';
@@ -589,14 +591,20 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     // Filter conversations and groups based on selected filter and search query
     List<ConversationSummary> filteredConversations = [];
     List<GroupSummary> filteredGroups = [];
+
+    // Hide locked chats from the main inbox (device-local Hidden Chat).
+    final hiddenIds =
+        ref.watch(hiddenConversationIdsProvider).valueOrNull ?? const <int>{};
+    final visibleConversations =
+        conversations.where((c) => !hiddenIds.contains(c.id)).toList();
     
     // Apply search filter
-    List<ConversationSummary> searchFilteredConversations = conversations;
+    List<ConversationSummary> searchFilteredConversations = visibleConversations;
     List<GroupSummary> searchFilteredGroups = groups;
     
     if (_searchQuery.isNotEmpty) {
       final query = _searchQuery.toLowerCase();
-      searchFilteredConversations = conversations.where((c) {
+      searchFilteredConversations = visibleConversations.where((c) {
         final name = c.otherUser.name.toLowerCase();
         final phone = c.otherUser.phone?.toLowerCase() ?? '';
         final lastMessage = (c.lastMessage ?? '').toLowerCase();
@@ -992,6 +1000,27 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
           icon: Icons.label_outline,
           label: 'Add to Label',
           onTap: () => _showAddToLabelDialog(context, conversation.id),
+        ),
+        DesktopGlassMenuItem(
+          icon: Icons.lock_outline,
+          label: 'Chat lock',
+          onTap: () async {
+            await HiddenChatSetupFlow.start(
+              context,
+              ref,
+              conversationIdToHide: conversation.id,
+            );
+            if (!mounted) return;
+            final hidden = await ref
+                .read(hiddenChatServiceProvider)
+                .isHidden(conversation.id);
+            if (hidden) {
+              if (_selectedConversationId == conversation.id) {
+                _clearChatSelection();
+              }
+              _refreshConversations();
+            }
+          },
         ),
         DesktopGlassMenuItem(
           icon: Icons.download,

@@ -15,16 +15,19 @@ import '../../widgets/desktop_center_modal.dart';
 class CreateGroupScreen extends ConsumerStatefulWidget {
   final String? initialGroupType;
   final bool forModal;
+  final List<int> initialMemberIds;
 
   const CreateGroupScreen({
     super.key,
     this.initialGroupType,
     this.forModal = false,
+    this.initialMemberIds = const [],
   });
 
   static Future<bool?> showModal(
     BuildContext context, {
     String groupType = 'group',
+    List<int> initialMemberIds = const [],
   }) {
     final title = groupType == 'channel' ? 'Create Channel' : 'Create Group';
     return showDesktopCenterModal<bool>(
@@ -35,6 +38,7 @@ class CreateGroupScreen extends ConsumerStatefulWidget {
       child: CreateGroupScreen(
         initialGroupType: groupType,
         forModal: true,
+        initialMemberIds: initialMemberIds,
       ),
     );
   }
@@ -60,6 +64,9 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
   void initState() {
     super.initState();
     _searchController.addListener(_onSearch);
+    if (widget.initialMemberIds.isNotEmpty) {
+      _selectedMemberIds.addAll(widget.initialMemberIds);
+    }
   }
   
   @override

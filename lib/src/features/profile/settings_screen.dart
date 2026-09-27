@@ -15,6 +15,7 @@ import '../labels/labels_screen.dart';
 import '../two_factor/two_factor_screen.dart';
 import '../linked_devices/linked_devices_screen.dart';
 import '../privacy/privacy_settings_screen.dart';
+import '../chats/hidden_chat/hidden_chat_setup_flow.dart';
 import '../storage/storage_usage_screen.dart';
 import '../media_auto_download/media_auto_download_screen.dart';
 import '../notifications/notification_settings_screen.dart';
@@ -202,6 +203,12 @@ class SettingsScreen extends ConsumerWidget {
                       title: 'Privacy',
                       child: const PrivacySettingsScreen(),
                     ),
+                  ),
+                  _SettingsTile(
+                    icon: Icons.lock_outline,
+                    title: 'Locked chats',
+                    subtitle: 'Open chats hidden with Chat lock',
+                    onTap: () => HiddenChatSetupFlow.openVault(context, ref),
                   ),
                 ],
               ),

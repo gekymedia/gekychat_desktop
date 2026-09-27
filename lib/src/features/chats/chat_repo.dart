@@ -1794,7 +1794,19 @@ class ChatRepository {
         }
       }
       
-      await apiService.addGroupMember(groupId, {'phones': userPhones});
+      await addGroupMembersByPhones(groupId, userPhones);
+    } catch (e) {
+      throw Exception('Failed to add group members: $e');
+    }
+  }
+
+  Future<void> addGroupMembersByPhones(int groupId, List<String> phones) async {
+    final cleaned = phones.map((p) => p.trim()).where((p) => p.isNotEmpty).toList();
+    if (cleaned.isEmpty) {
+      throw Exception('No phone numbers to add');
+    }
+    try {
+      await apiService.addGroupMember(groupId, {'phones': cleaned});
     } catch (e) {
       throw Exception('Failed to add group members: $e');
     }

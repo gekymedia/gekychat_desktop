@@ -127,6 +127,23 @@ class ContactsRepository {
     }
   }
 
+  /// Groups shared between the current user and [userId].
+  Future<List<GroupSummary>> getCommonGroups(int userId) async {
+    if (userId <= 0) return const [];
+    try {
+      final r = await api.get('/users/$userId/common-groups');
+      final data = r.data;
+      final list = data is Map ? data['data'] : data;
+      if (list is! List) return const [];
+      return list
+          .whereType<Map>()
+          .map((e) => GroupSummary.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    } catch (e) {
+      throw ContactsException('Failed to load common groups: $e');
+    }
+  }
+
   /// Fresh profile with online/last-seen and whether they are in your contacts.
   Future<
       ({
