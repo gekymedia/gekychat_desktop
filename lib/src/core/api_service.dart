@@ -927,6 +927,17 @@ class ApiService {
   Future<Response> getWorldFeedPost(int postId) =>
       get('/world-feed/posts/$postId');
 
+  Future<Response> getWorldFeedInterests() => get('/world-feed/interests');
+
+  Future<Response> saveWorldFeedInterests({
+    List<String>? interests,
+    bool skip = false,
+  }) =>
+      post('/world-feed/interests', data: {
+        if (skip) 'skip': true,
+        if (interests != null) 'interests': interests,
+      });
+
   // ---------------------------------------------------------------------------
   // PHASE 2: Email Chat (Mail)
   // ---------------------------------------------------------------------------
