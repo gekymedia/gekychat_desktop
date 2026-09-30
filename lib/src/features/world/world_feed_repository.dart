@@ -9,6 +9,25 @@ class WorldFeedRepository {
 
   WorldFeedRepository(this._apiService);
 
+  Future<Map<String, dynamic>> getInterests() async {
+    final response = await _apiService.getWorldFeedInterests();
+    final data = response.data;
+    if (data is Map && data['data'] is Map) {
+      return Map<String, dynamic>.from(data['data'] as Map);
+    }
+    return <String, dynamic>{};
+  }
+
+  Future<void> saveInterests({
+    List<String>? interests,
+    bool skip = false,
+  }) async {
+    await _apiService.saveWorldFeedInterests(
+      interests: interests,
+      skip: skip,
+    );
+  }
+
   /// Get world feed posts
   Future<Map<String, dynamic>> getFeed({int? page, String? query}) async {
     // Use getWorldFeedPosts which supports query parameter

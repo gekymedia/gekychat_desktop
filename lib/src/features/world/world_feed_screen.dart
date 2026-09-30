@@ -21,6 +21,7 @@ import '../../widgets/constrained_slide_route.dart';
 import '../../utils/external_share.dart';
 import '../chats/widgets/share_text_to_chats_screen.dart';
 import 'widgets/world_feed_share_dialog.dart';
+import 'widgets/world_feed_interests_dialog.dart';
 import '../../utils/snackbar_helper.dart';
 
 /// World Feed — TikTok-style vertical full-screen feed for desktop.
@@ -46,6 +47,11 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
   void initState() {
     super.initState();
     _loadPosts();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final refreshed = await maybeShowWorldFeedInterestsDialog(context, ref);
+      if (refreshed && mounted) await _reloadFeed();
+    });
   }
 
   @override
