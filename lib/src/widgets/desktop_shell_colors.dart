@@ -34,7 +34,8 @@ abstract final class DesktopShellColors {
   static Color railDivider(bool isDark) =>
       isDark ? const Color(0xFF2A3942) : const Color(0xFFE9EDEF);
 
-  static const double railWidth = 64;
+  /// Narrower icon rail — closer to WhatsApp Desktop.
+  static const double railWidth = 56;
 
   /// Top-left scoop where the icon rail and title bar meet the chat list panel.
   static const double listPanelTopLeftRadius = 16;
