@@ -10,6 +10,7 @@ class DesktopFilterPill extends StatefulWidget {
     required this.isDark,
     required this.onTap,
     this.badgeCount,
+    this.trailing,
   });
 
   final String label;
@@ -17,6 +18,7 @@ class DesktopFilterPill extends StatefulWidget {
   final bool isDark;
   final VoidCallback onTap;
   final int? badgeCount;
+  final Widget? trailing;
 
   @override
   State<DesktopFilterPill> createState() => _DesktopFilterPillState();
@@ -94,6 +96,10 @@ class _DesktopFilterPillState extends State<DesktopFilterPill> {
                           ),
                         ),
                       ),
+                    ],
+                    if (widget.trailing != null) ...[
+                      const SizedBox(width: 2),
+                      widget.trailing!,
                     ],
                   ],
                 ),

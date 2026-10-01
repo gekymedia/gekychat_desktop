@@ -77,7 +77,7 @@ class SideNav extends ConsumerWidget {
           route: '/ai',
           isActive: currentRoute == '/ai',
           iconBuilder: (onAccentBackground) => GekyChatAiIcon(
-            size: 24,
+            size: 22,
             onAccentBackground: onAccentBackground,
           ),
         ),
@@ -122,7 +122,7 @@ class SideNav extends ConsumerWidget {
         children: [
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
               children: primaryItems
                   .map(
                     (item) => _NavItemWidget(
@@ -136,14 +136,14 @@ class SideNav extends ConsumerWidget {
           ),
           const Divider(height: 1),
           Padding(
-            padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+            padding: const EdgeInsets.fromLTRB(6, 6, 6, 2),
             child: _RailProfileButton(
               userProfileAsync: userProfileAsync,
               isDark: isDark,
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+            padding: const EdgeInsets.fromLTRB(2, 0, 2, 6),
             child: _NavItemWidget(
               item: bottomWithActive.first,
               isDark: isDark,
@@ -188,11 +188,11 @@ class _RailProfileButton extends StatelessWidget {
             onTap: openSwitcher,
             borderRadius: BorderRadius.circular(12),
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
+              padding: const EdgeInsets.symmetric(vertical: 6),
               child: ColoredAvatar(
                 imageUrl: profile.avatarUrl,
                 name: profile.name,
-                radius: 18,
+                radius: 16,
               ),
             ),
           ),
@@ -285,8 +285,9 @@ class _NavItemWidgetState extends ConsumerState<_NavItemWidget> {
     final unreadTotal = widget.item.route == '/chats'
         ? ref.watch(sidebarUnreadTotalProvider)
         : 0;
+    // Keep Chats badge visible even on the active route (WA Desktop).
     final showUnreadBadge =
-        widget.item.route == '/chats' && unreadTotal > 0 && !isActive;
+        widget.item.route == '/chats' && unreadTotal > 0;
     final showStatusDot = widget.item.route == '/status' &&
         !isActive &&
         ref.watch(statusNavHasUnviewedProvider);
@@ -302,15 +303,15 @@ class _NavItemWidgetState extends ConsumerState<_NavItemWidget> {
     } else if (widget.item.imageAsset != null) {
       iconChild = Image.asset(
         widget.item.imageAsset!,
-        width: 24,
-        height: 24,
+        width: 22,
+        height: 22,
         fit: BoxFit.contain,
         color: isActive ? activeIconColor : idleIconColor,
         errorBuilder: (context, error, stackTrace) {
           return Icon(
             Icons.circle_notifications,
             color: isActive ? activeIconColor : idleIconColor,
-            size: 24,
+            size: 22,
           );
         },
       );
@@ -318,7 +319,7 @@ class _NavItemWidgetState extends ConsumerState<_NavItemWidget> {
       iconChild = Icon(
         widget.item.icon!,
         color: isActive ? activeIconColor : idleIconColor,
-        size: 24,
+        size: 22,
       );
     }
 
@@ -331,7 +332,10 @@ class _NavItemWidgetState extends ConsumerState<_NavItemWidget> {
             Positioned(
               right: -8,
               top: -6,
-              child: _UnreadBadge(count: unreadTotal),
+              child: _UnreadBadge(
+                count: unreadTotal,
+                onAccentBackground: isActive,
+              ),
             ),
           if (showStatusDot)
             Positioned(
@@ -370,13 +374,13 @@ class _NavItemWidgetState extends ConsumerState<_NavItemWidget> {
             duration: const Duration(milliseconds: 180),
             curve: Curves.easeOutCubic,
             width: double.infinity,
-            height: 44,
-            margin: const EdgeInsets.only(bottom: 4),
+            height: 40,
+            margin: const EdgeInsets.only(bottom: 2),
             decoration: BoxDecoration(
               color: isActive
                   ? activeBg
                   : (_hovered ? hoverBg : Colors.transparent),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(10),
             ),
             child: Center(child: iconChild),
           ),
@@ -387,25 +391,33 @@ class _NavItemWidgetState extends ConsumerState<_NavItemWidget> {
 }
 
 class _UnreadBadge extends StatelessWidget {
-  const _UnreadBadge({required this.count});
+  const _UnreadBadge({
+    required this.count,
+    this.onAccentBackground = false,
+  });
 
   final int count;
+  final bool onAccentBackground;
 
   @override
   Widget build(BuildContext context) {
     final label = count > 99 ? '99+' : '$count';
+    final bg =
+        onAccentBackground ? Colors.white : const Color(0xFF25D366);
+    final fg =
+        onAccentBackground ? const Color(0xFF008069) : Colors.white;
     return Container(
       constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
       padding: const EdgeInsets.symmetric(horizontal: 4),
       decoration: BoxDecoration(
-        color: const Color(0xFF25D366),
+        color: bg,
         borderRadius: BorderRadius.circular(8),
       ),
       alignment: Alignment.center,
       child: Text(
         label,
-        style: const TextStyle(
-          color: Colors.white,
+        style: TextStyle(
+          color: fg,
           fontSize: 9,
           fontWeight: FontWeight.w700,
           height: 1.1,

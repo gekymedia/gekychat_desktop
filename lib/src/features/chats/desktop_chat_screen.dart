@@ -562,6 +562,8 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     switch (_selectedFilter) {
       case 'unread':
         return 'No unread conversations';
+      case 'favorites':
+        return 'No favorite chats';
       case 'groups':
         return 'No groups';
       case 'channels':
@@ -651,6 +653,13 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                 g.type != 'channel' &&
                 (g.unreadCount > 0 || _isManuallyUnreadGroup(g.id)),
           )
+          .toList();
+    } else if (_selectedFilter == 'favorites') {
+      filteredConversations = searchFilteredConversations
+          .where((c) => c.archivedAt == null && c.isPinned)
+          .toList();
+      filteredGroups = searchFilteredGroups
+          .where((g) => g.type != 'channel' && g.isPinned)
           .toList();
     } else if (_selectedFilter == 'groups') {
       filteredConversations = [];
@@ -1869,20 +1878,6 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                   ),
                   const Spacer(),
                   IconButton(
-                    key: _newChatHeaderButtonKey,
-                    icon: Icon(
-                      Icons.add_comment_outlined,
-                      color: isDark ? Colors.white70 : const Color(0xFF667781),
-                    ),
-                    tooltip: 'New chat',
-                    onPressed: () {
-                      final anchor = _newChatHeaderButtonKey.currentContext;
-                      if (anchor != null) {
-                        _showNewChatMenu(anchor);
-                      }
-                    },
-                  ),
-                  IconButton(
                     key: _chatsMoreMenuButtonKey,
                     icon: Icon(
                       Icons.more_vert,
@@ -1895,6 +1890,30 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                         _showChatsMoreMenu(anchor);
                       }
                     },
+                  ),
+                  const SizedBox(width: 4),
+                  Material(
+                    key: _newChatHeaderButtonKey,
+                    color: const Color(0xFF008069),
+                    borderRadius: BorderRadius.circular(10),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () {
+                        final anchor = _newChatHeaderButtonKey.currentContext;
+                        if (anchor != null) {
+                          _showNewChatMenu(anchor);
+                        }
+                      },
+                      child: const SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: Icon(
+                          Icons.add,
+                          color: Colors.white,
+                          size: 22,
+                        ),
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -1913,7 +1932,7 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                           fontFamily: DesktopTypography.fontFamily,
                         ),
                         decoration: InputDecoration(
-                          hintText: 'Search or press Ctrl+K',
+                          hintText: 'Search or start a new chat',
                           hintStyle: TextStyle(
                             color: isDark
                                 ? Colors.white54
@@ -2043,21 +2062,9 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
                   const SizedBox(width: 8),
                   _buildFilterChip('unread', 'Unread', isDark),
                   const SizedBox(width: 8),
-                  _buildFilterChip('groups', 'Groups', isDark),
+                  _buildFilterChip('favorites', 'Favorites', isDark),
                   const SizedBox(width: 8),
-                  _buildFilterChip('channels', 'Channels', isDark),
-                  const SizedBox(width: 8),
-                  _buildFilterChip('archived', 'Archived', isDark),
-                  const SizedBox(width: 8),
-                  _buildFilterChip('broadcast', 'Broadcast', isDark),
-                  ..._labels.map((label) {
-                    return Padding(
-                      padding: const EdgeInsets.only(left: 8),
-                      child: _buildFilterChip('label-${label.id}', label.name, isDark),
-                    );
-                  }),
-                  const SizedBox(width: 8),
-                  _buildAddLabelPill(isDark),
+                  _buildMoreFiltersPill(isDark),
                 ],
               ),
             ),
@@ -2218,14 +2225,21 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
       return Consumer(
         builder: (context, ref, child) {
           int? unreadCount;
+          // Badge = number of unread chats (WhatsApp Desktop), not message sum.
           conversationsAsync.whenData((conversations) {
             groupsAsync.whenData((groups) {
-              unreadCount = conversations
-                  .where((c) => c.unreadCount > 0 && c.archivedAt == null)
-                  .fold<int>(0, (sum, c) => sum + c.unreadCount) +
-                  groups
-                      .where((g) => g.unreadCount > 0 && g.type != 'channel')
-                      .fold<int>(0, (sum, g) => sum + g.unreadCount);
+              final unreadChats = conversations
+                  .where((c) =>
+                      c.archivedAt == null &&
+                      (c.unreadCount > 0 ||
+                          _isManuallyUnreadConversation(c.id)))
+                  .length;
+              final unreadGroups = groups
+                  .where((g) =>
+                      g.type != 'channel' &&
+                      (g.unreadCount > 0 || _isManuallyUnreadGroup(g.id)))
+                  .length;
+              unreadCount = unreadChats + unreadGroups;
             });
           });
           return _buildFilterChipWidget(filter, label, isDark, isSelected, unreadCount);
@@ -2235,22 +2249,101 @@ class _DesktopChatScreenState extends ConsumerState<DesktopChatScreen> with Widg
     
     return _buildFilterChipWidget(filter, label, isDark, isSelected, null);
   }
-  
-  Widget _buildAddLabelPill(bool isDark) {
-    return SizedBox(
-      height: 32,
-      child: Material(
-        color: isDark ? const Color(0xFF2A3942) : const Color(0xFFF0F2F5),
-        shape: const StadiumBorder(),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: () => _showCreateLabelDialog(context, isDark),
-          child: const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 14),
-            child: Icon(Icons.add, size: 16),
+
+  /// Overflow for secondary filters (Groups / Channels / Archived / …).
+  Widget _buildMoreFiltersPill(bool isDark) {
+    final secondarySelected = _selectedFilter == 'groups' ||
+        _selectedFilter == 'channels' ||
+        _selectedFilter == 'archived' ||
+        _selectedFilter == 'broadcast' ||
+        _selectedFilter.startsWith('label-');
+    String label = 'More';
+    if (_selectedFilter == 'groups') {
+      label = 'Groups';
+    } else if (_selectedFilter == 'channels') {
+      label = 'Channels';
+    } else if (_selectedFilter == 'archived') {
+      label = 'Archived';
+    } else if (_selectedFilter == 'broadcast') {
+      label = 'Broadcast';
+    } else if (_selectedFilter.startsWith('label-')) {
+      for (final l in _labels) {
+        if ('label-${l.id}' == _selectedFilter) {
+          label = l.name;
+          break;
+        }
+      }
+    }
+
+    return Builder(
+      builder: (context) {
+        return DesktopFilterPill(
+          label: label,
+          isSelected: secondarySelected,
+          isDark: isDark,
+          trailing: Icon(
+            Icons.expand_more,
+            size: 16,
+            color: secondarySelected
+                ? Colors.white
+                : (isDark ? Colors.white60 : const Color(0xFF667781)),
           ),
-        ),
-      ),
+          onTap: () async {
+            final box = context.findRenderObject() as RenderBox?;
+            if (box == null) return;
+            final overlay =
+                Overlay.of(context).context.findRenderObject() as RenderBox?;
+            if (overlay == null) return;
+            final position = RelativeRect.fromRect(
+              Rect.fromPoints(
+                box.localToGlobal(Offset.zero, ancestor: overlay),
+                box.localToGlobal(
+                  box.size.bottomRight(Offset.zero),
+                  ancestor: overlay,
+                ),
+              ),
+              Offset.zero & overlay.size,
+            );
+            final value = await showMenu<String>(
+              context: context,
+              position: position,
+              items: [
+                const PopupMenuItem(value: 'groups', child: Text('Groups')),
+                const PopupMenuItem(
+                  value: 'channels',
+                  child: Text('Channels'),
+                ),
+                const PopupMenuItem(
+                  value: 'archived',
+                  child: Text('Archived'),
+                ),
+                const PopupMenuItem(
+                  value: 'broadcast',
+                  child: Text('Broadcasts'),
+                ),
+                if (_labels.isNotEmpty) const PopupMenuDivider(),
+                ..._labels.map(
+                  (l) => PopupMenuItem(
+                    value: 'label-${l.id}',
+                    child: Text(l.name),
+                  ),
+                ),
+                const PopupMenuDivider(),
+                const PopupMenuItem(
+                  value: 'create_label',
+                  child: Text('Create label…'),
+                ),
+              ],
+            );
+            if (!mounted || value == null) return;
+            if (value == 'create_label') {
+              _showCreateLabelDialog(context, isDark);
+              return;
+            }
+            _onFilterChipSelected(value);
+          },
+        );
+      },
     );
   }
 

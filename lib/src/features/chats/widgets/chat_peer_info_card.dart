@@ -5,7 +5,7 @@ import '../../../utils/avatar_utils.dart';
 import '../../../utils/phone_country.dart';
 import '../models.dart';
 
-/// WhatsApp-style peer info card shown at the top of a DM thread.
+/// Compact WhatsApp-style peer info card at the top of a DM thread.
 class ChatPeerInfoCard extends StatelessWidget {
   const ChatPeerInfoCard({
     super.key,
@@ -39,7 +39,6 @@ class ChatPeerInfoCard extends StatelessWidget {
     final muted = isDark ? const Color(0xFF8696A0) : const Color(0xFF667781);
     final title = isDark ? Colors.white : const Color(0xFF111B21);
     final accent = const Color(0xFF00A884);
-    final blockBg = isDark ? const Color(0xFF3A1F24) : const Color(0xFFFDECEE);
     final blockFg = isDark ? const Color(0xFFFF6B6B) : const Color(0xFFD32F2F);
 
     final displayName = user.name.trim().isEmpty ? 'Unknown' : user.name.trim();
@@ -48,44 +47,44 @@ class ChatPeerInfoCard extends StatelessWidget {
         : null;
     final origin = PhoneCountry.phoneOriginLabel(user.phone);
     final country = PhoneCountry.fromPhone(user.phone);
-    final contactLabel = isContact ? 'In your contacts' : 'Not a contact';
+    final contactLabel = isContact ? 'Contact' : 'Not a contact';
     final groupsLabel = commonGroupsCount <= 0
         ? 'No common groups'
         : (commonGroupsCount == 1
             ? (commonGroupNames.isNotEmpty
-                ? '1 group in common: ${commonGroupNames.first}'
+                ? '1 group in common'
                 : '1 group in common')
             : '$commonGroupsCount groups in common');
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
       child: Material(
         color: cardBg,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(14),
         child: InkWell(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(14),
           onTap: onOpenProfile,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 22, 20, 16),
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
             child: Column(
               children: [
                 _Avatar(user: user, displayName: displayName),
-                const SizedBox(height: 14),
+                const SizedBox(height: 8),
                 if (handle != null) ...[
                   Text(
                     handle,
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: title,
-                      fontSize: 22,
+                      fontSize: 17,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Text(
                     '~$displayName',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: muted, fontSize: 15),
+                    style: TextStyle(color: muted, fontSize: 13),
                   ),
                 ] else
                   Text(
@@ -93,17 +92,17 @@ class ChatPeerInfoCard extends StatelessWidget {
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: title,
-                      fontSize: 22,
+                      fontSize: 17,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 6),
                 if (loading)
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.only(bottom: 4),
                     child: SizedBox(
-                      width: 18,
-                      height: 18,
+                      width: 14,
+                      height: 14,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
                         color: muted,
@@ -111,93 +110,46 @@ class ChatPeerInfoCard extends StatelessWidget {
                     ),
                   )
                 else
-                  Text.rich(
-                    TextSpan(
-                      style: TextStyle(color: muted, fontSize: 13.5, height: 1.45),
-                      children: [
-                        const TextSpan(text: 'Phone number from '),
-                        TextSpan(
-                          text: country ?? 'unknown region',
-                          style: TextStyle(
-                            color: title.withValues(alpha: 0.85),
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        TextSpan(text: '  ·  $contactLabel  ·  $groupsLabel'),
-                      ],
-                    ),
+                  Text(
+                    [
+                      if (country != null) country,
+                      contactLabel,
+                      groupsLabel,
+                    ].join('  ·  '),
                     textAlign: TextAlign.center,
-                  ),
-                const SizedBox(height: 14),
-                InkWell(
-                  onTap: onSafetyTools,
-                  borderRadius: BorderRadius.circular(8),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 6,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.info_outline, size: 18, color: accent),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Safety tools',
-                          style: TextStyle(
-                            color: accent,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
+                    style: TextStyle(
+                      color: muted,
+                      fontSize: 12.5,
+                      height: 1.35,
                     ),
                   ),
+                const SizedBox(height: 10),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    if (!isContact && onAddContact != null)
+                      _CompactAction(
+                        icon: Icons.person_add_alt_1,
+                        label: 'Add',
+                        color: accent,
+                        onTap: onAddContact,
+                      ),
+                    _CompactAction(
+                      icon: Icons.info_outline,
+                      label: 'Safety',
+                      color: accent,
+                      onTap: onSafetyTools,
+                    ),
+                    _CompactAction(
+                      icon: Icons.block,
+                      label: 'Block',
+                      color: blockFg,
+                      onTap: onBlock,
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 12),
-                if (!isContact && onAddContact != null) ...[
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: onAddContact,
-                      icon: Icon(Icons.person_add_alt_1, color: accent),
-                      label: Text(
-                        'Add to contacts',
-                        style: TextStyle(
-                          color: accent,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(color: accent.withValues(alpha: 0.45)),
-                        shape: const StadiumBorder(),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                ],
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: onBlock,
-                    icon: Icon(Icons.block, color: blockFg),
-                    label: Text(
-                      'Block',
-                      style: TextStyle(
-                        color: blockFg,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: blockBg,
-                      shape: const StadiumBorder(),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      elevation: 0,
-                    ),
-                  ),
-                ),
-                // Keep semantics for screen readers / tests
                 Semantics(
                   label: origin,
                   child: const SizedBox.shrink(),
@@ -205,6 +157,46 @@ class ChatPeerInfoCard extends StatelessWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CompactAction extends StatelessWidget {
+  const _CompactAction({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -221,7 +213,7 @@ class _Avatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final url = user.avatarUrl;
     return CircleAvatar(
-      radius: 40,
+      radius: 28,
       backgroundColor: AvatarUtils.getColorForName(displayName),
       backgroundImage: (url != null && url.isNotEmpty)
           ? CachedNetworkImageProvider(url)
@@ -231,7 +223,7 @@ class _Avatar extends StatelessWidget {
               AvatarUtils.getInitials(displayName),
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 28,
+                fontSize: 20,
                 fontWeight: FontWeight.w600,
               ),
             )

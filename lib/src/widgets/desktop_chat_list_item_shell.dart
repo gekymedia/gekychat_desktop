@@ -79,16 +79,19 @@ class _DesktopChatListItemShellState extends State<DesktopChatListItemShell> {
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  if (widget.hasUnread && !widget.isSelected)
+                  // WhatsApp-style green leading edge for selected or unread rows.
+                  if (widget.isSelected || widget.hasUnread)
                     Positioned(
                       left: 0,
-                      top: 12,
-                      bottom: 12,
+                      top: widget.isSelected ? 8 : 12,
+                      bottom: widget.isSelected ? 8 : 12,
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 180),
-                        width: 3,
+                        width: widget.isSelected ? 3.5 : 3,
                         decoration: BoxDecoration(
-                          color: const Color(0xFF25D366),
+                          color: widget.isSelected
+                              ? const Color(0xFF008069)
+                              : const Color(0xFF25D366),
                           borderRadius: BorderRadius.circular(2),
                         ),
                       ),

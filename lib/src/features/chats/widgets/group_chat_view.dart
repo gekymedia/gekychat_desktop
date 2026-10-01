@@ -2943,32 +2943,36 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
               ),
               if (!isChannel) ...[
                 IconButton(
-                  icon: Icon(Icons.call, color: isDark ? Colors.white70 : Colors.grey[600]),
-                  tooltip: 'Voice call',
-                  onPressed: () => _startCall('voice'),
-                ),
-                IconButton(
                   icon: Icon(Icons.videocam, color: isDark ? Colors.white70 : Colors.grey[600]),
                   tooltip: 'Video call',
                   onPressed: () => _startCall('video'),
                 ),
+                IconButton(
+                  icon: Icon(Icons.call, color: isDark ? Colors.white70 : Colors.grey[600]),
+                  tooltip: 'Voice call',
+                  onPressed: () => _startCall('voice'),
+                ),
               ],
+              IconButton(
+                icon: Icon(Icons.search, color: isDark ? Colors.white70 : Colors.grey[600]),
+                tooltip: 'Search',
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    ConstrainedSlideRightRoute(
+                      page: SearchInChatScreen(
+                        groupId: widget.groupId,
+                        title: widget.groupName,
+                      ),
+                      leftOffset: 400.0, // Sidebar width
+                    ),
+                  );
+                },
+              ),
               PopupMenuButton<String>(
                 icon: Icon(Icons.more_vert, color: isDark ? Colors.white70 : Colors.grey[600]),
                 onSelected: (value) async {
                   switch (value) {
-                    case 'search':
-                      Navigator.push(
-                        context,
-                        ConstrainedSlideRightRoute(
-                          page: SearchInChatScreen(
-                            groupId: widget.groupId,
-                            title: widget.groupName,
-                          ),
-                          leftOffset: 400.0, // Sidebar width
-                        ),
-                      );
-                      break;
                     case 'media':
                       Navigator.push(
                         context,
@@ -3010,13 +3014,6 @@ class _GroupChatViewState extends ConsumerState<GroupChatView> {
                   }
                 },
                 itemBuilder: (context) => [
-                  const PopupMenuItem(value: 'search', child: Row(
-                    children: [
-                      Icon(Icons.search, size: 20),
-                      SizedBox(width: 8),
-                      Text('Search'),
-                    ],
-                  )),
                   const PopupMenuItem(value: 'media', child: Row(
                     children: [
                       Icon(Icons.photo_library, size: 20),
