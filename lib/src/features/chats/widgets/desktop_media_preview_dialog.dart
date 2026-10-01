@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../theme/app_theme.dart';
 import '../../../utils/clipboard_media_helper.dart';
+import 'image_doodle_editor_screen.dart';
 import 'video_preview_widget.dart';
 
 /// Result from the desktop media preview dialog.
@@ -136,6 +137,15 @@ class _DesktopMediaPreviewDialogState extends State<DesktopMediaPreviewDialog> {
     });
   }
 
+  Future<void> _openDoodleOnCurrent() async {
+    if (_files.isEmpty) return;
+    final file = _files[_currentIndex];
+    if (!ClipboardMediaHelper.isImagePath(file.path)) return;
+    final edited = await showImageDoodleOverlay(context, imageFile: file);
+    if (edited == null || !mounted) return;
+    setState(() => _files[_currentIndex] = edited);
+  }
+
   void _send() {
     if (_files.isEmpty) return;
     Navigator.pop(
@@ -185,6 +195,15 @@ class _DesktopMediaPreviewDialogState extends State<DesktopMediaPreviewDialog> {
                     Text(
                       '${_currentIndex + 1}/${_files.length}',
                       style: TextStyle(fontSize: 13, color: muted),
+                    ),
+                  if (ClipboardMediaHelper.isImagePath(
+                    _files[_currentIndex].path,
+                  ))
+                    IconButton(
+                      tooltip: 'Draw',
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(Icons.brush, color: muted, size: 20),
+                      onPressed: _openDoodleOnCurrent,
                     ),
                   IconButton(
                     tooltip: 'Remove',
@@ -245,11 +264,14 @@ class _DesktopMediaPreviewDialogState extends State<DesktopMediaPreviewDialog> {
 
                         Widget preview;
                         if (isImage) {
-                          preview = Image.file(
-                            file,
-                            fit: BoxFit.contain,
-                            errorBuilder: (_, __, ___) => const Center(
-                              child: Icon(Icons.broken_image_outlined, size: 40),
+                          preview = SizedBox(
+                            width: double.infinity,
+                            child: Image.file(
+                              file,
+                              fit: BoxFit.fitWidth,
+                              errorBuilder: (_, __, ___) => const Center(
+                                child: Icon(Icons.broken_image_outlined, size: 40),
+                              ),
                             ),
                           );
                         } else if (isVideo) {
@@ -260,7 +282,10 @@ class _DesktopMediaPreviewDialogState extends State<DesktopMediaPreviewDialog> {
                           );
                         }
 
-                        return Center(child: preview);
+                        return Align(
+                          alignment: Alignment.center,
+                          child: preview,
+                        );
                       },
                     ),
                   ),

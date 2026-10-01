@@ -938,6 +938,62 @@ class ApiService {
         if (interests != null) 'interests': interests,
       });
 
+  /// Record opening a creator profile (optional source post = watch→profile signal).
+  Future<Response> recordWorldFeedProfileView(
+    int userId, {
+    int? sourcePostId,
+  }) =>
+      post(
+        '/world-feed/users/$userId/view',
+        data: {
+          if (sourcePostId != null) 'source_post_id': sourcePostId,
+        },
+      );
+
+  /// World feed & live activity (Instagram/TikTok-style notifications).
+  /// [filter] TikTok dropdown: `all` | `likes` | `comments` | `mentions`.
+  Future<Response> getWorldFeedActivity({
+    int? page,
+    String? type,
+    String? excludeType,
+    String? filter,
+  }) {
+    final query = <String, dynamic>{'per_page': 20};
+    if (page != null) query['page'] = page;
+    if (type != null && type.isNotEmpty) query['type'] = type;
+    if (excludeType != null && excludeType.isNotEmpty) {
+      query['exclude_type'] = excludeType;
+    }
+    if (filter != null && filter.isNotEmpty) query['filter'] = filter;
+    return get('/world-feed/activity', queryParameters: query);
+  }
+
+  Future<Response> getWorldFeedActivityUnreadCount() =>
+      get('/world-feed/activity/unread-count');
+
+  Future<Response> markWorldFeedActivityRead({
+    List<int>? activityIds,
+    bool all = false,
+    String? type,
+  }) =>
+      post(
+        '/world-feed/activity/read',
+        data: {
+          if (all) 'all': true,
+          if (!all) 'activity_ids': activityIds ?? [],
+          if (type != null && type.isNotEmpty) 'type': type,
+        },
+      );
+
+  Future<Response> getWorldFeedTrendingHashtags({int limit = 20}) =>
+      get('/world-feed/trending-hashtags', queryParameters: {'limit': limit});
+
+  Future<Response> followUser(int userId) =>
+      post('/users/$userId/follow', data: {});
+
+  Future<Response> unfollowUser(int userId) =>
+      post('/users/$userId/unfollow', data: {});
+
   // ---------------------------------------------------------------------------
   // PHASE 2: Email Chat (Mail)
   // ---------------------------------------------------------------------------

@@ -9,6 +9,9 @@ class User {
   final bool? isOnline;
   final DateTime? lastSeenAt;
 
+  /// Admin-granted Premium Verified badge (not phone OTP signup).
+  final bool isPremiumVerified;
+
   User({
     required this.id,
     required this.name,
@@ -16,7 +19,28 @@ class User {
     this.avatarUrl,
     this.isOnline,
     this.lastSeenAt,
+    this.isPremiumVerified = false,
   });
+
+  User copyWith({
+    int? id,
+    String? name,
+    String? phone,
+    String? avatarUrl,
+    bool? isOnline,
+    DateTime? lastSeenAt,
+    bool? isPremiumVerified,
+  }) {
+    return User(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      phone: phone ?? this.phone,
+      avatarUrl: avatarUrl ?? this.avatarUrl,
+      isOnline: isOnline ?? this.isOnline,
+      lastSeenAt: lastSeenAt ?? this.lastSeenAt,
+      isPremiumVerified: isPremiumVerified ?? this.isPremiumVerified,
+    );
+  }
 
   factory User.fromJson(Map<String, dynamic> json) {
     // Get name - prefer non-empty name, fallback to phone, then "Unknown"
@@ -34,6 +58,11 @@ class User {
     final lastSeen = lastSeenRaw != null
         ? DateTime.tryParse(lastSeenRaw.toString())?.toLocal()
         : null;
+
+    final premium =
+        json['is_premium_verified'] == true ||
+        json['isPremiumVerified'] == true ||
+        json['verification_status']?.toString() == 'verified';
     
     return User(
       id: GekyContact.parseInt(json['id']) ?? 0,
@@ -45,6 +74,7 @@ class User {
           onlineRaw == '1' ||
           onlineRaw == 'online',
       lastSeenAt: lastSeen,
+      isPremiumVerified: premium,
     );
   }
 }

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:video_player/video_player.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'status_repository.dart';
@@ -16,6 +15,7 @@ import '../world/widgets/video_trimmer_widget.dart';
 import '../chats/chat_providers.dart';
 import '../contacts/contacts_repository.dart';
 import '../chats/models.dart' show GekyContact;
+import '../chats/widgets/image_doodle_editor_screen.dart';
 import '../../utils/snackbar_helper.dart';
 import '../../services/product_analytics_service.dart';
 import '../../services/video_compression_service.dart';
@@ -383,6 +383,17 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
     }
   }
 
+  Future<void> _openDoodleEditor() async {
+    if (_selectedMedia == null || _isVideo || _isLoading) return;
+    final edited = await showImageDoodleOverlay(
+      context,
+      imageFile: _selectedMedia!,
+    );
+    if (edited != null && mounted) {
+      setState(() => _selectedMedia = edited);
+    }
+  }
+
   Future<void> _pickMedia() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -591,13 +602,19 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
                 if (_selectedMedia != null)
                   Container(
                     height: 300,
+                    width: double.infinity,
                     decoration: BoxDecoration(
                       color: Colors.grey[300],
                       borderRadius: BorderRadius.circular(12),
                     ),
+                    clipBehavior: Clip.antiAlias,
                     child: _isVideo
                         ? const Center(child: Icon(Icons.videocam, size: 64))
-                        : Image.file(_selectedMedia!, fit: BoxFit.cover),
+                        : Image.file(
+                            _selectedMedia!,
+                            fit: BoxFit.fitWidth,
+                            width: double.infinity,
+                          ),
                   )
                 else
                   Container(
@@ -634,68 +651,188 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
                     ),
                   ),
                 
-                // Caption input for media
+                // Caption input for media — pill (+ left, @ right), chips, audience+send row
                 if (_selectedMedia != null) ...[
                   const SizedBox(height: 16),
+                  if (!_isVideo)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: _isLoading ? null : _openDoodleEditor,
+                        icon: const Icon(Icons.brush, size: 18),
+                        label: const Text('Draw'),
+                      ),
+                    ),
                   TextField(
                     controller: _textController,
                     style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                    minLines: 1,
+                    maxLines: 4,
                     decoration: InputDecoration(
                       hintText: 'Add a caption...',
-                      hintStyle: TextStyle(color: isDark ? Colors.white54 : Colors.grey[600]),
+                      hintStyle: TextStyle(
+                        color: isDark ? Colors.white54 : Colors.grey[600],
+                      ),
+                      filled: true,
+                      fillColor: isDark
+                          ? const Color(0xFF202C33)
+                          : Colors.grey.shade100,
                       border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(999),
+                        borderSide: BorderSide.none,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(999),
+                        borderSide: BorderSide.none,
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(999),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 12,
+                      ),
+                      prefixIcon: IconButton(
+                        tooltip: 'Add photo/video',
+                        icon: Icon(
+                          Icons.add,
+                          color: isDark ? Colors.white70 : Colors.grey[700],
+                        ),
+                        onPressed: _isLoading ? null : _pickMedia,
                       ),
                       suffixIcon: IconButton(
-                        icon: Icon(
-                          _showEmojiPicker ? Icons.keyboard : Icons.emoji_emotions_outlined,
-                          color: isDark ? Colors.white70 : Colors.grey[600],
+                        tooltip: 'Mention contacts',
+                        icon: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Icon(
+                              Icons.alternate_email_rounded,
+                              color: isDark ? Colors.white70 : Colors.grey[700],
+                            ),
+                            if (_mentionedTargets.isNotEmpty)
+                              Positioned(
+                                right: -6,
+                                top: -4,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 1,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF008069),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    '${_mentionedTargets.length}',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
-                        onPressed: () {
-                          setState(() {
-                            _showEmojiPicker = !_showEmojiPicker;
-                          });
-                        },
+                        onPressed: _isLoading ? null : _pickMentionTargets,
                       ),
                     ),
-                    maxLines: 3,
                   ),
-                  if (_showEmojiPicker)
-                    Container(
-                      height: 250,
-                      margin: const EdgeInsets.only(top: 8),
-                      decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF202C33) : Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: isDark ? const Color(0xFF3B4A54) : Colors.grey[300]!,
-                        ),
-                      ),
-                      child: EmojiPicker(
-                        onEmojiSelected: (category, emoji) {
-                          _textController.text = _textController.text + emoji.emoji;
-                        },
-                        config: const Config(
-                          height: 250,
-                          checkPlatformCompatibility: true,
-                        ),
+                  if (_mentionedTargets.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: _mentionedTargets
+                            .map(
+                              (t) => Chip(
+                                label: Text(t.name),
+                                onDeleted: _isLoading
+                                    ? null
+                                    : () => setState(
+                                          () => _mentionedTargets.remove(t),
+                                        ),
+                              ),
+                            )
+                            .toList(),
                       ),
                     ),
+                  ],
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: InkWell(
+                          onTap: _isLoading ? null : _openPrivacyEditor,
+                          borderRadius: BorderRadius.circular(8),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.privacy_tip_outlined,
+                                  size: 18,
+                                  color: isDark ? Colors.white70 : Colors.black54,
+                                ),
+                                const SizedBox(width: 6),
+                                Flexible(
+                                  child: Text(
+                                    'Status (${_privacySummary()})',
+                                    style: TextStyle(
+                                      color: isDark
+                                          ? Colors.white70
+                                          : Colors.black54,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: _isLoading ? null : _createStatus,
+                        child: Container(
+                          width: 48,
+                          height: 48,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF00A884),
+                            shape: BoxShape.circle,
+                          ),
+                          child: _isLoading
+                              ? const Padding(
+                                  padding: EdgeInsets.all(12),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.send,
+                                  color: Colors.white,
+                                  size: 22,
+                                ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
-                
-                const SizedBox(height: 24),
 
-                ListTile(
-                  leading: const Icon(Icons.privacy_tip_outlined),
-                  title: const Text('Audience'),
-                  subtitle: Text(_privacySummary()),
-                  onTap: _isLoading ? null : _openPrivacyEditor,
-                ),
-
-                const SizedBox(height: 8),
-                
-                // Color picker (for text status)
-                if (_selectedMedia == null)
+                if (_selectedMedia == null) ...[
+                  const SizedBox(height: 24),
+                  ListTile(
+                    leading: const Icon(Icons.privacy_tip_outlined),
+                    title: const Text('Audience'),
+                    subtitle: Text(_privacySummary()),
+                    onTap: _isLoading ? null : _openPrivacyEditor,
+                  ),
+                  const SizedBox(height: 8),
                   Wrap(
                     spacing: 12,
                     runSpacing: 12,
@@ -710,7 +847,9 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
                             color: color,
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: isSelected ? Colors.white : Colors.transparent,
+                              color: isSelected
+                                  ? Colors.white
+                                  : Colors.transparent,
                               width: 3,
                             ),
                           ),
@@ -718,27 +857,25 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
                       );
                     }).toList(),
                   ),
-                
-                const SizedBox(height: 24),
-                
-                // Pick media button
-                OutlinedButton.icon(
-                  onPressed: _pickMedia,
-                  icon: const Icon(Icons.add_photo_alternate),
-                  label: Text(_selectedMedia != null ? 'Change Media' : 'Add Photo/Video'),
-                ),
-                if (_mentionedTargets.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'Will notify: ${_mentionedTargets.map((e) => e.name).join(', ')}',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isDark ? Colors.white70 : Colors.black54,
+                  const SizedBox(height: 24),
+                  OutlinedButton.icon(
+                    onPressed: _pickMedia,
+                    icon: const Icon(Icons.add_photo_alternate),
+                    label: const Text('Add Photo/Video'),
+                  ),
+                  if (_mentionedTargets.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Will notify: ${_mentionedTargets.map((e) => e.name).join(', ')}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isDark ? Colors.white70 : Colors.black54,
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ],
               ],
             ),
@@ -747,6 +884,10 @@ class _CreateStatusScreenState extends ConsumerState<CreateStatusScreen> {
     );
 
     if (widget.forModal) {
+      // Media mode already has circular send on the audience row.
+      if (_selectedMedia != null) {
+        return content;
+      }
       return Column(
         children: [
           Expanded(child: content),
