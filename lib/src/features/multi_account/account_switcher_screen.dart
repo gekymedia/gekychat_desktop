@@ -27,6 +27,7 @@ int? _accountIdFromMap(Map<String, dynamic> account) {
 
 class _AccountSwitcherScreenState extends ConsumerState<AccountSwitcherScreen> {
   int? _currentAccountId;
+  bool _switching = false;
 
   @override
   void initState() {
@@ -52,12 +53,17 @@ class _AccountSwitcherScreenState extends ConsumerState<AccountSwitcherScreen> {
     final isDark = theme.brightness == Brightness.dark;
     final accountsAsync = ref.watch(accountsProvider);
 
-    return Scaffold(
+    return PopScope(
+      canPop: !_switching,
+      child: Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text('Switch Account'),
+        automaticallyImplyLeading: !_switching,
       ),
-      body: accountsAsync.when(
+      body: Stack(
+        children: [
+          accountsAsync.when(
         data: (accounts) {
           final currentId = _currentAccountId;
           final list = accounts.map<Map<String, dynamic>>((a) {
@@ -277,43 +283,87 @@ class _AccountSwitcherScreenState extends ConsumerState<AccountSwitcherScreen> {
             ],
           );
         },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, stack) => Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.error_outline,
-                size: 64,
-                color: Colors.red[300],
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (error, stack) => Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    size: 64,
+                    color: Colors.red[300],
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Failed to load accounts',
+                    style: TextStyle(
+                      color: isDark ? Colors.white70 : Colors.grey[700],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ElevatedButton(
+                    onPressed: () {
+                      ref.invalidate(accountsProvider);
+                    },
+                    child: const Text('Retry'),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              Text(
-                'Failed to load accounts',
-                style: TextStyle(
-                  color: isDark ? Colors.white70 : Colors.grey[700],
+            ),
+          ),
+          if (_switching)
+            Positioned.fill(
+              child: AbsorbPointer(
+                child: ColoredBox(
+                  color: Colors.black.withValues(alpha: isDark ? 0.45 : 0.28),
+                  child: Center(
+                    child: Card(
+                      elevation: 4,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 28,
+                          vertical: 22,
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const SizedBox(
+                              width: 36,
+                              height: 36,
+                              child: CircularProgressIndicator(strokeWidth: 3),
+                            ),
+                            const SizedBox(height: 14),
+                            Text(
+                              'Switching account…',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
-              const SizedBox(height: 8),
-              ElevatedButton(
-                onPressed: () {
-                  ref.invalidate(accountsProvider);
-                },
-                child: const Text('Retry'),
-              ),
-            ],
-          ),
-        ),
+            ),
+        ],
       ),
+    ),
     );
   }
 
   Future<void> _switchAccount(int accountId) async {
+    if (_switching) return;
     if (accountId == 0) {
       if (mounted) {
-                context.showInfoToast('Cannot switch to this account. Please remove it and add again.');      }
+        context.showInfoToast(
+          'Cannot switch to this account. Please remove it and add again.',
+        );
+      }
       return;
     }
+    setState(() => _switching = true);
     try {
       final repository = ref.read(accountRepositoryProvider);
       await repository.switchAccount(accountId);
@@ -324,12 +374,16 @@ class _AccountSwitcherScreenState extends ConsumerState<AccountSwitcherScreen> {
       ref.invalidate(hiddenConversationIdsProvider);
       ref.read(hiddenChatServiceProvider).notifyListeners();
       if (mounted) {
+        Navigator.of(context).maybePop();
         context.go('/chats');
-                context.showSuccessToast('Account switched successfully');      }
+        context.showSuccessToast('Account switched successfully');
+      }
     } catch (e, stackTrace) {
       debugPrint('Error switching account: $e\n$stackTrace');
       if (mounted) {
-                context.showErrorToast('Failed to switch account: $e');      }
+        setState(() => _switching = false);
+        context.showErrorToast('Failed to switch account: $e');
+      }
     }
   }
 
