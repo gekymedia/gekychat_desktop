@@ -10,12 +10,13 @@ Future<T?> showDesktopCenterModal<T>({
   List<Widget>? headerActions,
   double maxWidth = 560,
   double maxHeightFraction = 0.85,
+  double barrierOpacity = 0.45,
 }) {
   final isDark = Theme.of(context).brightness == Brightness.dark;
 
   return showDialog<T>(
     context: context,
-    barrierColor: Colors.black.withValues(alpha: 0.45),
+    barrierColor: Colors.black.withValues(alpha: barrierOpacity),
     builder: (dialogContext) {
       final maxHeight = MediaQuery.sizeOf(context).height * maxHeightFraction;
 
