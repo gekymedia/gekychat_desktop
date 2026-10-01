@@ -114,6 +114,75 @@ class WorldFeedRepository {
     }
     throw Exception('Post not found');
   }
+
+  /// Trending hashtags for World search discovery.
+  Future<List<Map<String, dynamic>>> getTrendingHashtags({
+    int limit = 20,
+  }) async {
+    try {
+      final response =
+          await _apiService.getWorldFeedTrendingHashtags(limit: limit);
+      final data = response.data['data'] as List<dynamic>? ?? [];
+      return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Record opening a creator profile. Pass [sourcePostId] when navigating
+  /// from a watched post — used as a strong feed affinity signal.
+  Future<void> recordProfileView(int userId, {int? sourcePostId}) async {
+    try {
+      await _apiService.recordWorldFeedProfileView(
+        userId,
+        sourcePostId: sourcePostId,
+      );
+    } catch (_) {}
+  }
+
+  Future<Map<String, dynamic>> getActivity({
+    int page = 1,
+    String? type,
+    String? excludeType,
+    String? filter,
+  }) async {
+    final response = await _apiService.getWorldFeedActivity(
+      page: page,
+      type: type,
+      excludeType: excludeType,
+      filter: filter,
+    );
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  Future<int> getActivityUnreadCount() async {
+    final response = await _apiService.getWorldFeedActivityUnreadCount();
+    return (response.data['unread_count'] as int?) ?? 0;
+  }
+
+  Future<void> markActivityRead({
+    List<int>? activityIds,
+    bool all = false,
+    String? type,
+  }) async {
+    await _apiService.markWorldFeedActivityRead(
+      activityIds: activityIds,
+      all: all,
+      type: type,
+    );
+  }
+
+  Future<void> followUser(int userId) async {
+    try {
+      await _apiService.followUser(userId);
+    } catch (_) {}
+  }
+
+  Future<void> unfollowUser(int userId) async {
+    try {
+      await _apiService.unfollowUser(userId);
+    } catch (_) {}
+  }
 }
 
 final worldFeedRepositoryProvider = Provider<WorldFeedRepository>((ref) {
@@ -126,4 +195,14 @@ final worldPostPendingProvider = StateProvider<bool>((ref) => false);
 
 /// Bumped after a successful background World Feed publish so the feed reloads.
 final worldFeedRefreshNonceProvider = StateProvider<int>((ref) => 0);
+
+/// Unread count for the World activity bell badge.
+final worldFeedActivityUnreadCountProvider = FutureProvider<int>((ref) async {
+  try {
+    final repo = ref.read(worldFeedRepositoryProvider);
+    return repo.getActivityUnreadCount();
+  } catch (_) {
+    return 0;
+  }
+});
 

@@ -982,14 +982,29 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
                                     : null,
                           ),
                           SizedBox(height: isNarrow ? 12 : 16),
-                          Text(
-                            displayName,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: nameFontSize,
-                              fontWeight: FontWeight.w600,
-                              color: isDark ? Colors.white : Colors.black,
-                            ),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  displayName,
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: nameFontSize,
+                                    fontWeight: FontWeight.w600,
+                                    color: isDark ? Colors.white : Colors.black,
+                                  ),
+                                ),
+                              ),
+                              if (!isSelfChat && user.isPremiumVerified) ...[
+                                const SizedBox(width: 6),
+                                Icon(
+                                  Icons.verified,
+                                  size: nameFontSize * 0.85,
+                                  color: AppTheme.primaryGreen,
+                                ),
+                              ],
+                            ],
                           ),
                           if (!isSelfChat && user.phone != null) ...[
                             const SizedBox(height: 4),

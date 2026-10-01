@@ -144,6 +144,14 @@ class ConversationListItem extends ConsumerWidget {
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
+                          if (conversation.otherUser.isPremiumVerified) ...[
+                            const SizedBox(width: 4),
+                            const Icon(
+                              Icons.verified,
+                              size: 15,
+                              color: AppTheme.primaryGreen,
+                            ),
+                          ],
                           if (conversation.otherUser.isOnline == true) ...[
                             const SizedBox(width: 5),
                             Container(

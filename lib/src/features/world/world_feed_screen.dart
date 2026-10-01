@@ -16,12 +16,13 @@ import 'widgets/world_feed_image_carousel.dart';
 import 'widgets/video_progress_bar.dart';
 import '../../features/contacts/contact_info_screen.dart';
 import '../../features/chats/models.dart';
-import '../../features/search/search_screen.dart';
 import '../../widgets/constrained_slide_route.dart';
 import '../../utils/external_share.dart';
 import '../chats/widgets/share_text_to_chats_screen.dart';
 import 'widgets/world_feed_share_dialog.dart';
 import 'widgets/world_feed_interests_dialog.dart';
+import 'widgets/world_search_screen.dart';
+import 'widgets/world_activity_bell_button.dart';
 import '../../utils/snackbar_helper.dart';
 
 /// World Feed — TikTok-style vertical full-screen feed for desktop.
@@ -560,15 +561,19 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
               const Spacer(),
               IconButton(
                 icon: const Icon(Icons.search, color: Colors.white),
-                tooltip: 'Find creators',
+                tooltip: 'Search World',
                 onPressed: () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => const SearchScreen(),
+                      builder: (context) => const WorldSearchScreen(),
                     ),
                   );
                 },
+              ),
+              const WorldActivityBellButton(
+                iconColor: Colors.white,
+                iconSize: 22,
               ),
               IconButton(
                 icon: const Icon(Icons.add_box_outlined, color: Colors.white),
@@ -754,7 +759,10 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       GestureDetector(
-                        onTap: () => _navigateToProfile(creator),
+                        onTap: () => _navigateToProfile(
+                          creator,
+                          sourcePostId: postId,
+                        ),
                         child: Text(
                           creatorName,
                           style: const TextStyle(
@@ -807,7 +815,10 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
                     children: [
                       if (creator != null) ...[
                         GestureDetector(
-                          onTap: () => _navigateToProfile(creator),
+                          onTap: () => _navigateToProfile(
+                            creator,
+                            sourcePostId: postId,
+                          ),
                           child: _buildAvatar(
                             avatarUrl: creatorAvatar != null
                                 ? _resolveStoragePath(baseUrl, creatorAvatar)
@@ -1137,12 +1148,20 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
     }
   }
 
-  void _navigateToProfile(Map<String, dynamic>? creator) {
+  void _navigateToProfile(
+    Map<String, dynamic>? creator, {
+    int? sourcePostId,
+  }) {
     if (creator == null || creator['id'] == null) return;
 
     try {
+      final userId = creator['id'] is int
+          ? creator['id'] as int
+          : int.tryParse(creator['id'].toString()) ?? 0;
+      if (userId <= 0) return;
+
       final user = User(
-        id: creator['id'] as int,
+        id: userId,
         name: creator['name']?.toString() ?? 'Unknown',
         phone: creator['phone']?.toString(),
         avatarUrl: creator['avatar_url']?.toString(),
@@ -1150,7 +1169,20 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
         lastSeenAt: creator['last_seen_at'] != null
             ? DateTime.tryParse(creator['last_seen_at'].toString())
             : null,
+        isPremiumVerified: creator['is_premium_verified'] == true ||
+            creator['verification_status']?.toString() == 'verified',
       );
+
+      // Watch → profile affinity signal for ranking / Activity.
+      final me = ref.read(currentUserProvider).valueOrNull?.id;
+      if (me == null || me != userId) {
+        unawaited(
+          ref.read(worldFeedRepositoryProvider).recordProfileView(
+                userId,
+                sourcePostId: sourcePostId,
+              ),
+        );
+      }
 
       Navigator.push(
         context,
@@ -1189,7 +1221,8 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
         break;
       case 'view_profile':
         final creator = post['creator'] as Map<String, dynamic>?;
-        _navigateToProfile(creator);
+        final sourcePostId = _postIdFromRaw(post['id']);
+        _navigateToProfile(creator, sourcePostId: sourcePostId);
         break;
       case 'report':
         _showReportDialog(post);
@@ -1270,7 +1303,7 @@ class _WorldFeedScreenState extends ConsumerState<WorldFeedScreen> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => const SearchScreen(),
+                        builder: (context) => const WorldSearchScreen(),
                       ),
                     );
                   },
