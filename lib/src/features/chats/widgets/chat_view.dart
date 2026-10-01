@@ -3701,11 +3701,65 @@ class _ChatViewState extends ConsumerState<ChatView> {
                   }
                 },
                 itemBuilder: (context) => [
-                  const PopupMenuItem(value: 'search', child: Text('Search')),
-                  const PopupMenuItem(value: 'media', child: Text('Media')),
-                  const PopupMenuItem(value: 'clear', child: Text('Clear chat')),
-                  const PopupMenuItem(value: 'export', child: Text('Export chat')),
-                  const PopupMenuItem(value: 'delete', child: Text('Delete chat')),
+                  const PopupMenuItem(
+                    value: 'search',
+                    child: Row(
+                      children: [
+                        Icon(Icons.search, size: 20),
+                        SizedBox(width: 8),
+                        Text('Search'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'media',
+                    child: Row(
+                      children: [
+                        Icon(Icons.photo_library_outlined, size: 20),
+                        SizedBox(width: 8),
+                        Text('Media'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'clear',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete_sweep_outlined, size: 20),
+                        SizedBox(width: 8),
+                        Text('Clear chat'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'export',
+                    child: Row(
+                      children: [
+                        Icon(Icons.ios_share, size: 20),
+                        SizedBox(width: 8),
+                        Text('Export chat'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.delete_outline,
+                          size: 20,
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Delete chat',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ],
