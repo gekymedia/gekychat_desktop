@@ -21,11 +21,13 @@ import 'src/core/theme/theme_provider.dart' as custom_theme;
 import 'src/core/theme/theme_service.dart';
 import 'src/features/calls/incoming_call_handler.dart';
 import 'src/features/calls/providers.dart';
+import 'src/features/chats/models.dart' show DesktopPendingComposerDraft;
 import 'src/services/inbox_realtime_sync.dart';
 import 'src/services/status_realtime_sync.dart';
 import 'src/services/background_sync_worker.dart';
 import 'src/widgets/keyboard_shortcuts_dialog.dart';
 import 'src/widgets/livekit_call_overlay.dart';
+import 'src/utils/phone_matcher.dart';
 import 'src/utils/world_feed_link_navigation.dart';
 import 'src/widgets/desktop_typography.dart';
 import 'src/widgets/desktop_shell_colors.dart';
@@ -184,6 +186,17 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
     }
     final parsed = widget.deepLinkService.parseLink(link);
     if (parsed != null && mounted) {
+      final sendPhone = parsed['sendPhone'];
+      if (sendPhone != null && sendPhone.isNotEmpty) {
+        unawaited(
+          _openSendLinkChat(
+            phone: sendPhone,
+            text: parsed['sendText'] ?? '',
+          ),
+        );
+        return;
+      }
+
       final route = parsed['route'];
       if (route != null) {
         final router = ref.read(routerProvider);
@@ -219,6 +232,68 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
         }
         debugPrint('🔗 Navigated to: $route');
       }
+    }
+  }
+
+  /// Click-to-chat from web: gekychat://send?phone=&text=
+  Future<void> _openSendLinkChat({
+    required String phone,
+    required String text,
+  }) async {
+    if (!mounted) return;
+    final router = ref.read(routerProvider);
+    ref.read(currentSectionProvider.notifier).setSection('/chats');
+    router.go('/chats');
+
+    try {
+      final phones = <String>{
+        phone.trim(),
+        ...PhoneMatcher.candidates(phone),
+        PhoneMatcher.normalizeGhanaLoginPhone(phone),
+      }.where((p) => p.trim().isNotEmpty).toList();
+
+      final response = await ref.read(apiServiceProvider).resolveContacts(phones);
+      final raw = response.data;
+      final list = raw is Map ? raw['data'] : raw;
+      int? userId;
+      if (list is List && list.isNotEmpty) {
+        final first = list.first;
+        if (first is Map) {
+          final idRaw = first['id'];
+          userId = idRaw is int
+              ? idRaw
+              : int.tryParse(idRaw?.toString() ?? '');
+        }
+      }
+      if (userId == null || userId <= 0) {
+        debugPrint('🔗 Send link: no GekyChat user for phone=$phone');
+        return;
+      }
+
+      final start = await ref.read(apiServiceProvider).startConversation(userId);
+      final data = start.data;
+      final conversationId = data is Map
+          ? (data['data'] is Map
+                ? (data['data'] as Map)['id'] as int?
+                : data['id'] as int?)
+          : null;
+      if (conversationId == null || !mounted) return;
+
+      final trimmed = text.trim();
+      if (trimmed.isNotEmpty) {
+        ref.read(pendingDesktopComposerDraftProvider.notifier).state =
+            DesktopPendingComposerDraft(
+              conversationId: conversationId,
+              text: trimmed,
+            );
+      }
+      ref.read(selectedGroupIdProvider.notifier).state = null;
+      ref
+          .read(selectedConversationProvider.notifier)
+          .selectConversation(conversationId);
+      debugPrint('🔗 Send link opened conversation=$conversationId');
+    } catch (e) {
+      debugPrint('🔗 Send link failed: $e');
     }
   }
   

@@ -21,4 +21,13 @@ void main() {
     expect(parsed?['route'], '/chats');
     expect(parsed?['groupId'], '42');
   });
+
+  test('parses gekychat://send?phone=&text=', () {
+    final parsed = service.parseLink(
+      'gekychat://send?phone=233508389213&text=Hi%20ADAMS',
+    );
+    expect(parsed?['route'], '/chats');
+    expect(parsed?['sendPhone'], '233508389213');
+    expect(parsed?['sendText'], 'Hi ADAMS');
+  });
 }

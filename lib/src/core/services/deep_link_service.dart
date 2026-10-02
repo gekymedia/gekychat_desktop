@@ -76,7 +76,22 @@ class DeepLinkService {
           final webPath = webUri.path;
           
           // Map web paths to desktop routes
-          if (webPath.startsWith('/c/')) {
+          if (webPath.startsWith('/me/') ||
+              webPath == '/send' ||
+              webPath == '/send/') {
+            final phone = webPath.startsWith('/me/')
+                ? webPath.split('/').where((s) => s.isNotEmpty).last
+                : (webUri.queryParameters['phone'] ?? '');
+            final text = webUri.queryParameters['text'] ?? '';
+            if (phone.isNotEmpty) {
+              return {
+                'route': '/chats',
+                'sendPhone': phone,
+                if (text.isNotEmpty) 'sendText': text,
+              };
+            }
+            return {'route': '/chats'};
+          } else if (webPath.startsWith('/c/')) {
             // /c/{conversationId} -> /chats
             final conversationId = webPath.split('/').last;
             return {
@@ -111,6 +126,7 @@ class DeepLinkService {
       // Parse direct protocol routes
       // gekychat://chat/{conversationId}  (host=chat, path=/id)
       // gekychat:///chat/{conversationId} (path=/chat/id)
+      // gekychat://send?phone=&text=     (click-to-chat from web /me or /send)
       // gekychat://group/{groupId}
       // gekychat://channel/{channelId}
       // gekychat://user/{userId}
@@ -135,6 +151,18 @@ class DeepLinkService {
       }
 
       switch (routeType) {
+        case 'send':
+        case 'me':
+          final phone = (queryParams['phone'] ?? routeId ?? '').trim();
+          final text = queryParams['text'] ?? '';
+          if (phone.isEmpty) {
+            return {'route': '/chats'};
+          }
+          return {
+            'route': '/chats',
+            'sendPhone': phone,
+            if (text.isNotEmpty) 'sendText': text,
+          };
         case 'chat':
           if (routeId != null) {
             return {
