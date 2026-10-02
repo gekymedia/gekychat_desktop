@@ -238,6 +238,19 @@ class _ChatViewState extends ConsumerState<ChatView> {
     _messageSelection.addListener(_onMessageSelectionChanged);
     // Ensure recording state is false on init
     _isRecording = false;
+    // Apply click-to-chat / birthday prefill if it was set before this view mounted.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final draft = ref.read(pendingDesktopComposerDraftProvider);
+      if (draft == null || draft.conversationId != widget.conversationId) {
+        return;
+      }
+      _messageController.text = draft.text;
+      _messageController.selection = TextSelection.collapsed(
+        offset: _messageController.text.length,
+      );
+      ref.read(pendingDesktopComposerDraftProvider.notifier).state = null;
+    });
   }
   
   Future<void> _refreshPeerProfile() async {
